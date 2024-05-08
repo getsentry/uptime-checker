@@ -1,11 +1,16 @@
-fn main() {
-    println!("Hello, world!");
-}
+mod cli;
+mod cliapp;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_addition() {
-        assert_eq!(1 + 1, 2);
-    }
+use std::process;
+
+pub fn main() {
+    let exit_code = match cli::execute() {
+        Ok(()) => 0,
+        Err(_err) => {
+            // TODO(epurkhiser): capture error? Here's what relay did
+            // relay_log::ensure_error(&err);
+            1
+        }
+    };
+    process::exit(exit_code);
 }
