@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.66"
 clap = { version = "4.4.6" }
+tokio = { version = "1.28.0", features = ["macros", "sync", "tracing", "signal", "rt-multi-thread"] }
