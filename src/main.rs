@@ -3,8 +3,9 @@ mod cliapp;
 
 use std::process;
 
-pub fn main() {
-    let exit_code = match cli::execute() {
+#[tokio::main]
+pub async fn main() {
+    let exit_code = match cli::execute().await {
         Ok(()) => 0,
         Err(_err) => {
             // TODO(epurkhiser): capture error? Here's what relay did
