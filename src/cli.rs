@@ -9,7 +9,7 @@ pub async fn execute() -> io::Result<()> {
     let matches = app.get_matches();
 
     if let Some(_matches) = matches.subcommand_matches("run") {
-        println!("Hello world. I am doing nothing. ^C to exit");
+        println!("Hello uptime. I am doing nothing. ^C to exit");
         ctrl_c().await
     } else {
         unreachable!();
