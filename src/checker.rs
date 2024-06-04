@@ -1,7 +1,6 @@
 use std::error::Error;
-use std::time::Duration;
 
-use reqwest::{ClientBuilder, StatusCode};
+use reqwest::StatusCode;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum CheckResult {
@@ -27,33 +26,28 @@ pub async fn check_domain(client: &reqwest::Client, domain: String) -> CheckResu
     }
 
     match response_result {
-        Ok(_) => {
-            return CheckResult::SUCCESS;
-        }
+        Ok(_) => CheckResult::SUCCESS,
         Err(e) => {
             if e.is_timeout() {
                 return CheckResult::FAILURE(FailureReason::Timeout);
-            } else {
-                // TODO: More reasons
-
-                let mut source = e.source();
-                while let Some(inner) = source {
-                    if inner.source().is_none() {
-                        break;
-                    }
-                    source = inner.source();
-
-                    // TODO: Would be better to get specific errors without string matching like this
-                    // Not sure if there's a better way
-                    if source.unwrap().to_string().contains("dns error") {
-                        return CheckResult::FAILURE(FailureReason::DnsError(
-                            source.unwrap().source().unwrap().to_string(),
-                        ));
-                    }
-                }
-
-                return CheckResult::FAILURE(FailureReason::Error(format!("{:?}", e)));
             }
+            // TODO: More reasons
+            let mut source = e.source();
+            while let Some(inner) = source {
+                if inner.source().is_none() {
+                    break;
+                }
+                source = inner.source();
+
+                // TODO: Would be better to get specific errors without string matching like this
+                // Not sure if there's a better way
+                if source.unwrap().to_string().contains("dns error") {
+                    return CheckResult::FAILURE(FailureReason::DnsError(
+                        source.unwrap().source().unwrap().to_string(),
+                    ));
+                }
+            }
+            CheckResult::FAILURE(FailureReason::Error(format!("{:?}", e)))
         }
     }
 }
