@@ -66,23 +66,52 @@ pub async fn check_domain(client: &reqwest::Client, domain: String) -> CheckResu
 #[cfg(test)]
 mod tests {
     use super::{check_domain, CheckResult, FailureReason};
-    use reqwest::ClientBuilder;
+    use httpmock::prelude::*;
+    use httpmock::Method;
+    use reqwest::{ClientBuilder, StatusCode};
     use std::time::Duration;
+    // use crate::checker::FailureReason;
 
     #[tokio::test]
     async fn test_add() {
-        let timeout = Duration::from_secs(5);
+        let server = MockServer::start();
+        let head_mock = server.mock(|when, then| {
+            when.method(Method::HEAD).path("/head");
+            then.status(200);
+        });
+        let head_disallowed_mock = server.mock(|when, then| {
+            when.method(Method::HEAD).path("/no-head");
+            then.status(StatusCode::METHOD_NOT_ALLOWED.as_u16());
+        });
+        let get_mock = server.mock(|when, then| {
+            when.method(Method::GET).path("/no-head");
+            then.status(200);
+        });
+        let timeout_mock = server.mock(|when, then| {
+            when.method(Method::HEAD).path("/timeout");
+            then.delay(Duration::from_millis(300)).status(200);
+        });
+
+        let timeout = Duration::from_millis(200);
         let client = ClientBuilder::new().timeout(timeout).build().unwrap();
 
         assert_eq!(
-            check_domain(&client, "https://google.com/".to_string()).await,
+            check_domain(&client, server.url("/head")).await,
             CheckResult::SUCCESS
         );
         assert_eq!(
-            check_domain(&client, "https://sentry.io/".to_string()).await,
+            check_domain(&client, server.url("/no-head")).await,
             CheckResult::SUCCESS
         );
-        assert_eq!(check_domain(&client, "https://hjkhjkljkh.io/".to_string()).await, CheckResult::FAILURE(FailureReason::DnsError("failed to lookup address information: nodename nor servname provided, or not known".to_string())));
-        assert_eq!(check_domain(&client, "https://santry.io/".to_string()).await, CheckResult::FAILURE(FailureReason::DnsError("failed to lookup address information: nodename nor servname provided, or not known".to_string())));
-    }
+        assert_eq!(
+            check_domain(&client, server.url("/timeout")).await,
+            CheckResult::FAILURE(FailureReason::Timeout)
+        );
+        head_mock.assert();
+        head_disallowed_mock.assert();
+        get_mock.assert();
+        timeout_mock.assert();
+        // TODO: Figure out how to simulate a DNS failure
+        // assert_eq!(check_domain(&client, "https://hjkhjkljkh.io/".to_string()).await, CheckResult::FAILURE(FailureReason::DnsError("failed to lookup address information: nodename nor servname provided, or not known".to_string())));
+   }
 }
