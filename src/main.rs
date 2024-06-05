@@ -1,3 +1,4 @@
+mod checker;
 mod cli;
 mod cliapp;
 mod scheduler;
