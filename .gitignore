@@ -1,4 +1,12 @@
-/target
+# Rust
+**/*.rs.bk
+target
+*.pending-snap
 
-/gocd/generated-pipelines
-/gocd/templates/vendor
+# Editors
+/.idea/
+.DS_Store
+
+# Jsonnet-bundler
+gocd/templates/vendor/
+gocd/generated-pipelines/
