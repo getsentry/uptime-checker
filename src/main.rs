@@ -1,6 +1,7 @@
 mod cli;
 mod cliapp;
 mod scheduler;
+mod types;
 
 use std::process;
 
