@@ -11,7 +11,7 @@ pub enum CheckResult {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum FailureReason {
-    TIMEOUT,
+    Timeout,
     DnsError(String),
     Error(String),
 }
@@ -37,7 +37,7 @@ pub async fn check_url(client: &reqwest::Client, url: String) -> CheckResult {
         Ok(_) => CheckResult::Success,
         Err(e) => {
             if e.is_timeout() {
-                return CheckResult::Failure(FailureReason::TIMEOUT);
+                return CheckResult::Failure(FailureReason::Timeout);
             }
             // TODO: More reasons
             let mut inner = &e as &dyn Error;
@@ -101,7 +101,7 @@ mod tests {
         );
         assert_eq!(
             check_url(&client, server.url("/timeout")).await,
-            CheckResult::Failure(FailureReason::TIMEOUT)
+            CheckResult::Failure(FailureReason::Timeout)
         );
         head_mock.assert();
         head_disallowed_mock.assert();
