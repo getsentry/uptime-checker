@@ -5,8 +5,7 @@ RUN mkdir -p ~/.cargo && \
     echo 'protocol = "sparse"' >> ~/.cargo/config
 
 RUN apk add --no-cache libc-dev
-RUN apk add openssl
-RUN apk add pkgconfig
+RUN apk add --no-cache pkgconfig openssl-dev
 
 RUN cargo new --bin /app
 WORKDIR /app
@@ -17,11 +16,15 @@ WORKDIR /app
 
 COPY Cargo.toml .
 COPY Cargo.lock .
+RUN cargo update
+ENV RUSTFLAGS="-Ctarget-feature=-crt-static"
+ENV PKG_CONFIG_ALLOW_CROSS=1
 RUN cargo build --release && rm -rf src/
 
 # Copy the source code and run the build again. This should only compile the
 # app itself as the dependencies were already built above.
 COPY . ./
+RUN cargo update
 RUN rm target/release/deps/uptime_checker* && cargo build --release
 
 FROM alpine:3.20

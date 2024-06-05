@@ -33,8 +33,6 @@ pub async fn do_request(
 /// Makes a request to a url to determine whether it is up.
 /// Up is defined as returning a 2xx within a specific timeframe.
 pub async fn check_url(client: &reqwest::Client, url: String) -> CheckResult {
-
-
     match do_request(client, url).await {
         Ok(_) => CheckResult::SUCCESS,
         Err(e) => {
