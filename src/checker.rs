@@ -15,29 +15,27 @@ pub enum FailureReason {
     DnsError(String),
     Error(String),
 }
-
+/// Fetches the response from a URL.
+///
+/// First attempts to fetch just the head, and if not supported falls back to fetching the entire body.
 pub async fn do_request(
     client: &reqwest::Client,
-    domain: String,
+    url: String,
 ) -> Result<Response, reqwest::Error> {
-    /*
-    Fetches the response from a URL. First attempts to fetch just the head, and if not supported falls
-    back to fetching the entire body.
-     */
-    let response = client.head(&domain).send().await?;
+    let response = client.head(&url).send().await?;
     match response.status() {
-        StatusCode::METHOD_NOT_ALLOWED => client.get(&domain).send().await,
+        StatusCode::METHOD_NOT_ALLOWED => client.get(&url).send().await,
         _ => Ok(response),
     }
 }
 
-pub async fn check_domain(client: &reqwest::Client, domain: String) -> CheckResult {
-    /*
-    Checks whether a domain is up and working. Makes a request to the domain and if a 2xx is
-    returned then the domain is considered working.
-     */
 
-    match do_request(client, domain).await {
+/// Makes a request to a url to determine whether it is up.
+/// Up is defined as returning a 2xx within a specific timeframe.
+pub async fn check_url(client: &reqwest::Client, url: String) -> CheckResult {
+
+
+    match do_request(client, url).await {
         Ok(_) => CheckResult::SUCCESS,
         Err(e) => {
             if e.is_timeout() {
@@ -65,7 +63,7 @@ pub async fn check_domain(client: &reqwest::Client, domain: String) -> CheckResu
 
 #[cfg(test)]
 mod tests {
-    use super::{check_domain, CheckResult, FailureReason};
+    use super::{check_url, CheckResult, FailureReason};
     use httpmock::prelude::*;
     use httpmock::Method;
     use reqwest::{ClientBuilder, StatusCode};
@@ -96,15 +94,15 @@ mod tests {
         let client = ClientBuilder::new().timeout(timeout).build().unwrap();
 
         assert_eq!(
-            check_domain(&client, server.url("/head")).await,
+            check_url(&client, server.url("/head")).await,
             CheckResult::SUCCESS
         );
         assert_eq!(
-            check_domain(&client, server.url("/no-head")).await,
+            check_url(&client, server.url("/no-head")).await,
             CheckResult::SUCCESS
         );
         assert_eq!(
-            check_domain(&client, server.url("/timeout")).await,
+            check_url(&client, server.url("/timeout")).await,
             CheckResult::FAILURE(FailureReason::Timeout)
         );
         head_mock.assert();
