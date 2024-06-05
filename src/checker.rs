@@ -4,9 +4,9 @@ use reqwest::{Response, StatusCode};
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum CheckResult {
-    SUCCESS,
-    FAILURE(FailureReason),
-    MISSED,
+    Success,
+    Failure(FailureReason),
+    Missed,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -34,10 +34,10 @@ pub async fn do_request(
 /// Up is defined as returning a 2xx within a specific timeframe.
 pub async fn check_url(client: &reqwest::Client, url: String) -> CheckResult {
     match do_request(client, url).await {
-        Ok(_) => CheckResult::SUCCESS,
+        Ok(_) => CheckResult::Success,
         Err(e) => {
             if e.is_timeout() {
-                return CheckResult::FAILURE(FailureReason::Timeout);
+                return CheckResult::Failure(FailureReason::Timeout);
             }
             // TODO: More reasons
             let mut inner = &e as &dyn Error;
@@ -48,13 +48,13 @@ pub async fn check_url(client: &reqwest::Client, url: String) -> CheckResult {
                 // Not sure if there's a better way
                 let inner_message = inner.to_string();
                 if inner_message.contains("dns error") {
-                    return CheckResult::FAILURE(FailureReason::DnsError(
+                    return CheckResult::Failure(FailureReason::DnsError(
                         inner.source().unwrap().to_string(),
                     ));
                 }
             }
             // TODO: Should incorporate status code somehow
-            CheckResult::FAILURE(FailureReason::Error(format!("{:?}", e)))
+            CheckResult::Failure(FailureReason::Error(format!("{:?}", e)))
         }
     }
 }
@@ -93,15 +93,15 @@ mod tests {
 
         assert_eq!(
             check_url(&client, server.url("/head")).await,
-            CheckResult::SUCCESS
+            CheckResult::Success
         );
         assert_eq!(
             check_url(&client, server.url("/no-head")).await,
-            CheckResult::SUCCESS
+            CheckResult::Success
         );
         assert_eq!(
             check_url(&client, server.url("/timeout")).await,
-            CheckResult::FAILURE(FailureReason::Timeout)
+            CheckResult::Failure(FailureReason::Timeout)
         );
         head_mock.assert();
         head_disallowed_mock.assert();
