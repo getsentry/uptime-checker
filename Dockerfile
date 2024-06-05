@@ -5,6 +5,7 @@ RUN mkdir -p ~/.cargo && \
     echo 'protocol = "sparse"' >> ~/.cargo/config
 
 RUN apk add --no-cache libc-dev
+RUN apk add pkgconfig
 
 RUN cargo new --bin /app
 WORKDIR /app
