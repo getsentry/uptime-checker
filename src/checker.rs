@@ -18,21 +18,17 @@ pub enum FailureReason {
 /// Fetches the response from a URL.
 ///
 /// First attempts to fetch just the head, and if not supported falls back to fetching the entire body.
-pub async fn do_request(
-    client: &reqwest::Client,
-    url: String,
-) -> Result<Response, reqwest::Error> {
-    let response = client.head(&url).send().await?;
+async fn do_request(client: &reqwest::Client, url: &str) -> Result<Response, reqwest::Error> {
+    let response = client.head(url).send().await?;
     match response.status() {
-        StatusCode::METHOD_NOT_ALLOWED => client.get(&url).send().await,
+        StatusCode::METHOD_NOT_ALLOWED => client.get(url).send().await,
         _ => Ok(response),
     }
 }
 
-
 /// Makes a request to a url to determine whether it is up.
 /// Up is defined as returning a 2xx within a specific timeframe.
-pub async fn check_url(client: &reqwest::Client, url: String) -> CheckResult {
+pub async fn check_url(client: &reqwest::Client, url: &str) -> CheckResult {
     match do_request(client, url).await {
         Ok(_) => CheckResult::Success,
         Err(e) => {
@@ -92,15 +88,15 @@ mod tests {
         let client = ClientBuilder::new().timeout(timeout).build().unwrap();
 
         assert_eq!(
-            check_url(&client, server.url("/head")).await,
+            check_url(&client, &server.url("/head")).await,
             CheckResult::Success
         );
         assert_eq!(
-            check_url(&client, server.url("/no-head")).await,
+            check_url(&client, &server.url("/no-head")).await,
             CheckResult::Success
         );
         assert_eq!(
-            check_url(&client, server.url("/timeout")).await,
+            check_url(&client, &server.url("/timeout")).await,
             CheckResult::Failure(FailureReason::Timeout)
         );
         head_mock.assert();
@@ -109,5 +105,5 @@ mod tests {
         timeout_mock.assert();
         // TODO: Figure out how to simulate a DNS failure
         // assert_eq!(check_domain(&client, "https://hjkhjkljkh.io/".to_string()).await, CheckResult::FAILURE(FailureReason::DnsError("failed to lookup address information: nodename nor servname provided, or not known".to_string())));
-   }
+    }
 }
