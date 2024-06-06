@@ -11,7 +11,7 @@ where
 /// The status result of a check
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum CheckStatus {
+pub enum CheckStatus {
     Success,
     Failure,
     MissedWindow,
@@ -20,7 +20,7 @@ enum CheckStatus {
 /// The status reason result of a failed check
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum CheckStatusReasonType {
+pub enum CheckStatusReasonType {
     Timeout,
     DnsError,
     Failure,
@@ -29,7 +29,7 @@ enum CheckStatusReasonType {
 /// The type of HTTP request used for the check
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum RequestType {
+pub enum RequestType {
     Head,
     Get,
 }
@@ -37,59 +37,59 @@ enum RequestType {
 /// Captures the reason for a check's given status
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-struct CheckStatusReason {
+pub struct CheckStatusReason {
     /// The type of the status reason
     #[serde(rename = "type")]
-    status_type: CheckStatusReasonType,
+    pub status_type: CheckStatusReasonType,
 
     /// A human readable description of the status reason
-    description: String,
+    pub description: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-struct RequestInfo {
+pub struct RequestInfo {
     /// The type of HTTP method used for the check
-    request_type: RequestType,
+    pub request_type: RequestType,
 
     /// The status code of the response
-    http_status_code: u16,
+    pub http_status_code: u16,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-struct CheckResult {
+pub struct CheckResult {
     /// Unique identifier of the uptime check
     #[serde(serialize_with = "uuid_simple")]
-    guid: Uuid,
+    pub guid: Uuid,
 
     /// The identifier of the uptime monitor
-    monitor_id: u64,
+    pub monitor_id: u64,
 
     /// The identifier of the uptime monitors environment
-    monitor_environment_id: u64,
+    pub monitor_environment_id: u64,
 
     /// The status of the check
-    status: CheckStatus,
+    pub status: CheckStatus,
 
     /// Reason for the status, primairly used for failure
-    status_reason: Option<CheckStatusReason>,
+    pub status_reason: Option<CheckStatusReason>,
 
     /// Trace ID associated with the check-in made
     #[serde(serialize_with = "uuid_simple")]
-    trace_id: Uuid,
+    pub trace_id: Uuid,
 
     /// Timestamp in milliseconds of when the check was schedule to run
-    scheduled_check_time: u64,
+    pub scheduled_check_time: u64,
 
     /// Timestamp in milliseconds of when the check was actually ran
-    actual_check_time: u64,
+    pub actual_check_time: u64,
 
     /// Duration of the check in ms. Will be null when the status is missed_window
-    duration_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
 
     /// Information about the check request made. Will be empty if the check was missed
-    request_info: Option<RequestInfo>,
+    pub request_info: Option<RequestInfo>,
 }
 
 #[cfg(test)]
