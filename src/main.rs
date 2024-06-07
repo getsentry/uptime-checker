@@ -6,6 +6,7 @@ mod cliapp;
 mod logging;
 mod scheduler;
 mod types;
+mod producer;
 
 use std::process;
 
