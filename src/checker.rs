@@ -1,6 +1,5 @@
-use std::error::Error;
-
-use reqwest::{Response, StatusCode};
+use reqwest::{Client, ClientBuilder, Response, StatusCode};
+use std::{error::Error, time::Duration};
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -8,13 +7,29 @@ use crate::types::{
     CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo, RequestType,
 };
 
+pub struct CheckerConfig {
+    /// How long will we wait before we consider the request to have timed out.
+    pub timeout: Duration,
+}
+
+impl Default for CheckerConfig {
+    fn default() -> CheckerConfig {
+        CheckerConfig {
+            timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+/// Responsible for making HTTP requests to check if a domain is up.
+#[derive(Clone, Debug)]
+pub struct Checker {
+    client: Client,
+}
+
 /// Fetches the response from a URL.
 ///
 /// First attempts to fetch just the head, and if not supported falls back to fetching the entire body.
-async fn do_request(
-    client: &reqwest::Client,
-    url: &str,
-) -> (RequestType, Result<Response, reqwest::Error>) {
+async fn do_request(client: &Client, url: &str) -> (RequestType, Result<Response, reqwest::Error>) {
     let head_response = match client.head(url).send().await {
         Ok(response) => response,
         Err(e) => return (RequestType::Head, Err(e)),
@@ -44,68 +59,79 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
     None
 }
 
-/// Makes a request to a url to determine whether it is up.
-/// Up is defined as returning a 2xx within a specific timeframe.
-pub async fn check_url(client: &reqwest::Client, url: &str) -> CheckResult {
-    let trace_id = Uuid::new_v4();
+impl Checker {
+    pub fn new(config: CheckerConfig) -> Self {
+        let client = ClientBuilder::new()
+            .timeout(config.timeout)
+            .build()
+            .expect("Failed to build checker client");
 
-    let start = Instant::now();
-    let (request_type, response) = do_request(client, url).await;
-    let duration_ms = Some(start.elapsed().as_millis());
+        Self { client }
+    }
 
-    let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
-        CheckStatus::Success
-    } else {
-        CheckStatus::Failure
-    };
+    /// Makes a request to a url to determine whether it is up.
+    /// Up is defined as returning a 2xx within a specific timeframe.
+    pub async fn check_url(&self, url: &str) -> CheckResult {
+        let trace_id = Uuid::new_v4();
 
-    let http_status_code = match &response {
-        Ok(r) => Some(r.status().as_u16()),
-        Err(e) => e.status().map(|s| s.as_u16()),
-    };
+        let start = Instant::now();
+        let (request_type, response) = do_request(&self.client, url).await;
+        let duration_ms = Some(start.elapsed().as_millis());
 
-    let request_info = Some(RequestInfo {
-        http_status_code,
-        request_type,
-    });
+        let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
+            CheckStatus::Success
+        } else {
+            CheckStatus::Failure
+        };
 
-    let status_reason = match response {
-        Ok(r) if r.status().is_success() => None,
-        Ok(r) => Some(CheckStatusReason {
-            status_type: CheckStatusReasonType::Failure,
-            description: format!("Got non 2xx status: {}", r.status()),
-        }),
-        Err(e) => Some({
-            if e.is_timeout() {
-                CheckStatusReason {
-                    status_type: CheckStatusReasonType::Timeout,
-                    description: format!("{:?}", e),
+        let http_status_code = match &response {
+            Ok(r) => Some(r.status().as_u16()),
+            Err(e) => e.status().map(|s| s.as_u16()),
+        };
+
+        let request_info = Some(RequestInfo {
+            http_status_code,
+            request_type,
+        });
+
+        let status_reason = match response {
+            Ok(r) if r.status().is_success() => None,
+            Ok(r) => Some(CheckStatusReason {
+                status_type: CheckStatusReasonType::Failure,
+                description: format!("Got non 2xx status: {}", r.status()),
+            }),
+            Err(e) => Some({
+                if e.is_timeout() {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::Timeout,
+                        description: format!("{:?}", e),
+                    }
+                } else if let Some(message) = dns_error(&e) {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::DnsError,
+                        description: message,
+                    }
+                } else {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::Failure,
+                        description: format!("{:?}", e),
+                    }
                 }
-            } else if let Some(message) = dns_error(&e) {
-                CheckStatusReason {
-                    status_type: CheckStatusReasonType::DnsError,
-                    description: message,
-                }
-            } else {
-                CheckStatusReason {
-                    status_type: CheckStatusReasonType::Failure,
-                    description: format!("{:?}", e),
-                }
-            }
-        }),
-    };
+            }),
+        };
 
-    CheckResult {
-        guid: Uuid::new_v4(),
-        monitor_id: 0,
-        monitor_environment_id: 0,
-        status,
-        status_reason,
-        trace_id,
-        scheduled_check_time: 0,
-        actual_check_time: 0,
-        duration_ms,
-        request_info,
+        CheckResult {
+            guid: Uuid::new_v4(),
+            monitor_id: 0,
+            monitor_environment_id: 0,
+            status,
+            status_reason,
+            trace_id,
+            scheduled_check_time: 0,
+            actual_check_time: 0,
+            duration_ms,
+            request_info,
+        }
     }
 }
 
@@ -113,24 +139,24 @@ pub async fn check_url(client: &reqwest::Client, url: &str) -> CheckResult {
 mod tests {
     use crate::types::{CheckStatus, CheckStatusReasonType, RequestType};
 
-    use super::check_url;
+    use super::{Checker, CheckerConfig};
     use httpmock::prelude::*;
     use httpmock::Method;
-    use reqwest::{ClientBuilder, StatusCode};
+    use reqwest::StatusCode;
     use std::time::Duration;
     // use crate::checker::FailureReason;
 
     #[tokio::test]
     async fn test_simple_head() {
         let server = MockServer::start();
-        let client = ClientBuilder::new().build().unwrap();
+        let checker = Checker::new(CheckerConfig::default());
 
         let head_mock = server.mock(|when, then| {
             when.method(Method::HEAD).path("/head");
             then.delay(Duration::from_millis(50)).status(200);
         });
 
-        let result = check_url(&client, &server.url("/head")).await;
+        let result = checker.check_url(&server.url("/head")).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert!(result.status_reason.is_none());
@@ -150,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_get() {
         let server = MockServer::start();
-        let client = ClientBuilder::new().build().unwrap();
+        let checker = Checker::new(CheckerConfig::default());
 
         let head_disallowed_mock = server.mock(|when, then| {
             when.method(Method::HEAD).path("/no-head");
@@ -161,7 +187,7 @@ mod tests {
             then.status(200);
         });
 
-        let result = check_url(&client, &server.url("/no-head")).await;
+        let result = checker.check_url(&server.url("/no-head")).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -180,14 +206,14 @@ mod tests {
         let server = MockServer::start();
 
         let timeout = Duration::from_millis(TIMEOUT);
-        let client = ClientBuilder::new().timeout(timeout).build().unwrap();
+        let checker = Checker::new(CheckerConfig { timeout });
 
         let timeout_mock = server.mock(|when, then| {
             when.method(Method::HEAD).path("/timeout");
             then.delay(Duration::from_millis(TIMEOUT + 100)).status(200);
         });
 
-        let result = check_url(&client, &server.url("/timeout")).await;
+        let result = checker.check_url(&server.url("/timeout")).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration_ms.unwrap_or(0) >= TIMEOUT as u128);
@@ -203,14 +229,14 @@ mod tests {
     #[tokio::test]
     async fn test_simple_400() {
         let server = MockServer::start();
-        let client = ClientBuilder::new().build().unwrap();
+        let checker = Checker::new(CheckerConfig::default());
 
         let head_mock = server.mock(|when, then| {
             when.method(Method::HEAD).path("/head");
             then.status(400);
         });
 
-        let result = check_url(&client, &server.url("/head")).await;
+        let result = checker.check_url(&server.url("/head")).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(
