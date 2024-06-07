@@ -52,8 +52,9 @@ pub struct RequestInfo {
     /// The type of HTTP method used for the check
     pub request_type: RequestType,
 
-    /// The status code of the response
-    pub http_status_code: u16,
+    /// The status code of the response. May be empty when the request did not receive a response
+    /// whatsoever.
+    pub http_status_code: Option<u16>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -86,7 +87,7 @@ pub struct CheckResult {
     pub actual_check_time: u64,
 
     /// Duration of the check in ms. Will be null when the status is missed_window
-    pub duration_ms: Option<u64>,
+    pub duration_ms: Option<u128>,
 
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,
