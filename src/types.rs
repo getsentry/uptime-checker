@@ -73,7 +73,7 @@ pub struct CheckResult {
     /// The status of the check
     pub status: CheckStatus,
 
-    /// Reason for the status, primairly used for failure
+    /// Reason for the status, primarily used for failure
     pub status_reason: Option<CheckStatusReason>,
 
     /// Trace ID associated with the check-in made
