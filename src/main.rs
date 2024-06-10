@@ -3,6 +3,7 @@
 mod checker;
 mod cli;
 mod cliapp;
+mod config;
 mod logging;
 mod scheduler;
 mod types;

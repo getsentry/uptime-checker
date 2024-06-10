@@ -1,18 +1,20 @@
 use std::io;
 
+use clap::Parser;
 use tokio::signal::ctrl_c;
 
 use crate::{
     cliapp::{Cli, Commands},
-    logging,
+    config::Config,
+    logging::{self, LoggingConfig},
     scheduler::run_scheduler,
 };
-use clap::Parser;
 
 pub fn execute() -> io::Result<()> {
     let app = Cli::parse();
+    let config = Config::extract(&app.config).expect("Configuration invalid");
 
-    logging::init();
+    logging::init(LoggingConfig::from_config(&config));
 
     match app.command {
         Commands::Run => tokio::runtime::Builder::new_multi_thread()
