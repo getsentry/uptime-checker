@@ -3,14 +3,16 @@
 mod checker;
 mod cli;
 mod cliapp;
+mod logging;
 mod scheduler;
 mod types;
 
 use std::process;
 
-#[tokio::main]
-pub async fn main() {
-    let exit_code = match cli::execute().await {
+use sentry::Hub;
+
+pub fn main() {
+    let exit_code = match cli::execute() {
         Ok(()) => 0,
         Err(_err) => {
             // TODO(epurkhiser): capture error? Here's what relay did
@@ -18,5 +20,7 @@ pub async fn main() {
             1
         }
     };
+
+    Hub::current().client().map(|x| x.close(None));
     process::exit(exit_code);
 }
