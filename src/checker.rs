@@ -13,8 +13,8 @@ pub struct CheckerConfig {
 }
 
 impl Default for CheckerConfig {
-    fn default() -> CheckerConfig {
-        CheckerConfig {
+    fn default() -> Self {
+        Self {
             timeout: Duration::from_secs(5),
         }
     }
