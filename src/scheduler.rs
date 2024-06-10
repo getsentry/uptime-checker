@@ -4,13 +4,13 @@ use chrono::Utc;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
-use crate::checker::{Checker, CheckerConfig};
+use crate::checker::Checker;
 use crate::producer::ResultProducer;
 
 pub async fn run_scheduler() -> Result<(), JobSchedulerError> {
     let scheduler = JobScheduler::new().await?;
 
-    let checker = Arc::new(Checker::new(CheckerConfig::default()));
+    let checker = Arc::new(Checker::new(Default::default()));
 
     let checker_job = Job::new_async("0 */5 * * * *", move |_uuid, mut _l| {
         let job_checker = checker.clone();
