@@ -1,30 +1,40 @@
 //! This module implements the definition of the command line app.
 
-use clap::builder::ValueParser;
-use clap::{Arg, Command, ValueHint};
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand, ValueHint};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const ABOUT: &str = "The Sentry uptime checker service.";
 
-pub fn make_app() -> Command {
-    Command::new("relay")
-        .disable_help_subcommand(true)
-        .subcommand_required(true)
-        .propagate_version(true)
-        .version(VERSION)
-        .about(ABOUT)
-        .arg(
-            Arg::new("config")
-                .long("config")
-                .short('c')
-                .global(true)
-                .value_hint(ValueHint::DirPath)
-                .value_parser(ValueParser::path_buf())
-                .help("The path to the config file."),
-        )
-        .subcommand(
-            Command::new("run")
-                .about("Run the service")
-                .after_help("This runs the uptime-checker in the foreground until it's shut down."),
-        )
+#[derive(Parser, Debug)]
+#[clap(
+    name = "uptime-checker",
+    version = VERSION,
+    about = ABOUT,
+    disable_help_subcommand = true,
+    subcommand_required = true,
+)]
+pub struct Cli {
+    #[clap(
+        short,
+        long,
+        global = true,
+        help = "The path to the config file.",
+        value_hint = ValueHint::FilePath
+    )]
+    pub config: Option<PathBuf>,
+
+    #[clap(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Run the service
+    #[clap(
+        about = "Run the service",
+        after_help = "This runs the uptime-checker in the foreground until it's shut down."
+    )]
+    Run,
 }
