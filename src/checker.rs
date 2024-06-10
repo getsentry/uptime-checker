@@ -44,6 +44,7 @@ async fn do_request(client: &Client, url: &str) -> (RequestType, Result<Response
     (RequestType::Get, result)
 }
 
+/// Check if the request error is a DNS error.
 fn dns_error(err: &reqwest::Error) -> Option<String> {
     let mut inner = &err as &dyn Error;
     while let Some(source) = inner.source() {
