@@ -4,7 +4,7 @@ RUN mkdir -p ~/.cargo && \
     echo '[registries.crates-io]' > ~/.cargo/config && \
     echo 'protocol = "sparse"' >> ~/.cargo/config
 
-RUN apk add --no-cache libc-dev
+RUN apk add --no-cache libc-dev cmake make g++
 RUN apk add --no-cache pkgconfig openssl-dev
 
 RUN cargo new --bin /app
