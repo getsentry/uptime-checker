@@ -18,7 +18,9 @@ pub async fn run_scheduler() -> Result<(), JobSchedulerError> {
         Box::pin(async move {
             println!("Executing job at {:?}", Utc::now());
 
-            let check_result = job_checker.check_url("https://sentry.io").await;
+            let check_result = job_checker
+                .check_url("https://downtime-simulator-test1.vercel.app")
+                .await;
             // TODO: Get this from configuration.
             // TODO: Producer should be instantiated with these values and shared
             let config = KafkaConfig::new_config(["0.0.0.0".to_string()].to_vec(), None);
