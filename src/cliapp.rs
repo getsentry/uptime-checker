@@ -15,7 +15,7 @@ pub const ABOUT: &str = "The Sentry uptime checker service.";
     disable_help_subcommand = true,
     subcommand_required = true,
 )]
-pub struct Cli {
+pub struct CliApp {
     #[clap(
         short,
         long,

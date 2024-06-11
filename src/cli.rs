@@ -4,14 +4,14 @@ use clap::Parser;
 use tokio::signal::ctrl_c;
 
 use crate::{
-    cliapp::{Cli, Commands},
+    cliapp::{CliApp, Commands},
     config::Config,
     logging::{self, LoggingConfig},
     scheduler::run_scheduler,
 };
 
 pub fn execute() -> io::Result<()> {
-    let app = Cli::parse();
+    let app = CliApp::parse();
     let config = Config::extract(&app.config).expect("Configuration invalid");
 
     logging::init(LoggingConfig::from_config(&config));
