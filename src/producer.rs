@@ -18,7 +18,7 @@ pub enum ExtractCodeError {
 }
 
 pub async fn produce_checker_result(
-    result: CheckResult,
+    result: &CheckResult,
     topic: Topic,
     config: KafkaConfig,
 ) -> Result<(), ExtractCodeError> {
@@ -31,29 +31,25 @@ pub async fn produce_checker_result(
     // and don't have holes.
     Ok(producer.produce(
         &topic,
-        KafkaPayload::new(None, None, Some(serde_json::to_vec(&result)?)),
+        KafkaPayload::new(None, None, Some(serde_json::to_vec(result)?)),
     )?)
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDateTime;
-    use chrono::offset::Local;
     use super::{ExtractCodeError, produce_checker_result};
     use rust_arroyo::backends::kafka::config::KafkaConfig;
     use rust_arroyo::types::Topic;
     use uuid::Uuid;
-    use crate::checker::{check_url, FailureReason, UrlCheckResult};
-    use crate::checker::UrlCheckResult::Success;
     use crate::types::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo, RequestType};
 
-    pub async fn send_result(result: UrlCheckResult) -> Result<(), ExtractCodeError>{
+    pub async fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError>{
         let guid = Uuid::new_v4();
         let result = CheckResult {
             guid: guid,
             monitor_id: 123,
             monitor_environment_id: 456,
-            status: CheckStatus::Success,
+            status: result,
             status_reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::DnsError,
                 description: "hi".to_string(),
@@ -64,21 +60,19 @@ mod tests {
             duration_ms: Some(100),
             request_info: Some(RequestInfo {
                 request_type: RequestType::Head,
-                http_status_code: 200,
+                http_status_code: Some(200),
             }),
         };
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since
         // it will fail async
         let config = KafkaConfig::new_config(["0.0.0.0".to_string()].to_vec(), None);
-        produce_checker_result(result, Topic::new("test-topic"), config).await
+        produce_checker_result(&result, Topic::new("test-topic"), config).await
     }
 
     #[tokio::test]
     async fn test() {
-        let result = send_result(Success).await;
+        let result = send_result(CheckStatus::Success).await;
         assert_eq!(result.unwrap(), ());
-
-
     }
 
 }
