@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use chrono::Utc;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
+use tracing::info;
 
 use crate::checker::Checker;
 use crate::producer::ResultProducer;
@@ -16,7 +16,7 @@ pub async fn run_scheduler() -> Result<(), JobSchedulerError> {
         let job_checker = checker.clone();
 
         Box::pin(async move {
-            println!("Executing job at {:?}", Utc::now());
+            info!("Executing check");
 
             let check_result = job_checker.check_url("https://sentry.io").await;
             // TODO: Get this from configuration.
@@ -25,7 +25,7 @@ pub async fn run_scheduler() -> Result<(), JobSchedulerError> {
             let producer = ResultProducer::new("uptime-checker-results", config);
             let _ = producer.produce_checker_result(&check_result).await;
 
-            println!("checked sentry.io, got {:?}", check_result)
+            info!(result = ?check_result, "Check complete");
         })
     })?;
 

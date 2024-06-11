@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use crate::logging;
 use clap::{Parser, Subcommand, ValueHint};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -24,6 +25,25 @@ pub struct CliApp {
         value_hint = ValueHint::FilePath
     )]
     pub config: Option<PathBuf>,
+
+    #[clap(
+        short,
+        long,
+        global = true,
+        value_name = "LEVEL",
+        help = "Set the log level filter.",
+        value_enum
+    )]
+    pub log_level: Option<logging::Level>,
+
+    #[clap(
+        long,
+        global = true,
+        value_name = "FORMAT",
+        help = "Set the logging output format.",
+        value_enum
+    )]
+    pub log_format: Option<logging::LogFormat>,
 
     #[clap(subcommand)]
     pub command: Commands,
