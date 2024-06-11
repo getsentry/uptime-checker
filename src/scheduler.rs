@@ -2,11 +2,10 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
-use rust_arroyo::types::Topic;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
 use crate::checker::{Checker, CheckerConfig};
-use crate::producer::produce_checker_result;
+use crate::producer::ResultProducer;
 
 pub async fn run_scheduler() -> Result<(), JobSchedulerError> {
     let scheduler = JobScheduler::new().await?;
@@ -23,8 +22,8 @@ pub async fn run_scheduler() -> Result<(), JobSchedulerError> {
             // TODO: Get this from configuration.
             // TODO: Producer should be instantiated with these values and shared
             let config = KafkaConfig::new_config(["0.0.0.0".to_string()].to_vec(), None);
-            let topic = Topic::new("uptime-checker-results");
-            let _ = produce_checker_result(&check_result, topic, config).await;
+            let producer = ResultProducer::new("uptime-checker-results", config);
+            let _ = producer.produce_checker_result(&check_result).await;
 
             println!("checked sentry.io, got {:?}", check_result)
         })

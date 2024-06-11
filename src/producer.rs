@@ -17,29 +17,38 @@ pub enum ExtractCodeError {
     ProducerError(#[from] ProducerError),
 }
 
-pub async fn produce_checker_result(
-    result: &CheckResult,
-    topic: Topic,
-    config: KafkaConfig,
-) -> Result<(), ExtractCodeError> {
-    let producer = KafkaProducer::new(config.clone());
-    let topic = TopicOrPartition::Topic(topic);
-    // TODO: Note that this will rarely fail directly here - mostly will only happen if the queue
-    // is full. We need to have a callback that tells us whether the other produces succeed so we
-    // know whether to mark the check as successful. We never want to just silently drop a result -
-    // we'd much prefer to retry it later and produce a miss, so that we at least know that we missed
-    // and don't have holes.
-    Ok(producer.produce(
-        &topic,
-        KafkaPayload::new(None, None, Some(serde_json::to_vec(result)?)),
-    )?)
+pub struct ResultProducer {
+    producer: KafkaProducer,
+    topic: TopicOrPartition,
+}
+
+impl ResultProducer {
+    pub fn new(topic_name: &str, config: KafkaConfig) -> Self {
+        let producer = KafkaProducer::new(config);
+        let topic = TopicOrPartition::Topic(Topic::new(topic_name));
+        Self { producer, topic }
+    }
+
+    pub async fn produce_checker_result(
+        &self,
+        result: &CheckResult,
+    ) -> Result<(), ExtractCodeError> {
+        // TODO: Note that this will rarely fail directly here - mostly will only happen if the queue
+        // is full. We need to have a callback that tells us whether the other produces succeed so we
+        // know whether to mark the check as successful. We never want to just silently drop a result -
+        // we'd much prefer to retry it later and produce a miss, so that we at least know that we missed
+        // and don't have holes.
+        Ok(self.producer.produce(
+            &self.topic,
+            KafkaPayload::new(None, None, Some(serde_json::to_vec(result)?)),
+        )?)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ExtractCodeError, produce_checker_result};
+    use super::{ExtractCodeError, ResultProducer};
     use rust_arroyo::backends::kafka::config::KafkaConfig;
-    use rust_arroyo::types::Topic;
     use uuid::Uuid;
     use crate::types::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo, RequestType};
 
@@ -66,7 +75,8 @@ mod tests {
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since
         // it will fail async
         let config = KafkaConfig::new_config(["0.0.0.0".to_string()].to_vec(), None);
-        produce_checker_result(&result, Topic::new("test-topic"), config).await
+        let producer = ResultProducer::new("test-topic", config);
+        producer.produce_checker_result(&result).await
     }
 
     #[tokio::test]
