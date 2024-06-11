@@ -4,9 +4,7 @@ use rust_arroyo::backends::kafka::types::KafkaPayload;
 
 use rust_arroyo::types::{Topic, TopicOrPartition};
 
-use crate::types::{
-    CheckResult,
-};
+use crate::types::CheckResult;
 use rust_arroyo::backends::{Producer, ProducerError};
 
 #[derive(Debug, thiserror::Error)]
@@ -48,11 +46,14 @@ impl ResultProducer {
 #[cfg(test)]
 mod tests {
     use super::{ExtractCodeError, ResultProducer};
+    use crate::types::{
+        CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
+        RequestType,
+    };
     use rust_arroyo::backends::kafka::config::KafkaConfig;
     use uuid::Uuid;
-    use crate::types::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo, RequestType};
 
-    pub async fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError>{
+    pub async fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
         let guid = Uuid::new_v4();
         let result = CheckResult {
             guid: guid,
@@ -84,5 +85,4 @@ mod tests {
         let result = send_result(CheckStatus::Success).await;
         assert_eq!(result.unwrap(), ());
     }
-
 }
