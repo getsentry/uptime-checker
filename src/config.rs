@@ -34,6 +34,9 @@ pub struct Config {
         serialize_with = "list_serializer"
     )]
     pub results_kafka_cluster: Vec<String>,
+
+    /// The topic to produce uptime checks into.
+    pub results_kafka_topic: String,
 }
 
 impl Default for Config {
@@ -44,6 +47,7 @@ impl Default for Config {
             log_level: logging::Level::Warn,
             log_format: logging::LogFormat::Auto,
             results_kafka_cluster: vec![],
+            results_kafka_topic: "uptime-results".to_owned(),
         }
     }
 }
@@ -131,7 +135,8 @@ mod tests {
                     sentry_env: Some(Cow::from("my_env")),
                     log_level: logging::Level::Warn,
                     log_format: logging::LogFormat::Auto,
-                    results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()]
+                    results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
+                    results_kafka_topic: "uptime-results".to_owned(),
                 }
             );
             Ok(())
@@ -172,7 +177,8 @@ mod tests {
                     sentry_env: Some(Cow::from("my_env_override")),
                     log_level: logging::Level::Trace,
                     log_format: logging::LogFormat::Json,
-                    results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()]
+                    results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
+                    results_kafka_topic: "uptime-results".to_owned(),
                 }
             );
             Ok(())

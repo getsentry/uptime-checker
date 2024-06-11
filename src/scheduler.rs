@@ -14,7 +14,7 @@ pub async fn run_scheduler(config: &Config) -> Result<(), JobSchedulerError> {
     let checker = Arc::new(Checker::new(Default::default()));
 
     let producer = Arc::new(ResultProducer::new(
-        "uptime-results",
+        &config.results_kafka_topic,
         KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
     ));
 
