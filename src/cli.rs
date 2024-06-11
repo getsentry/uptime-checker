@@ -22,7 +22,9 @@ pub fn execute() -> io::Result<()> {
             .build()
             .unwrap()
             .block_on(async {
-                run_scheduler().await.expect("Failed to run scheduler");
+                run_scheduler(&config)
+                    .await
+                    .expect("Failed to run scheduler");
                 ctrl_c().await
             }),
     }
