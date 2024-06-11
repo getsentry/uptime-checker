@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
-use tracing::info;
+use tracing::{error, info};
 
 use crate::checker::Checker;
 use crate::config::Config;
@@ -28,7 +28,10 @@ pub async fn run_scheduler(config: &Config) -> Result<(), JobSchedulerError> {
             let check_result = job_checker
                 .check_url("https://downtime-simulator-test1.vercel.app")
                 .await;
-            let _ = job_producer.produce_checker_result(&check_result).await;
+
+            if let Err(e) = job_producer.produce_checker_result(&check_result).await {
+                error!(error = ?e, "Failed to produce check result");
+            }
 
             info!(result = ?check_result, "Check complete");
         })
