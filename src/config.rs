@@ -1,11 +1,13 @@
-use std::{borrow::Cow, path::PathBuf};
+use std::borrow::Cow;
 
 use figment::{
-    providers::{Env, Format, Yaml},
+    providers::{Env, Format, Serialized, Yaml},
     Figment,
 };
 
 use serde::{Deserialize, Serialize};
+
+use crate::{cliapp, logging};
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -14,6 +16,12 @@ pub struct Config {
 
     /// The environment to report to sentry errors to.
     pub sentry_env: Option<Cow<'static, str>>,
+
+    /// The log level to filter logging to.
+    pub log_level: logging::Level,
+
+    /// The log format to output.
+    pub log_format: logging::LogFormat,
 
     /// The kafka cluster to report results to. Expected to be a string of comma separated
     /// addresses.
@@ -28,6 +36,18 @@ pub struct Config {
     pub results_kafka_cluster: Vec<String>,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            sentry_dsn: None,
+            sentry_env: None,
+            log_level: logging::Level::Warn,
+            log_format: logging::LogFormat::Auto,
+            results_kafka_cluster: vec![],
+        }
+    }
+}
+
 fn list_deserialize<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -35,7 +55,7 @@ where
     let str_sequence = String::deserialize(deserializer)?;
     let result = str_sequence
         .split(',')
-        .map(|item| item.to_owned())
+        .map(|item| item.trim().to_owned())
         .collect();
     Ok(result)
 }
@@ -49,27 +69,39 @@ where
 
 impl Config {
     /// Load configuration from an optional configuration file and environment
-    pub fn extract(path: &Option<PathBuf>) -> anyhow::Result<Config> {
-        let builder = Figment::new();
+    pub fn extract(app: &cliapp::CliApp) -> anyhow::Result<Config> {
+        let mut builder = Figment::from(Serialized::defaults(Config::default()));
 
-        let builder = match path {
-            Some(path) => builder.merge(Yaml::file(path)),
-            _ => builder,
+        if let Some(path) = &app.config {
+            builder = builder.merge(Yaml::file(path));
         };
 
-        // Override env variables if provided
-        let config: Config = builder.merge(Env::prefixed("UPTIME_CHECKER_")).extract()?;
+        // Override with env variables if provided
+        builder = builder.merge(Env::prefixed("UPTIME_CHECKER_"));
 
+        // Override some values from the CliApp
+        if let Some(log_level) = app.log_level {
+            builder = builder.merge(Serialized::default("log_level", log_level))
+        }
+        if let Some(log_format) = app.log_format {
+            builder = builder.merge(Serialized::default("log_format", log_format))
+        }
+
+        let config: Config = builder.extract()?;
         Ok(config)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{borrow::Cow, path::PathBuf};
+
     use figment::Jail;
     use similar_asserts::assert_eq;
 
-    use super::*;
+    use crate::{cliapp, logging};
+
+    use super::Config;
 
     #[test]
     fn test_simple() {
@@ -83,14 +115,22 @@ mod tests {
                 "#,
             )?;
 
-            let config = Config::extract(&Some(PathBuf::from("config.yaml")))
-                .expect("Invalid configuration");
+            let app = cliapp::CliApp {
+                config: Some(PathBuf::from("config.yaml")),
+                log_level: None,
+                log_format: None,
+                command: cliapp::Commands::Run,
+            };
+
+            let config = Config::extract(&app).expect("Invalid configuration");
 
             assert_eq!(
                 config,
                 Config {
                     sentry_dsn: Some("my_dsn".to_owned()),
                     sentry_env: Some(Cow::from("my_env")),
+                    log_level: logging::Level::Warn,
+                    log_format: logging::LogFormat::Auto,
                     results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()]
                 }
             );
@@ -99,13 +139,14 @@ mod tests {
     }
 
     #[test]
-    fn test_onv_override() {
+    fn test_overrides() {
         Jail::expect_with(|jail| {
             jail.create_file(
                 "config.yaml",
                 r#"
                 sentry_dsn: my_dsn
                 sentry_env: my_env
+                log_format: json
                 "#,
             )?;
 
@@ -115,14 +156,22 @@ mod tests {
                 "10.0.0.1,10.0.0.2:7000",
             );
 
-            let config = Config::extract(&Some(PathBuf::from("config.yaml")))
-                .expect("Invalid configuration");
+            let app = cliapp::CliApp {
+                config: Some(PathBuf::from("config.yaml")),
+                log_level: Some(logging::Level::Trace),
+                log_format: None,
+                command: cliapp::Commands::Run,
+            };
+
+            let config = Config::extract(&app).expect("Invalid configuration");
 
             assert_eq!(
                 config,
                 Config {
                     sentry_dsn: Some("my_dsn".to_owned()),
                     sentry_env: Some(Cow::from("my_env_override")),
+                    log_level: logging::Level::Trace,
+                    log_format: logging::LogFormat::Json,
                     results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()]
                 }
             );

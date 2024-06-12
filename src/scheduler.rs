@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use chrono::Utc;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
+use tracing::info;
 
 use crate::checker::Checker;
 use crate::config::Config;
@@ -23,14 +23,14 @@ pub async fn run_scheduler(config: &Config) -> Result<(), JobSchedulerError> {
         let job_producer = producer.clone();
 
         Box::pin(async move {
-            println!("Executing job at {:?}", Utc::now());
+            info!("Executing check");
 
             let check_result = job_checker
                 .check_url("https://downtime-simulator-test1.vercel.app")
                 .await;
             let _ = job_producer.produce_checker_result(&check_result).await;
 
-            println!("checked sentry.io, got {:?}", check_result)
+            info!(result = ?check_result, "Check complete");
         })
     })?;
 

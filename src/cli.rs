@@ -2,6 +2,7 @@ use std::io;
 
 use clap::Parser;
 use tokio::signal::ctrl_c;
+use tracing::info;
 
 use crate::{
     cliapp::{CliApp, Commands},
@@ -12,9 +13,11 @@ use crate::{
 
 pub fn execute() -> io::Result<()> {
     let app = CliApp::parse();
-    let config = Config::extract(&app.config).expect("Configuration invalid");
+    let config = Config::extract(&app).expect("Configuration invalid");
 
     logging::init(LoggingConfig::from_config(&config));
+
+    info!(config = ?config);
 
     match app.command {
         Commands::Run => tokio::runtime::Builder::new_multi_thread()
