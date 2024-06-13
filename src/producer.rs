@@ -3,6 +3,7 @@ use rust_arroyo::backends::kafka::producer::KafkaProducer;
 use rust_arroyo::backends::kafka::types::KafkaPayload;
 
 use rust_arroyo::types::{Topic, TopicOrPartition};
+use sentry_kafka_schemas::{Schema, SchemaError};
 
 use crate::types::CheckResult;
 use rust_arroyo::backends::{Producer, ProducerError};
@@ -10,36 +11,47 @@ use rust_arroyo::backends::{Producer, ProducerError};
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractCodeError {
     #[error(transparent)]
-    SerializationError(#[from] serde_json::Error),
+    Serialization(#[from] serde_json::Error),
     #[error(transparent)]
-    ProducerError(#[from] ProducerError),
+    Producer(#[from] ProducerError),
+    #[error(transparent)]
+    Schema(#[from] SchemaError),
 }
 
 pub struct ResultProducer {
     producer: KafkaProducer,
     topic: TopicOrPartition,
+    schema: Schema,
 }
 
 impl ResultProducer {
     pub fn new(topic_name: &str, config: KafkaConfig) -> Self {
         let producer = KafkaProducer::new(config);
         let topic = TopicOrPartition::Topic(Topic::new(topic_name));
-        Self { producer, topic }
+        let schema = sentry_kafka_schemas::get_schema("uptime-results", None).unwrap();
+
+        Self {
+            producer,
+            topic,
+            schema,
+        }
     }
 
     pub async fn produce_checker_result(
         &self,
         result: &CheckResult,
     ) -> Result<(), ExtractCodeError> {
+        let json = serde_json::to_vec(result)?;
+        self.schema.validate_json(&json)?;
+
         // TODO: Note that this will rarely fail directly here - mostly will only happen if the queue
         // is full. We need to have a callback that tells us whether the other produces succeed so we
         // know whether to mark the check as successful. We never want to just silently drop a result -
         // we'd much prefer to retry it later and produce a miss, so that we at least know that we missed
         // and don't have holes.
-        Ok(self.producer.produce(
-            &self.topic,
-            KafkaPayload::new(None, None, Some(serde_json::to_vec(result)?)),
-        )?)
+        Ok(self
+            .producer
+            .produce(&self.topic, KafkaPayload::new(None, None, Some(json)))?)
     }
 }
 
@@ -76,7 +88,7 @@ mod tests {
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since
         // it will fail async
         let config = KafkaConfig::new_config(["0.0.0.0".to_string()].to_vec(), None);
-        let producer = ResultProducer::new("test-topic", config);
+        let producer = ResultProducer::new("uptime-results", config);
         producer.produce_checker_result(&result).await
     }
 
