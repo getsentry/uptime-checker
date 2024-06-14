@@ -64,11 +64,9 @@ pub struct CheckResult {
     #[serde(serialize_with = "uuid_simple")]
     pub guid: Uuid,
 
-    /// The identifier of the uptime monitor
-    pub monitor_id: u64,
-
-    /// The identifier of the uptime monitors environment
-    pub monitor_environment_id: u64,
+    /// The identifier of the subscription
+    #[serde(serialize_with = "uuid_simple")]
+    pub subscription_id: Uuid,
 
     /// The status of the check
     pub status: CheckStatus,
@@ -103,8 +101,7 @@ mod tests {
     fn serialize_json_roundtrip_failure_example() {
         let json = r#"{
   "guid": "54afc7ed9c53491481919c931f75bae1",
-  "monitor_id": 1,
-  "monitor_environment_id": 1,
+  "subscription_id": "23d6048d67c948d9a19c0b47979e9a03",
   "status": "failure",
   "status_reason": {
     "type": "dns_error",
@@ -130,8 +127,7 @@ mod tests {
     fn serialize_json_roundtrip_success_example() {
         let json = r#"{
   "guid": "54afc7ed9c53491481919c931f75bae1",
-  "monitor_id": 1,
-  "monitor_environment_id": 1,
+  "subscription_id": "23d6048d67c948d9a19c0b47979e9a03",
   "status": "success",
   "status_reason": null,
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
