@@ -18,7 +18,7 @@ pub async fn run_scheduler(config: &Config) -> Result<(), JobSchedulerError> {
         KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
     ));
 
-    let checker_job = Job::new_async("*/10 * * * * *", move |_uuid, mut _l| {
+    let checker_job = Job::new_async("0 */5 * * * *", move |_uuid, mut _l| {
         let job_checker = checker.clone();
         let job_producer = producer.clone();
 
