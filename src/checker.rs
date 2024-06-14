@@ -1,7 +1,7 @@
 use reqwest::{Client, ClientBuilder, Response, StatusCode};
 use std::{error::Error, time::Duration};
 use tokio::time::Instant;
-use uuid::Uuid;
+use uuid::{Uuid, uuid};
 
 use crate::types::{
     CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo, RequestType,
@@ -25,6 +25,8 @@ impl Default for CheckerConfig {
 pub struct Checker {
     client: Client,
 }
+
+pub const SUBSCRIPTION_ID: Uuid = uuid!("663399a09e6340a79c3c7a3f26878904");
 
 /// Fetches the response from a URL.
 ///
@@ -124,7 +126,7 @@ impl Checker {
         CheckResult {
             guid: Uuid::new_v4(),
             // TODO: Use the real subscription id here when we have it
-            subscription_id: Uuid::new_v4(),
+            subscription_id: SUBSCRIPTION_ID,
             status,
             status_reason,
             trace_id,

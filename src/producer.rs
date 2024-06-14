@@ -63,13 +63,14 @@ mod tests {
         RequestType,
     };
     use rust_arroyo::backends::kafka::config::KafkaConfig;
-    use uuid::Uuid;
+    use uuid::{Uuid};
+    use crate::checker::SUBSCRIPTION_ID;
 
     pub async fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
         let guid = Uuid::new_v4();
         let result = CheckResult {
             guid,
-            subscription_id: Uuid::new_v4(),
+            subscription_id: SUBSCRIPTION_ID,
             status: result,
             status_reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::DnsError,
