@@ -4,7 +4,7 @@ use sentry::types::Dsn;
 use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
 
-use crate::config;
+use crate::{cliapp::VERSION, config};
 
 use tracing_subscriber::{prelude::*, Layer};
 
@@ -84,7 +84,7 @@ pub fn init(config: LoggingConfig) {
 
         let guard = sentry::init(sentry::ClientOptions {
             dsn,
-            release: sentry::release_name!(),
+            release: Some(Cow::Borrowed(VERSION)),
             environment: config.sentry_env.to_owned(),
             ..Default::default()
         });

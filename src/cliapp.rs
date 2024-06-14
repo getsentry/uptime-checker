@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::logging;
 use clap::{Parser, Subcommand, ValueHint};
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("UPTIME_CHECKER_VERSION");
 pub const ABOUT: &str = "The Sentry uptime checker service.";
 
 #[derive(Parser, Debug)]

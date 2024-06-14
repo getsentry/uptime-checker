@@ -1,5 +1,8 @@
 FROM rust:1.74-alpine3.18 as builder
 
+ARG UPTIME_CHECKER_GIT_REVISION
+ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
+
 RUN mkdir -p ~/.cargo && \
     echo '[registries.crates-io]' > ~/.cargo/config && \
     echo 'protocol = "sparse"' >> ~/.cargo/config
