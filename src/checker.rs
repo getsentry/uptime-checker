@@ -123,8 +123,8 @@ impl Checker {
 
         CheckResult {
             guid: Uuid::new_v4(),
-            monitor_id: 0,
-            monitor_environment_id: 0,
+            // TODO: Use the real subscription id here when we have it
+            subscription_id: Uuid::new_v4(),
             status,
             status_reason,
             trace_id,

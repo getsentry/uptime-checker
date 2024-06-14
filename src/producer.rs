@@ -69,8 +69,7 @@ mod tests {
         let guid = Uuid::new_v4();
         let result = CheckResult {
             guid,
-            monitor_id: 123,
-            monitor_environment_id: 456,
+            subscription_id: Uuid::new_v4(),
             status: result,
             status_reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::DnsError,
