@@ -8,6 +8,8 @@ steps:
         '-t',
         'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA',
         '--build-arg',
+        'UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA',
+        '--build-arg',
         'BUILDKIT_INLINE_CACHE=1',
         '--cache-from',
         'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest',
