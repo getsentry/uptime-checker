@@ -32,8 +32,17 @@ pub const SUBSCRIPTION_ID: Uuid = uuid!("663399a09e6340a79c3c7a3f26878904");
 /// Fetches the response from a URL.
 ///
 /// First attempts to fetch just the head, and if not supported falls back to fetching the entire body.
-async fn do_request(client: &Client, url: &str) -> (RequestType, Result<Response, reqwest::Error>) {
-    let head_response = match client.head(url).send().await {
+async fn do_request(
+    client: &Client,
+    url: &str,
+    sentry_trace: &str,
+) -> (RequestType, Result<Response, reqwest::Error>) {
+    let head_response = match client
+        .head(url)
+        .header("sentry-trace", sentry_trace.to_owned())
+        .send()
+        .await
+    {
         Ok(response) => response,
         Err(e) => return (RequestType::Head, Err(e)),
     };
@@ -43,7 +52,12 @@ async fn do_request(client: &Client, url: &str) -> (RequestType, Result<Response
         return (RequestType::Head, Ok(head_response));
     }
 
-    let result = client.get(url).send().await;
+    let result = client
+        .get(url)
+        .header("sentry-trace", sentry_trace.to_owned())
+        .send()
+        .await;
+
     (RequestType::Get, result)
 }
 
@@ -79,8 +93,13 @@ impl Checker {
         let trace_id = TraceId::default();
         let span_id = SpanId::default();
 
+        // Format the 'sentry-trace' header. The last byte indicates that we are NOT forcing
+        // sampling on child spans. If we were to set this to '1' it would mean that every
+        // check request made for that customer would be sampled,
+        let trace_header = format!("{}-{}-{}", trace_id, span_id, '0');
+
         let start = Instant::now();
-        let (request_type, response) = do_request(&self.client, url).await;
+        let (request_type, response) = do_request(&self.client, url, &trace_header).await;
         let duration_ms = Some(start.elapsed().as_millis());
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
@@ -189,7 +208,9 @@ mod tests {
             then.status(StatusCode::METHOD_NOT_ALLOWED.as_u16());
         });
         let get_mock = server.mock(|when, then| {
-            when.method(Method::GET).path("/no-head");
+            when.method(Method::GET)
+                .path("/no-head")
+                .header_exists("sentry-trace");
             then.status(200);
         });
 
@@ -215,7 +236,9 @@ mod tests {
         let checker = Checker::new(CheckerConfig { timeout });
 
         let timeout_mock = server.mock(|when, then| {
-            when.method(Method::HEAD).path("/timeout");
+            when.method(Method::HEAD)
+                .path("/timeout")
+                .header_exists("sentry-trace");
             then.delay(Duration::from_millis(TIMEOUT + 100)).status(200);
         });
 
@@ -238,7 +261,9 @@ mod tests {
         let checker = Checker::new(CheckerConfig::default());
 
         let head_mock = server.mock(|when, then| {
-            when.method(Method::HEAD).path("/head");
+            when.method(Method::HEAD)
+                .path("/head")
+                .header_exists("sentry-trace");
             then.status(400);
         });
 
