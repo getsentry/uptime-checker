@@ -1,3 +1,4 @@
+use sentry::protocol::{SpanId, TraceId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -75,8 +76,10 @@ pub struct CheckResult {
     pub status_reason: Option<CheckStatusReason>,
 
     /// Trace ID associated with the check-in made
-    #[serde(serialize_with = "uuid_simple")]
-    pub trace_id: Uuid,
+    pub trace_id: TraceId,
+    ///
+    /// Trace ID associated with the check-in made
+    pub span_id: SpanId,
 
     /// Timestamp in milliseconds of when the check was schedule to run
     pub scheduled_check_time: u64,
@@ -108,6 +111,7 @@ mod tests {
     "description": "Unable to resolve hostname example.xyz"
   },
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
+  "span_id": "9c1d886a44bafc94",
   "scheduled_check_time": 1717614062978,
   "actual_check_time": 1717614068008,
   "duration_ms": 100,
@@ -131,6 +135,7 @@ mod tests {
   "status": "success",
   "status_reason": null,
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
+  "span_id": "9c1d886a44bafc94",
   "scheduled_check_time": 1717614062978,
   "actual_check_time": 1717614068008,
   "duration_ms": 50,

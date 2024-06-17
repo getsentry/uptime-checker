@@ -1,7 +1,8 @@
 use reqwest::{Client, ClientBuilder, Response, StatusCode};
+use sentry::protocol::{SpanId, TraceId};
 use std::{error::Error, time::Duration};
 use tokio::time::Instant;
-use uuid::{Uuid, uuid};
+use uuid::{uuid, Uuid};
 
 use crate::types::{
     CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo, RequestType,
@@ -75,7 +76,8 @@ impl Checker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     pub async fn check_url(&self, url: &str) -> CheckResult {
-        let trace_id = Uuid::new_v4();
+        let trace_id = TraceId::default();
+        let span_id = SpanId::default();
 
         let start = Instant::now();
         let (request_type, response) = do_request(&self.client, url).await;
@@ -130,6 +132,7 @@ impl Checker {
             status,
             status_reason,
             trace_id,
+            span_id,
             scheduled_check_time: 0,
             actual_check_time: 0,
             duration_ms,
