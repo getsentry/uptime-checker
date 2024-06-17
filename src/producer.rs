@@ -58,13 +58,14 @@ impl ResultProducer {
 #[cfg(test)]
 mod tests {
     use super::{ExtractCodeError, ResultProducer};
+    use crate::checker::SUBSCRIPTION_ID;
     use crate::types::{
         CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
         RequestType,
     };
     use rust_arroyo::backends::kafka::config::KafkaConfig;
-    use uuid::{Uuid};
-    use crate::checker::SUBSCRIPTION_ID;
+    use sentry::protocol::{SpanId, TraceId};
+    use uuid::Uuid;
 
     pub async fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
         let guid = Uuid::new_v4();
@@ -76,7 +77,8 @@ mod tests {
                 status_type: CheckStatusReasonType::DnsError,
                 description: "hi".to_string(),
             }),
-            trace_id: guid,
+            trace_id: TraceId::default(),
+            span_id: SpanId::default(),
             scheduled_check_time: 789,
             actual_check_time: 123456,
             duration_ms: Some(100),
