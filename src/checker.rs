@@ -4,7 +4,7 @@ use std::{error::Error, time::Duration};
 use tokio::time::Instant;
 use uuid::{uuid, Uuid};
 
-use crate::types::{
+use crate::types::result::{
     CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo, RequestType,
 };
 
@@ -162,7 +162,7 @@ impl Checker {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::{CheckStatus, CheckStatusReasonType, RequestType};
+    use crate::types::result::{CheckStatus, CheckStatusReasonType, RequestType};
 
     use super::{Checker, CheckerConfig};
     use httpmock::prelude::*;
