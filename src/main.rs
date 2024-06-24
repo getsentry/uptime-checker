@@ -4,10 +4,11 @@ mod checker;
 mod cli;
 mod cliapp;
 mod config;
+mod config_store;
 mod logging;
+mod producer;
 mod scheduler;
 mod types;
-mod producer;
 
 use std::process;
 
