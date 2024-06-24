@@ -5,7 +5,7 @@ use rust_arroyo::backends::kafka::types::KafkaPayload;
 use rust_arroyo::types::{Topic, TopicOrPartition};
 use sentry_kafka_schemas::{Schema, SchemaError};
 
-use crate::types::CheckResult;
+use crate::types::result::CheckResult;
 use rust_arroyo::backends::{Producer, ProducerError};
 
 #[derive(Debug, thiserror::Error)]
@@ -59,7 +59,7 @@ impl ResultProducer {
 mod tests {
     use super::{ExtractCodeError, ResultProducer};
     use crate::checker::SUBSCRIPTION_ID;
-    use crate::types::{
+    use crate::types::result::{
         CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
         RequestType,
     };
