@@ -113,7 +113,7 @@ mod tests {
             CheckConfig {
                 subscription_id: Uuid::from_u128(0),
                 interval: CheckInterval::OneMinute,
-                timeout: 10,
+                timeout: Duration::from_secs(10),
                 url: "https://example.com".to_string(),
             }
         }
