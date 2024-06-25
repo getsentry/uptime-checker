@@ -65,16 +65,22 @@ mod tests {
 
     use super::{CheckConfig, CheckInterval};
 
+    impl Default for CheckConfig {
+        fn default() -> Self {
+            CheckConfig {
+                subscription_id: Uuid::from_u128(0),
+                interval: CheckInterval::OneMinute,
+                timeout: Duration::from_secs(10),
+                url: "https://example.com".to_string(),
+            }
+        }
+    }
+
     #[test]
     fn test_slots() {
         let all_slots = 0..MAX_CHECK_INTERVAL_SECS;
 
-        let minute_config = CheckConfig {
-            subscription_id: Uuid::from_u128(0),
-            interval: CheckInterval::OneMinute,
-            timeout: Duration::from_secs(10),
-            url: "example.com".to_string(),
-        };
+        let minute_config = CheckConfig::default();
 
         // Every minute slot includes the config
         assert_eq!(
@@ -85,18 +91,15 @@ mod tests {
         let hour_config = CheckConfig {
             subscription_id: Uuid::from_u128(1),
             interval: CheckInterval::SixtyMinutes,
-            timeout: Duration::from_secs(10),
-            url: "example.com".to_string(),
+            ..Default::default()
         };
 
         // The second slot includes the config because of the subscription_id
         assert_eq!(hour_config.slots(), vec![1]);
 
         let five_minute_config = CheckConfig {
-            subscription_id: Uuid::from_u128(0),
             interval: CheckInterval::FiveMinutes,
-            timeout: Duration::from_secs(10),
-            url: "example.com".to_string(),
+            ..Default::default()
         };
 
         // Every 5th slot includes the config
@@ -108,8 +111,7 @@ mod tests {
         let five_minute_config_offset = CheckConfig {
             subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128 + 15),
             interval: CheckInterval::FiveMinutes,
-            timeout: Duration::from_secs(10),
-            url: "example.com".to_string(),
+            ..Default::default()
         };
 
         // Every 5th slot includes the config starting at the 15th slot

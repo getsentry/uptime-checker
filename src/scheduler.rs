@@ -1,12 +1,15 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use tracing::{error, info};
+use uuid::uuid;
 
 use crate::checker::Checker;
 use crate::config::Config;
 use crate::producer::ResultProducer;
+use crate::types::check_config::{CheckConfig, CheckInterval};
 
 pub async fn run_scheduler(config: &Config) -> Result<(), JobSchedulerError> {
     let scheduler = JobScheduler::new().await?;
@@ -25,9 +28,14 @@ pub async fn run_scheduler(config: &Config) -> Result<(), JobSchedulerError> {
         Box::pin(async move {
             info!("Executing check");
 
-            let check_result = job_checker
-                .check_url("https://downtime-simulator-test1.vercel.app")
-                .await;
+            let test_config = CheckConfig {
+                url: "https://downtime-simulator-test1.vercel.app".to_string(),
+                subscription_id: uuid!("663399a09e6340a79c3c7a3f26878904"),
+                interval: CheckInterval::OneMinute,
+                timeout: Duration::from_secs(5),
+            };
+
+            let check_result = job_checker.check_url(&test_config).await;
 
             if let Err(e) = job_producer.produce_checker_result(&check_result).await {
                 error!(error = ?e, "Failed to produce check result");

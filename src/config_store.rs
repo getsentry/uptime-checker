@@ -104,17 +104,6 @@ mod tests {
         types::check_config::{CheckConfig, CheckInterval, MAX_CHECK_INTERVAL_SECS},
     };
 
-    impl Default for CheckConfig {
-        fn default() -> Self {
-            CheckConfig {
-                subscription_id: Uuid::from_u128(0),
-                interval: CheckInterval::OneMinute,
-                timeout: Duration::from_secs(10),
-                url: "https://example.com".to_string(),
-            }
-        }
-    }
-
     #[test]
     pub fn test_tick_for_time() {
         let time = SystemTime::UNIX_EPOCH;
