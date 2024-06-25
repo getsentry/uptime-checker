@@ -1,6 +1,6 @@
 use reqwest::{Client, ClientBuilder, Response, StatusCode};
 use sentry::protocol::{SpanId, TraceId};
-use std::error::Error;
+use std::{error::Error, time::SystemTime};
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -94,7 +94,7 @@ impl Checker {
 
         let start = Instant::now();
         let (request_type, response) = do_request(&self.client, config, &trace_header).await;
-        let duration_ms = Some(start.elapsed().as_millis());
+        let duration = Some(start.elapsed());
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
             CheckStatus::Success
@@ -145,9 +145,9 @@ impl Checker {
             status_reason,
             trace_id,
             span_id,
-            scheduled_check_time: 0,
-            actual_check_time: 0,
-            duration_ms,
+            scheduled_check_time: SystemTime::UNIX_EPOCH,
+            actual_check_time: SystemTime::UNIX_EPOCH,
+            duration,
             request_info,
         }
     }
@@ -169,9 +169,11 @@ mod tests {
         let server = MockServer::start();
         let checker = Checker::new(CheckerConfig::default());
 
+        let duration = Duration::from_millis(50);
+
         let head_mock = server.mock(|when, then| {
             when.method(Method::HEAD).path("/head");
-            then.delay(Duration::from_millis(50)).status(200);
+            then.delay(duration).status(200);
         });
 
         let config = CheckConfig {
@@ -191,7 +193,7 @@ mod tests {
             result.request_info.and_then(|i| i.http_status_code),
             Some(200)
         );
-        assert!(result.duration_ms.unwrap_or(0) >= 50);
+        assert!(result.duration.is_some_and(|d| d >= duration));
 
         head_mock.assert();
     }
@@ -254,7 +256,7 @@ mod tests {
         let result = checker.check_url(&config).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
-        assert!(result.duration_ms.unwrap_or(0) >= TIMEOUT as u128);
+        assert!(result.duration.is_some_and(|d| d > timeout));
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
             result.status_reason.map(|r| r.status_type),

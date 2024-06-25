@@ -1,5 +1,8 @@
+use std::time::{Duration, SystemTime};
+
 use sentry::protocol::{SpanId, TraceId};
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use uuid::Uuid;
 
 fn uuid_simple<S>(uuid: &Uuid, serializer: S) -> Result<S::Ok, S::Error>
@@ -58,6 +61,7 @@ pub struct RequestInfo {
     pub http_status_code: Option<u16>,
 }
 
+#[serde_as]
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CheckResult {
@@ -82,13 +86,17 @@ pub struct CheckResult {
     pub span_id: SpanId,
 
     /// Timestamp in milliseconds of when the check was schedule to run
-    pub scheduled_check_time: u64,
+    #[serde_as(as = "serde_with::TimestampMilliSeconds")]
+    pub scheduled_check_time: SystemTime,
 
     /// Timestamp in milliseconds of when the check was actually ran
-    pub actual_check_time: u64,
+    #[serde_as(as = "serde_with::TimestampMilliSeconds")]
+    pub actual_check_time: SystemTime,
 
     /// Duration of the check in ms. Will be null when the status is missed_window
-    pub duration_ms: Option<u128>,
+    #[serde(rename = "duration_ms")]
+    #[serde_as(as = "Option<serde_with::DurationMilliSeconds>")]
+    pub duration: Option<Duration>,
 
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,
