@@ -1,25 +1,20 @@
 use reqwest::{Client, ClientBuilder, Response, StatusCode};
 use sentry::protocol::{SpanId, TraceId};
-use std::{error::Error, time::Duration};
+use std::error::Error;
 use tokio::time::Instant;
-use uuid::{uuid, Uuid};
+use uuid::Uuid;
 
-use crate::types::result::{
-    CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo, RequestType,
+use crate::types::{
+    check_config::CheckConfig,
+    result::{
+        CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
+        RequestType,
+    },
 };
 
-pub struct CheckerConfig {
-    /// How long will we wait before we consider the request to have timed out.
-    pub timeout: Duration,
-}
-
-impl Default for CheckerConfig {
-    fn default() -> Self {
-        Self {
-            timeout: Duration::from_secs(5),
-        }
-    }
-}
+// TODO: Currently has no config, but will likely need one in the future
+#[derive(Default)]
+pub struct CheckerConfig {}
 
 /// Responsible for making HTTP requests to check if a domain is up.
 #[derive(Clone, Debug)]
@@ -27,18 +22,17 @@ pub struct Checker {
     client: Client,
 }
 
-pub const SUBSCRIPTION_ID: Uuid = uuid!("663399a09e6340a79c3c7a3f26878904");
-
 /// Fetches the response from a URL.
 ///
 /// First attempts to fetch just the head, and if not supported falls back to fetching the entire body.
 async fn do_request(
     client: &Client,
-    url: &str,
+    check_config: &CheckConfig,
     sentry_trace: &str,
 ) -> (RequestType, Result<Response, reqwest::Error>) {
     let head_response = match client
-        .head(url)
+        .head(check_config.url.as_str())
+        .timeout(check_config.timeout)
         .header("sentry-trace", sentry_trace.to_owned())
         .send()
         .await
@@ -53,7 +47,8 @@ async fn do_request(
     }
 
     let result = client
-        .get(url)
+        .get(check_config.url.as_str())
+        .timeout(check_config.timeout)
         .header("sentry-trace", sentry_trace.to_owned())
         .send()
         .await;
@@ -78,9 +73,8 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
 }
 
 impl Checker {
-    pub fn new(config: CheckerConfig) -> Self {
+    pub fn new(_config: CheckerConfig) -> Self {
         let client = ClientBuilder::new()
-            .timeout(config.timeout)
             .build()
             .expect("Failed to build checker client");
 
@@ -89,7 +83,7 @@ impl Checker {
 
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
-    pub async fn check_url(&self, url: &str) -> CheckResult {
+    pub async fn check_url(&self, config: &CheckConfig) -> CheckResult {
         let trace_id = TraceId::default();
         let span_id = SpanId::default();
 
@@ -99,7 +93,7 @@ impl Checker {
         let trace_header = format!("{}-{}-{}", trace_id, span_id, '0');
 
         let start = Instant::now();
-        let (request_type, response) = do_request(&self.client, url, &trace_header).await;
+        let (request_type, response) = do_request(&self.client, config, &trace_header).await;
         let duration_ms = Some(start.elapsed().as_millis());
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
@@ -146,8 +140,7 @@ impl Checker {
 
         CheckResult {
             guid: Uuid::new_v4(),
-            // TODO: Use the real subscription id here when we have it
-            subscription_id: SUBSCRIPTION_ID,
+            subscription_id: config.subscription_id,
             status,
             status_reason,
             trace_id,
@@ -162,6 +155,7 @@ impl Checker {
 
 #[cfg(test)]
 mod tests {
+    use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType, RequestType};
 
     use super::{Checker, CheckerConfig};
@@ -169,7 +163,6 @@ mod tests {
     use httpmock::Method;
     use reqwest::StatusCode;
     use std::time::Duration;
-    // use crate::checker::FailureReason;
 
     #[tokio::test]
     async fn test_simple_head() {
@@ -181,7 +174,12 @@ mod tests {
             then.delay(Duration::from_millis(50)).status(200);
         });
 
-        let result = checker.check_url(&server.url("/head")).await;
+        let config = CheckConfig {
+            url: server.url("/head").to_string(),
+            ..Default::default()
+        };
+
+        let result = checker.check_url(&config).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert!(result.status_reason.is_none());
@@ -214,7 +212,12 @@ mod tests {
             then.status(200);
         });
 
-        let result = checker.check_url(&server.url("/no-head")).await;
+        let config = CheckConfig {
+            url: server.url("/no-head").to_string(),
+            ..Default::default()
+        };
+
+        let result = checker.check_url(&config).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -233,7 +236,7 @@ mod tests {
         let server = MockServer::start();
 
         let timeout = Duration::from_millis(TIMEOUT);
-        let checker = Checker::new(CheckerConfig { timeout });
+        let checker = Checker::new(CheckerConfig::default());
 
         let timeout_mock = server.mock(|when, then| {
             when.method(Method::HEAD)
@@ -242,7 +245,13 @@ mod tests {
             then.delay(Duration::from_millis(TIMEOUT + 100)).status(200);
         });
 
-        let result = checker.check_url(&server.url("/timeout")).await;
+        let config = CheckConfig {
+            url: server.url("/timeout").to_string(),
+            timeout,
+            ..Default::default()
+        };
+
+        let result = checker.check_url(&config).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration_ms.unwrap_or(0) >= TIMEOUT as u128);
@@ -267,7 +276,12 @@ mod tests {
             then.status(400);
         });
 
-        let result = checker.check_url(&server.url("/head")).await;
+        let config = CheckConfig {
+            url: server.url("/head").to_string(),
+            ..Default::default()
+        };
+
+        let result = checker.check_url(&config).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(
