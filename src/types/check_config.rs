@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use uuid::Uuid;
 
 const ONE_MINUTE: isize = 60;
@@ -26,7 +28,7 @@ pub struct CheckConfig {
     pub interval: CheckInterval,
 
     // The total time we will allow to make the request in seconds.
-    pub timeout: u16,
+    pub timeout: Duration,
 
     /// The actual HTTP URL to check.
     pub url: String,
@@ -54,6 +56,8 @@ impl CheckConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use similar_asserts::assert_eq;
     use uuid::Uuid;
 
@@ -68,7 +72,7 @@ mod tests {
         let minute_config = CheckConfig {
             subscription_id: Uuid::from_u128(0),
             interval: CheckInterval::OneMinute,
-            timeout: 10,
+            timeout: Duration::from_secs(10),
             url: "example.com".to_string(),
         };
 
@@ -81,7 +85,7 @@ mod tests {
         let hour_config = CheckConfig {
             subscription_id: Uuid::from_u128(1),
             interval: CheckInterval::SixtyMinutes,
-            timeout: 10,
+            timeout: Duration::from_secs(10),
             url: "example.com".to_string(),
         };
 
@@ -91,7 +95,7 @@ mod tests {
         let five_minute_config = CheckConfig {
             subscription_id: Uuid::from_u128(0),
             interval: CheckInterval::FiveMinutes,
-            timeout: 10,
+            timeout: Duration::from_secs(10),
             url: "example.com".to_string(),
         };
 
@@ -104,7 +108,7 @@ mod tests {
         let five_minute_config_offset = CheckConfig {
             subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128 + 15),
             interval: CheckInterval::FiveMinutes,
-            timeout: 10,
+            timeout: Duration::from_secs(10),
             url: "example.com".to_string(),
         };
 
