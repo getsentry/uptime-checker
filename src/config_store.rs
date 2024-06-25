@@ -14,7 +14,7 @@ pub type CheckerConfigs = HashMap<Uuid, Arc<CheckConfig>>;
 
 /// The TickBucket is used to determine which checks should be executed at which ticks along the
 /// interval pattern. Each tick contains the set of checks that are assigned to that second.
-pub type TickBuckets = [HashSet<Uuid>; MAX_CHECK_INTERVAL_SECS];
+pub type TickBuckets = Vec<HashSet<Uuid>>;
 
 /// The ConfigStore maintains the state of all check configurations and provides an efficient way
 /// to retrieve the checks that are scheduled for a given tick.
@@ -52,13 +52,9 @@ impl Tick {
 
 impl ConfigStore {
     pub fn new() -> ConfigStore {
-        let bucket_vec: Vec<HashSet<Uuid>> = (0..MAX_CHECK_INTERVAL_SECS)
+        let buckets = (0..MAX_CHECK_INTERVAL_SECS)
             .map(|_| HashSet::new())
             .collect();
-
-        let buckets: TickBuckets = bucket_vec
-            .try_into()
-            .expect("Failed to initialize config buckets");
 
         ConfigStore {
             buckets,
