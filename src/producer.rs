@@ -57,6 +57,8 @@ impl ResultProducer {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use super::{ExtractCodeError, ResultProducer};
     use crate::types::result::{
         CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
@@ -78,9 +80,9 @@ mod tests {
             }),
             trace_id: TraceId::default(),
             span_id: SpanId::default(),
-            scheduled_check_time: 789,
-            actual_check_time: 123456,
-            duration_ms: Some(100),
+            scheduled_check_time: SystemTime::UNIX_EPOCH,
+            actual_check_time: SystemTime::UNIX_EPOCH,
+            duration: Some(Duration::from_secs(1)),
             request_info: Some(RequestInfo {
                 request_type: RequestType::Head,
                 http_status_code: Some(200),
