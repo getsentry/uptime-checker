@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
     sync::Arc,
     time::SystemTime,
 };
@@ -29,16 +30,17 @@ pub struct ConfigStore {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tick {
     index: usize,
+    time: SystemTime,
 }
 
 impl Tick {
     /// Used primarily in tests to create a tick. Does not grantee invariants.
     #[doc(hidden)]
-    fn new(index: usize) -> Tick {
-        Self { index }
+    fn new(index: usize, time: SystemTime) -> Tick {
+        Self { index, time }
     }
 
-    /// Get the tick for a given time.
+    /// Construct a tick for a given time.
     pub fn from_time(time: SystemTime) -> Tick {
         let tick: usize = time
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -46,7 +48,29 @@ impl Tick {
             .as_secs() as usize
             % MAX_CHECK_INTERVAL_SECS;
 
-        Self { index: tick }
+        Self { index: tick, time }
+    }
+
+    /// Get the wallclock time of the tick.
+    pub fn time(&self) -> SystemTime {
+        self.time
+    }
+}
+
+impl From<SystemTime> for Tick {
+    fn from(time: SystemTime) -> Self {
+        Tick::from_time(time)
+    }
+}
+
+impl fmt::Display for Tick {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let ts = self
+            .time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        write!(f, "Tick({}, {})", self.index, ts)
     }
 }
 
@@ -187,12 +211,12 @@ mod tests {
         });
         store.add_config(five_minute_config.clone());
 
-        let configs = store.get_configs(Tick::new(0));
+        let configs = store.get_configs(Tick::new(0, SystemTime::now()));
         assert_eq!(configs.len(), 2);
         assert!(configs.contains(&config));
         assert!(configs.contains(&five_minute_config));
 
-        let no_configs = store.get_configs(Tick::new(1));
+        let no_configs = store.get_configs(Tick::new(1, SystemTime::now()));
         assert!(no_configs.is_empty());
     }
 }

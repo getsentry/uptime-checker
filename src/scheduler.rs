@@ -1,19 +1,20 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::SystemTime;
 
 use rust_arroyo::backends::kafka::config::KafkaConfig;
-use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
-use tracing::{error, info};
-use uuid::uuid;
+use tokio::task::{JoinHandle, JoinSet};
+use tokio::time::{self, Instant};
+use tracing::{debug, error, info};
 
 use crate::checker::Checker;
 use crate::config::Config;
+use crate::config_store::{ConfigStore, Tick};
 use crate::producer::ResultProducer;
-use crate::types::check_config::{CheckConfig, CheckInterval};
 
-pub async fn run_scheduler(config: &Config) -> Result<(), JobSchedulerError> {
-    let scheduler = JobScheduler::new().await?;
-
+pub async fn run_scheduler(
+    config: &Config,
+    config_store: Arc<ConfigStore>,
+) -> Result<JoinHandle<()>, ()> {
     let checker = Arc::new(Checker::new(Default::default()));
 
     let producer = Arc::new(ResultProducer::new(
@@ -21,32 +22,59 @@ pub async fn run_scheduler(config: &Config) -> Result<(), JobSchedulerError> {
         KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
     ));
 
-    let checker_job = Job::new_async("0 */5 * * * *", move |_uuid, mut _l| {
-        let job_checker = checker.clone();
-        let job_producer = producer.clone();
+    let schduler = tokio::spawn(async move {
+        let mut interval = time::interval(time::Duration::from_secs(1));
 
-        Box::pin(async move {
-            info!("Executing check");
+        let start = SystemTime::now();
+        let instant = Instant::now();
 
-            let test_config = CheckConfig {
-                url: "https://downtime-simulator-test1.vercel.app".to_string(),
-                subscription_id: uuid!("663399a09e6340a79c3c7a3f26878904"),
-                interval: CheckInterval::OneMinute,
-                timeout: Duration::from_secs(5),
-            };
+        let schedule_checks = |tick: Tick| {
+            let configs = config_store.get_configs(tick);
 
-            let check_result = job_checker.check_url(&test_config).await;
-
-            if let Err(e) = job_producer.produce_checker_result(&check_result).await {
-                error!(error = ?e, "Failed to produce check result");
+            if configs.is_empty() {
+                debug!(tick = %tick, "No checks scheduled for tick");
+                return;
             }
 
-            info!(result = ?check_result, "Check complete");
-        })
-    })?;
+            let tick_start = Instant::now();
+            let mut join_set = JoinSet::new();
 
-    scheduler.add(checker_job).await?;
-    scheduler.start().await?;
+            // TODO: We should put schedule config exections into a worker using mpsc
+            for config in configs {
+                let job_checker = checker.clone();
+                let job_producer = producer.clone();
 
-    Ok(())
+                join_set.spawn(async move {
+                    let check_result = job_checker.check_url(&config, &tick).await;
+
+                    if let Err(e) = job_producer.produce_checker_result(&check_result).await {
+                        error!(error = ?e, "Failed to produce check result");
+                    }
+
+                    info!(result = ?check_result, "Check complete");
+                });
+            }
+
+            tokio::spawn(async move {
+                while join_set.join_next().await.is_some() {}
+
+                let execution_duration = tick_start.elapsed();
+                debug!(result = %tick, duration = ?execution_duration, "Tick check execution complete");
+            });
+        };
+
+        info!("Starting scheduler");
+
+        loop {
+            // TODO: Probably need graceful shutdown via a CancellationToken
+
+            let interval_tick = interval.tick().await;
+            let tick = Tick::from_time(start + interval_tick.duration_since(instant));
+
+            debug!(tick = %tick, "Scheduler ticking");
+            schedule_checks(tick);
+        }
+    });
+
+    Ok(schduler)
 }
