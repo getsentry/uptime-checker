@@ -13,7 +13,6 @@ httpmock = "0.7.0-rc.1"
 reqwest = "0.12.4"
 rust_arroyo = { version = "*", git = "https://github.com/getsentry/arroyo" }
 tokio = { version = "1.28.0", features = ["macros", "sync", "tracing", "signal", "rt-multi-thread"] }
-tokio-cron-scheduler = "0.10.2"
 uuid = { version = "1.8.0", features = ["serde", "v4"] }
 serde = { version = "1.0.159", features = ["derive", "rc"] }
 serde_json = "1.0.93"
