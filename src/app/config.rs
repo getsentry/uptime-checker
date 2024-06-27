@@ -37,6 +37,18 @@ pub struct Config {
 
     /// The topic to produce uptime checks into.
     pub results_kafka_topic: String,
+
+    /// The kafka cluster to load configs from to. Expected to be a string of comma separated
+    /// addresses.
+    ///
+    /// ```txt
+    /// 10.0.0.1:5000,10.0.0.2:6000
+    /// ```
+    #[serde_as(as = "serde_with::StringWithSeparator::<CommaSeparator, String>")]
+    pub configs_kafka_cluster: Vec<String>,
+
+    /// The topic to load [`CheckConfig`]s from.
+    pub configs_kafka_topic: String,
 }
 
 impl Default for Config {
@@ -48,6 +60,8 @@ impl Default for Config {
             log_format: logging::LogFormat::Auto,
             results_kafka_cluster: vec![],
             results_kafka_topic: "uptime-results".to_owned(),
+            configs_kafka_cluster: vec![],
+            configs_kafka_topic: "uptime-configs".to_owned(),
         }
     }
 }
@@ -118,7 +132,9 @@ mod tests {
                     log_level: logging::Level::Warn,
                     log_format: logging::LogFormat::Auto,
                     results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
+                    configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
+                    configs_kafka_topic: "uptime-configs".to_owned(),
                 }
             );
             Ok(())
@@ -142,6 +158,10 @@ mod tests {
                 "UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER",
                 "10.0.0.1,10.0.0.2:7000",
             );
+            jail.set_env(
+                "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
+                "10.0.0.1,10.0.0.2:7000",
+            );
 
             let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
@@ -160,7 +180,9 @@ mod tests {
                     log_level: logging::Level::Trace,
                     log_format: logging::LogFormat::Json,
                     results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
+                    configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
+                    configs_kafka_topic: "uptime-configs".to_owned(),
                 }
             );
             Ok(())
