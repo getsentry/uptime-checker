@@ -1,8 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    sync::Arc,
-};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -13,9 +9,12 @@ use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
 /// O(1) access during configuration updates.
 pub type CheckerConfigs = HashMap<Uuid, Arc<CheckConfig>>;
 
+// Represents a bucket of checks for a given tick.
+pub type TickBucket = Vec<Arc<CheckConfig>>;
+
 /// The TickBucket is used to determine which checks should be executed at which ticks along the
 /// interval pattern. Each tick contains the set of checks that are assigned to that second.
-pub type TickBuckets = Vec<HashSet<Uuid>>;
+pub type TickBuckets = Vec<TickBucket>;
 
 /// Ticks represnet a location within the TickBuckets. They are guaranteed to be within the
 /// MAX_CHECK_INTERVAL_SECS range.
@@ -25,6 +24,8 @@ pub struct Tick {
     time: DateTime<Utc>,
 }
 
+/// Represents a slot within the TickBuckets. Ticks are used to determine which checks should be
+/// executed at which ticks along the interval pattern.
 impl Tick {
     /// Used primarily in tests to create a tick. Does not grantee invariants.
     #[doc(hidden)]
@@ -68,9 +69,7 @@ pub struct ConfigStore {
 
 impl ConfigStore {
     pub fn new() -> ConfigStore {
-        let buckets = (0..MAX_CHECK_INTERVAL_SECS)
-            .map(|_| HashSet::new())
-            .collect();
+        let buckets = (0..MAX_CHECK_INTERVAL_SECS).map(|_| vec![]).collect();
 
         ConfigStore {
             buckets,
@@ -84,7 +83,7 @@ impl ConfigStore {
 
         // Insert the configuration into the appropriate slots
         for slot in config.slots() {
-            self.buckets[slot].insert(config.subscription_id);
+            self.buckets[slot].push(config.clone());
         }
     }
 
@@ -92,7 +91,12 @@ impl ConfigStore {
     pub fn remove_config(&mut self, subscription_id: Uuid) {
         if let Some(config) = self.configs.remove(&subscription_id) {
             for slot in config.slots() {
-                self.buckets[slot].remove(&subscription_id);
+                if let Some(idx) = self.buckets[slot]
+                    .iter()
+                    .position(|c| c.subscription_id == config.subscription_id)
+                {
+                    self.buckets[slot].remove(idx);
+                }
             }
         }
     }
@@ -101,7 +105,7 @@ impl ConfigStore {
     pub fn get_configs(&self, tick: Tick) -> Vec<Arc<CheckConfig>> {
         self.buckets[tick.index]
             .iter()
-            .filter_map(|id| self.configs.get(id).cloned())
+            .map(|conf| conf.clone())
             .collect()
     }
 }
