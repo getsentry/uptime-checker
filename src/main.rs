@@ -1,9 +1,7 @@
 // TODO: We might want to remove this once more stable, but it's just noisy for now.
 #![allow(dead_code)]
+mod app;
 mod checker;
-mod cli;
-mod cliapp;
-mod config;
 mod config_store;
 mod logging;
 mod producer;
@@ -15,7 +13,7 @@ use std::process;
 use sentry::Hub;
 
 pub fn main() {
-    let exit_code = match cli::execute() {
+    let exit_code = match app::execute() {
         Ok(()) => 0,
         Err(_err) => {
             // TODO(epurkhiser): capture error? Here's what relay did

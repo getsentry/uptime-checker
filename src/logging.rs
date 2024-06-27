@@ -4,7 +4,7 @@ use sentry::types::Dsn;
 use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
 
-use crate::{cliapp::VERSION, config};
+use crate::app::{cli::VERSION, config};
 
 use tracing_subscriber::{prelude::*, Layer};
 
