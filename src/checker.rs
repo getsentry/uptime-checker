@@ -14,10 +14,6 @@ use crate::types::{
     },
 };
 
-// TODO: Currently has no config, but will likely need one in the future
-#[derive(Default)]
-pub struct CheckerConfig {}
-
 /// Responsible for making HTTP requests to check if a domain is up.
 #[derive(Clone, Debug)]
 pub struct Checker {
@@ -80,7 +76,7 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
 }
 
 impl Checker {
-    pub fn new(_config: CheckerConfig) -> Self {
+    pub fn new() -> Self {
         let client = ClientBuilder::new()
             .build()
             .expect("Failed to build checker client");
@@ -169,7 +165,7 @@ mod tests {
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType, RequestType};
 
-    use super::{Checker, CheckerConfig};
+    use super::Checker;
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
@@ -182,7 +178,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_head() {
         let server = MockServer::start();
-        let checker = Checker::new(CheckerConfig::default());
+        let checker = Checker::new();
 
         let duration = TimeDelta::milliseconds(50);
 
@@ -219,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_get() {
         let server = MockServer::start();
-        let checker = Checker::new(CheckerConfig::default());
+        let checker = Checker::new();
 
         let head_disallowed_mock = server.mock(|when, then| {
             when.method(Method::HEAD).path("/no-head");
@@ -257,7 +253,7 @@ mod tests {
         let server = MockServer::start();
 
         let timeout = TimeDelta::milliseconds(TIMEOUT);
-        let checker = Checker::new(CheckerConfig::default());
+        let checker = Checker::new();
 
         let timeout_mock = server.mock(|when, then| {
             when.method(Method::HEAD)
@@ -290,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_400() {
         let server = MockServer::start();
-        let checker = Checker::new(CheckerConfig::default());
+        let checker = Checker::new();
 
         let head_mock = server.mock(|when, then| {
             when.method(Method::HEAD)
