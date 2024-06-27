@@ -1,6 +1,7 @@
+use chrono::{TimeDelta, Utc};
 use reqwest::{Client, ClientBuilder, Response, StatusCode};
 use sentry::protocol::{SpanId, TraceId};
-use std::{error::Error, time::SystemTime};
+use std::error::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -31,9 +32,14 @@ async fn do_request(
     check_config: &CheckConfig,
     sentry_trace: &str,
 ) -> (RequestType, Result<Response, reqwest::Error>) {
+    let timeout = check_config
+        .timeout
+        .to_std()
+        .expect("Timout duration could not be converted to std::time::Duration");
+
     let head_response = match client
         .head(&check_config.url)
-        .timeout(check_config.timeout)
+        .timeout(timeout)
         .header("sentry-trace", sentry_trace.to_owned())
         .send()
         .await
@@ -49,7 +55,7 @@ async fn do_request(
 
     let result = client
         .get(check_config.url.as_str())
-        .timeout(check_config.timeout)
+        .timeout(timeout)
         .header("sentry-trace", sentry_trace.to_owned())
         .send()
         .await;
@@ -86,7 +92,7 @@ impl Checker {
     /// Up is defined as returning a 2xx within a specific timeframe.
     pub async fn check_url(&self, config: &CheckConfig, tick: &Tick) -> CheckResult {
         let scheduled_check_time = tick.time();
-        let actual_check_time = SystemTime::now();
+        let actual_check_time = Utc::now();
 
         let trace_id = TraceId::default();
         let span_id = SpanId::default();
@@ -98,7 +104,7 @@ impl Checker {
 
         let start = Instant::now();
         let (request_type, response) = do_request(&self.client, config, &trace_header).await;
-        let duration = Some(start.elapsed());
+        let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
             CheckStatus::Success
@@ -159,25 +165,30 @@ impl Checker {
 
 #[cfg(test)]
 mod tests {
+    use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType, RequestType};
 
     use super::{Checker, CheckerConfig};
+    use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
     use reqwest::StatusCode;
-    use std::time::{Duration, SystemTime};
+
+    fn make_tick() -> Tick {
+        Tick::from_time(Utc::now() - TimeDelta::seconds(60))
+    }
 
     #[tokio::test]
     async fn test_simple_head() {
         let server = MockServer::start();
         let checker = Checker::new(CheckerConfig::default());
 
-        let duration = Duration::from_millis(50);
+        let duration = TimeDelta::milliseconds(50);
 
         let head_mock = server.mock(|when, then| {
             when.method(Method::HEAD).path("/head");
-            then.delay(duration).status(200);
+            then.delay(duration.to_std().unwrap()).status(200);
         });
 
         let config = CheckConfig {
@@ -185,8 +196,8 @@ mod tests {
             ..Default::default()
         };
 
-        let tick = SystemTime::now() - Duration::from_secs(60);
-        let result = checker.check_url(&config, &tick.into()).await;
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert!(result.status_reason.is_none());
@@ -198,8 +209,8 @@ mod tests {
             result.request_info.and_then(|i| i.http_status_code),
             Some(200)
         );
-        assert_eq!(result.scheduled_check_time, tick);
-        assert!(result.actual_check_time > tick);
+        assert_eq!(result.scheduled_check_time, tick.time());
+        assert!(result.actual_check_time > tick.time());
         assert!(result.duration.is_some_and(|d| d >= duration));
 
         head_mock.assert();
@@ -226,8 +237,8 @@ mod tests {
             ..Default::default()
         };
 
-        let tick = SystemTime::now() - Duration::from_secs(60);
-        let result = checker.check_url(&config, &tick.into()).await;
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -241,18 +252,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_timeout() {
-        static TIMEOUT: u64 = 200;
+        static TIMEOUT: i64 = 200;
 
         let server = MockServer::start();
 
-        let timeout = Duration::from_millis(TIMEOUT);
+        let timeout = TimeDelta::milliseconds(TIMEOUT);
         let checker = Checker::new(CheckerConfig::default());
 
         let timeout_mock = server.mock(|when, then| {
             when.method(Method::HEAD)
                 .path("/timeout")
                 .header_exists("sentry-trace");
-            then.delay(Duration::from_millis(TIMEOUT + 100)).status(200);
+            then.delay((timeout + TimeDelta::milliseconds(200)).to_std().unwrap())
+                .status(200);
         });
 
         let config = CheckConfig {
@@ -261,8 +273,8 @@ mod tests {
             ..Default::default()
         };
 
-        let tick = SystemTime::now() - Duration::from_secs(60);
-        let result = checker.check_url(&config, &tick.into()).await;
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
@@ -292,8 +304,8 @@ mod tests {
             ..Default::default()
         };
 
-        let tick = SystemTime::now() - Duration::from_secs(60);
-        let result = checker.check_url(&config, &tick.into()).await;
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(

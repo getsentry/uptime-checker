@@ -57,13 +57,13 @@ impl ResultProducer {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, SystemTime};
 
     use super::{ExtractCodeError, ResultProducer};
     use crate::types::result::{
         CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
         RequestType,
     };
+    use chrono::{TimeDelta, Utc};
     use rust_arroyo::backends::kafka::config::KafkaConfig;
     use sentry::protocol::{SpanId, TraceId};
     use uuid::{uuid, Uuid};
@@ -80,9 +80,9 @@ mod tests {
             }),
             trace_id: TraceId::default(),
             span_id: SpanId::default(),
-            scheduled_check_time: SystemTime::UNIX_EPOCH,
-            actual_check_time: SystemTime::UNIX_EPOCH,
-            duration: Some(Duration::from_secs(1)),
+            scheduled_check_time: Utc::now(),
+            actual_check_time: Utc::now(),
+            duration: Some(TimeDelta::seconds(1)),
             request_info: Some(RequestInfo {
                 request_type: RequestType::Head,
                 http_status_code: Some(200),

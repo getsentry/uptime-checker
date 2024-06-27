@@ -2,9 +2,9 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     sync::Arc,
-    time::SystemTime,
 };
 
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
@@ -17,61 +17,53 @@ pub type CheckerConfigs = HashMap<Uuid, Arc<CheckConfig>>;
 /// interval pattern. Each tick contains the set of checks that are assigned to that second.
 pub type TickBuckets = Vec<HashSet<Uuid>>;
 
-/// The ConfigStore maintains the state of all check configurations and provides an efficient way
-/// to retrieve the checks that are scheduled for a given tick.
-#[derive(Debug)]
-pub struct ConfigStore {
-    buckets: TickBuckets,
-    configs: CheckerConfigs,
-}
-
 /// Ticks represnet a location within the TickBuckets. They are guaranteed to be within the
 /// MAX_CHECK_INTERVAL_SECS range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tick {
     index: usize,
-    time: SystemTime,
+    time: DateTime<Utc>,
 }
 
 impl Tick {
     /// Used primarily in tests to create a tick. Does not grantee invariants.
     #[doc(hidden)]
-    fn new(index: usize, time: SystemTime) -> Tick {
+    fn new(index: usize, time: DateTime<Utc>) -> Tick {
         Self { index, time }
     }
 
     /// Construct a tick for a given time.
-    pub fn from_time(time: SystemTime) -> Tick {
-        let tick: usize = time
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as usize
-            % MAX_CHECK_INTERVAL_SECS;
+    pub fn from_time(time: DateTime<Utc>) -> Tick {
+        let tick: usize = time.timestamp() as usize % MAX_CHECK_INTERVAL_SECS;
 
         Self { index: tick, time }
     }
 
     /// Get the wallclock time of the tick.
-    pub fn time(&self) -> SystemTime {
+    pub fn time(&self) -> DateTime<Utc> {
         self.time
     }
 }
 
-impl From<SystemTime> for Tick {
-    fn from(time: SystemTime) -> Self {
+impl From<DateTime<Utc>> for Tick {
+    fn from(time: DateTime<Utc>) -> Self {
         Tick::from_time(time)
     }
 }
 
 impl fmt::Display for Tick {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let ts = self
-            .time
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        write!(f, "Tick({}, {})", self.index, ts)
+        let ts = self.time.timestamp();
+        write!(f, "Tick(slot: {}, ts: {})", self.index, ts)
     }
+}
+
+/// The ConfigStore maintains the state of all check configurations and provides an efficient way
+/// to retrieve the checks that are scheduled for a given tick.
+#[derive(Debug)]
+pub struct ConfigStore {
+    buckets: TickBuckets,
+    configs: CheckerConfigs,
 }
 
 impl ConfigStore {
@@ -116,11 +108,9 @@ impl ConfigStore {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::Arc,
-        time::{Duration, SystemTime},
-    };
+    use std::sync::Arc;
 
+    use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
     use crate::{
@@ -130,16 +120,16 @@ mod tests {
 
     #[test]
     pub fn test_tick_for_time() {
-        let time = SystemTime::UNIX_EPOCH;
+        let time = DateTime::from_timestamp(0, 0).unwrap();
         assert_eq!(Tick::from_time(time).index, 0);
 
-        let time = SystemTime::UNIX_EPOCH + Duration::from_secs(60);
+        let time = DateTime::from_timestamp(60, 0).unwrap();
         assert_eq!(Tick::from_time(time).index, 60);
 
-        let time = SystemTime::UNIX_EPOCH + Duration::from_secs(60 * 60);
+        let time = DateTime::from_timestamp(60 * 60, 0).unwrap();
         assert_eq!(Tick::from_time(time).index, 0);
 
-        let time = SystemTime::UNIX_EPOCH + Duration::from_secs(60 * 60 * 24);
+        let time = DateTime::from_timestamp(60 * 60 * 24, 0).unwrap();
         assert_eq!(Tick::from_time(time).index, 0);
     }
 
@@ -211,12 +201,12 @@ mod tests {
         });
         store.add_config(five_minute_config.clone());
 
-        let configs = store.get_configs(Tick::new(0, SystemTime::now()));
+        let configs = store.get_configs(Tick::new(0, Utc::now()));
         assert_eq!(configs.len(), 2);
         assert!(configs.contains(&config));
         assert!(configs.contains(&five_minute_config));
 
-        let no_configs = store.get_configs(Tick::new(1, SystemTime::now()));
+        let no_configs = store.get_configs(Tick::new(1, Utc::now()));
         assert!(no_configs.is_empty());
     }
 }

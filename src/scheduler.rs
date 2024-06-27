@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use std::time::SystemTime;
 
+use chrono::Utc;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{self, Instant};
@@ -25,7 +25,7 @@ pub async fn run_scheduler(
     let schduler = tokio::spawn(async move {
         let mut interval = time::interval(time::Duration::from_secs(1));
 
-        let start = SystemTime::now();
+        let start = Utc::now();
         let instant = Instant::now();
 
         let schedule_checks = |tick: Tick| {
