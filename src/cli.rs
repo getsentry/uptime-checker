@@ -1,5 +1,6 @@
-use std::{io, sync::Arc, time::Duration};
+use std::{io, sync::Arc};
 
+use chrono::TimeDelta;
 use clap::Parser;
 use tokio::signal::ctrl_c;
 use tracing::info;
@@ -29,7 +30,7 @@ pub fn execute() -> io::Result<()> {
         url: "https://downtime-simulator-test1.vercel.app".to_string(),
         subscription_id: uuid!("663399a09e6340a79c3c7a3f26878904"),
         interval: CheckInterval::FiveMinutes,
-        timeout: Duration::from_secs(5),
+        timeout: TimeDelta::seconds(5),
     }));
 
     match app.command {

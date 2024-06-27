@@ -1,7 +1,7 @@
-use std::time::{Duration, SystemTime};
-
+use chrono::{DateTime, TimeDelta, Utc};
 use sentry::protocol::{SpanId, TraceId};
 use serde::{Deserialize, Serialize};
+use serde_with::chrono;
 use serde_with::serde_as;
 use uuid::Uuid;
 
@@ -87,16 +87,16 @@ pub struct CheckResult {
 
     /// Timestamp in milliseconds of when the check was schedule to run
     #[serde_as(as = "serde_with::TimestampMilliSeconds")]
-    pub scheduled_check_time: SystemTime,
+    pub scheduled_check_time: DateTime<Utc>,
 
     /// Timestamp in milliseconds of when the check was actually ran
     #[serde_as(as = "serde_with::TimestampMilliSeconds")]
-    pub actual_check_time: SystemTime,
+    pub actual_check_time: DateTime<Utc>,
 
     /// Duration of the check in ms. Will be null when the status is missed_window
     #[serde(rename = "duration_ms")]
-    #[serde_as(as = "Option<serde_with::DurationMilliSeconds>")]
-    pub duration: Option<Duration>,
+    #[serde_as(as = "Option<serde_with::DurationMilliSeconds<i64>>")]
+    pub duration: Option<TimeDelta>,
 
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,

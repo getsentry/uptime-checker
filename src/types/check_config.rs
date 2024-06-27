@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use chrono::TimeDelta;
 use uuid::Uuid;
 
 const ONE_MINUTE: isize = 60;
@@ -27,8 +26,8 @@ pub struct CheckConfig {
     /// The interval between each check run.
     pub interval: CheckInterval,
 
-    // The total time we will allow to make the request in seconds.
-    pub timeout: Duration,
+    // The total time we will allow to make the request in.
+    pub timeout: TimeDelta,
 
     /// The actual HTTP URL to check.
     pub url: String,
@@ -56,8 +55,8 @@ impl CheckConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
 
+    use chrono::TimeDelta;
     use similar_asserts::assert_eq;
     use uuid::Uuid;
 
@@ -70,7 +69,7 @@ mod tests {
             CheckConfig {
                 subscription_id: Uuid::from_u128(0),
                 interval: CheckInterval::OneMinute,
-                timeout: Duration::from_secs(10),
+                timeout: TimeDelta::seconds(10),
                 url: "https://example.com".to_string(),
             }
         }
