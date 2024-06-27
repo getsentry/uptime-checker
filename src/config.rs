@@ -6,9 +6,12 @@ use figment::{
 };
 
 use serde::{Deserialize, Serialize};
+use serde_with::formats::CommaSeparator;
+use serde_with::serde_as;
 
 use crate::{cliapp, logging};
 
+#[serde_as]
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct Config {
     /// The sentry DSN to use for error reporting.
@@ -29,10 +32,7 @@ pub struct Config {
     /// ```txt
     /// 10.0.0.1:5000,10.0.0.2:6000
     /// ```
-    #[serde(
-        deserialize_with = "list_deserialize",
-        serialize_with = "list_serializer"
-    )]
+    #[serde_as(as = "serde_with::StringWithSeparator::<CommaSeparator, String>")]
     pub results_kafka_cluster: Vec<String>,
 
     /// The topic to produce uptime checks into.
@@ -50,25 +50,6 @@ impl Default for Config {
             results_kafka_topic: "uptime-results".to_owned(),
         }
     }
-}
-
-fn list_deserialize<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let str_sequence = String::deserialize(deserializer)?;
-    let result = str_sequence
-        .split(',')
-        .map(|item| item.trim().to_owned())
-        .collect();
-    Ok(result)
-}
-
-fn list_serializer<S>(list: &[String], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    list.join(",").serialize(serializer)
 }
 
 impl Config {
