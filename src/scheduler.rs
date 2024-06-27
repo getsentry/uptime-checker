@@ -15,7 +15,7 @@ pub async fn run_scheduler(
     config: &Config,
     config_store: Arc<ConfigStore>,
 ) -> Result<JoinHandle<()>, ()> {
-    let checker = Arc::new(Checker::new(Default::default()));
+    let checker = Arc::new(Checker::new());
 
     let producer = Arc::new(ResultProducer::new(
         &config.results_kafka_topic,
