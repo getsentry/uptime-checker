@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::formats::CommaSeparator;
 use serde_with::serde_as;
 
-use crate::{cliapp, logging};
+use crate::{app::cli, logging};
 
 #[serde_as]
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
@@ -54,7 +54,7 @@ impl Default for Config {
 
 impl Config {
     /// Load configuration from an optional configuration file and environment
-    pub fn extract(app: &cliapp::CliApp) -> anyhow::Result<Config> {
+    pub fn extract(app: &cli::CliApp) -> anyhow::Result<Config> {
         let mut builder = Figment::from(Serialized::defaults(Config::default()));
 
         if let Some(path) = &app.config {
@@ -84,7 +84,7 @@ mod tests {
     use figment::Jail;
     use similar_asserts::assert_eq;
 
-    use crate::{cliapp, logging};
+    use crate::{app::cli, logging};
 
     use super::Config;
 
@@ -97,14 +97,15 @@ mod tests {
                 sentry_dsn: my_dsn
                 sentry_env: my_env
                 results_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
+                configs_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
                 "#,
             )?;
 
-            let app = cliapp::CliApp {
+            let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
                 log_level: None,
                 log_format: None,
-                command: cliapp::Commands::Run,
+                command: cli::Commands::Run,
             };
 
             let config = Config::extract(&app).expect("Invalid configuration");
@@ -142,11 +143,11 @@ mod tests {
                 "10.0.0.1,10.0.0.2:7000",
             );
 
-            let app = cliapp::CliApp {
+            let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
                 log_level: Some(logging::Level::Trace),
                 log_format: None,
-                command: cliapp::Commands::Run,
+                command: cli::Commands::Run,
             };
 
             let config = Config::extract(&app).expect("Invalid configuration");

@@ -6,8 +6,8 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{self, Instant};
 use tracing::{debug, error, info};
 
+use crate::app::config::Config;
 use crate::checker::Checker;
-use crate::config::Config;
 use crate::config_store::{ConfigStore, Tick};
 use crate::producer::ResultProducer;
 

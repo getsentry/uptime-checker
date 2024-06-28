@@ -109,7 +109,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serialize_json_roundtrip_failure_example() {
+    fn serialize_json_roundtrip() {
         let json = r#"{
   "guid": "54afc7ed9c53491481919c931f75bae1",
   "subscription_id": "23d6048d67c948d9a19c0b47979e9a03",

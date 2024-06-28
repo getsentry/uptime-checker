@@ -1,5 +1,8 @@
 use std::{io, sync::Arc};
 
+pub mod cli;
+pub mod config;
+
 use chrono::TimeDelta;
 use clap::Parser;
 use tokio::signal::ctrl_c;
@@ -7,8 +10,6 @@ use tracing::info;
 use uuid::uuid;
 
 use crate::{
-    cliapp::{CliApp, Commands},
-    config::Config,
     config_store::ConfigStore,
     logging::{self, LoggingConfig},
     scheduler::run_scheduler,
@@ -16,8 +17,8 @@ use crate::{
 };
 
 pub fn execute() -> io::Result<()> {
-    let app = CliApp::parse();
-    let config = Config::extract(&app).expect("Configuration invalid");
+    let app = cli::CliApp::parse();
+    let config = config::Config::extract(&app).expect("Configuration invalid");
 
     logging::init(LoggingConfig::from_config(&config));
 
@@ -34,7 +35,7 @@ pub fn execute() -> io::Result<()> {
     }));
 
     match app.command {
-        Commands::Run => tokio::runtime::Builder::new_multi_thread()
+        cli::Commands::Run => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap()
