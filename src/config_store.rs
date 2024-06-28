@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
@@ -76,12 +77,19 @@ pub struct ConfigStore {
     configs: HashMap<Uuid, Arc<CheckConfig>>,
 }
 
+/// A RwLockable ConfigStore.
+pub type RwConfigStore = RwLock<ConfigStore>;
+
 impl ConfigStore {
     pub fn new() -> ConfigStore {
         ConfigStore {
             partitioned_buckets: HashMap::new(),
             configs: HashMap::new(),
         }
+    }
+
+    pub fn new_rw() -> RwConfigStore {
+        RwLock::new(ConfigStore::new())
     }
 
     /// Insert a new Check Configuration into the store.
