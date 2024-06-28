@@ -28,6 +28,7 @@ pub fn execute() -> io::Result<()> {
 
     // XXX: Example config while we build out the consumer that loads configs
     config_store.add_config(Arc::new(CheckConfig {
+        partition: 0,
         url: "https://downtime-simulator-test1.vercel.app".to_string(),
         subscription_id: uuid!("663399a09e6340a79c3c7a3f26878904"),
         interval: CheckInterval::FiveMinutes,

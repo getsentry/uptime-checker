@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -31,36 +32,51 @@ pub async fn run_scheduler(
         let schedule_checks = |tick: Tick| {
             let configs = config_store.get_configs(tick);
 
-            if configs.is_empty() {
-                debug!(tick = %tick, "No checks scheduled for tick");
-                return;
-            }
-
             let tick_start = Instant::now();
-            let mut join_set = JoinSet::new();
 
-            // TODO: We should put schedule config exections into a worker using mpsc
+            // We maintain a join set for each partition, this way as each partition worth of
+            // checks completes we can mark that partition as having completed for this tick
+            let partitions: Vec<_> = configs.iter().map(|c| c.partition).collect();
+
+            let mut partitioned_join_sets: HashMap<i32, JoinSet<_>> = partitions
+                .into_iter()
+                .map(|p| (p, JoinSet::new()))
+                .collect();
+
+            // TODO: We should put schedule config executions into a worker using mpsc
             for config in configs {
                 let job_checker = checker.clone();
                 let job_producer = producer.clone();
 
-                join_set.spawn(async move {
-                    let check_result = job_checker.check_url(&config, &tick).await;
+                partitioned_join_sets
+                    .get_mut(&config.partition)
+                    .map(|join_set| {
+                        join_set.spawn(async move {
+                            let check_result = job_checker.check_url(&config, &tick).await;
 
-                    if let Err(e) = job_producer.produce_checker_result(&check_result).await {
-                        error!(error = ?e, "Failed to produce check result");
-                    }
+                            if let Err(e) = job_producer.produce_checker_result(&check_result).await
+                            {
+                                error!(error = ?e, "Failed to produce check result");
+                            }
 
-                    info!(result = ?check_result, "Check complete");
-                });
+                            info!(result = ?check_result, "Check complete");
+                        })
+                    });
             }
 
-            tokio::spawn(async move {
-                while join_set.join_next().await.is_some() {}
+            for (partition, mut join_set) in partitioned_join_sets {
+                tokio::spawn(async move {
+                    while join_set.join_next().await.is_some() {}
+                    let execution_duration = tick_start.elapsed();
 
-                let execution_duration = tick_start.elapsed();
-                debug!(result = %tick, duration = ?execution_duration, "Tick check execution complete");
-            });
+                    debug!(
+                        result = %tick,
+                        duration = ?execution_duration,
+                        partition,
+                        "Tick check execution complete"
+                    );
+                });
+            }
         };
 
         info!("Starting scheduler");

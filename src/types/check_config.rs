@@ -25,6 +25,10 @@ pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
 #[serde_as]
 #[derive(Debug, PartialEq, Clone, Deserialize)]
 pub struct CheckConfig {
+    /// The kafka partition this config is associated to.
+    #[serde(skip)]
+    pub partition: i32,
+
     /// The subscription this check configuration is associated to in sentry.
     #[serde(with = "uuid::serde::simple")]
     pub subscription_id: Uuid,
@@ -76,6 +80,7 @@ mod tests {
     impl Default for CheckConfig {
         fn default() -> Self {
             CheckConfig {
+                partition: 0,
                 subscription_id: Uuid::from_u128(0),
                 interval: CheckInterval::OneMinute,
                 timeout: TimeDelta::seconds(10),
@@ -102,6 +107,7 @@ mod tests {
         assert_eq!(
             rmp_serde::from_slice::<CheckConfig>(&example).unwrap(),
             CheckConfig {
+                partition: 0,
                 subscription_id: uuid!("d7629c6c-82be-4f67-9ee7-8a0d977856d2"),
                 timeout: TimeDelta::milliseconds(500),
                 interval: CheckInterval::FiveMinutes,
