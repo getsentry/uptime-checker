@@ -9,12 +9,12 @@ use tracing::{debug, error, info};
 
 use crate::app::config::Config;
 use crate::checker::Checker;
-use crate::config_store::{ConfigStore, Tick};
+use crate::config_store::{RwConfigStore, Tick};
 use crate::producer::ResultProducer;
 
 pub async fn run_scheduler(
     config: &Config,
-    config_store: Arc<ConfigStore>,
+    config_store: Arc<RwConfigStore>,
 ) -> Result<JoinHandle<()>, ()> {
     let checker = Arc::new(Checker::new());
 
@@ -29,10 +29,12 @@ pub async fn run_scheduler(
         let start = Utc::now();
         let instant = Instant::now();
 
-        let schedule_checks = |tick: Tick| {
-            let configs = config_store.get_configs(tick);
-
+        let schedule_checks = |tick| {
             let tick_start = Instant::now();
+            let configs = config_store
+                .read()
+                .expect("Lock poisoned")
+                .get_configs(tick);
 
             // We maintain a join set for each partition, this way as each partition worth of
             // checks completes we can mark that partition as having completed for this tick
@@ -80,7 +82,6 @@ pub async fn run_scheduler(
         };
 
         info!("Starting scheduler");
-
         loop {
             // TODO: Probably need graceful shutdown via a CancellationToken
 
