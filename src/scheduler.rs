@@ -43,6 +43,13 @@ pub async fn run_scheduler(
                 .map(|p| (p, JoinSet::new()))
                 .collect();
 
+            // TODO(epurkhiser): Check if we skipped any ticks for each of the partition that's
+            // being processed. If we did we should catch up on those.
+            //
+            // TODO(epurkhiser): In the future it may make more sense to know how many
+            // partitions we are assigned and check skipped ticks for ALL partitions, not just
+            // partitions that we have checks to execute for in this tick.
+
             // TODO: We should put schedule config executions into a worker using mpsc
             for config in configs {
                 let job_checker = checker.clone();
@@ -64,6 +71,11 @@ pub async fn run_scheduler(
                     });
             }
 
+            // Spawn tasks to wait for each partition to complete.
+            //
+            // TODO(epurkhiser): We'll want to record the tick timestamp for this partition in
+            // redis or some other store so that we can resume processing if we fail to process
+            // ticks (crash-loop, etc)
             for (partition, mut join_set) in partitioned_join_sets {
                 tokio::spawn(async move {
                     while join_set.join_next().await.is_some() {}
