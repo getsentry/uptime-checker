@@ -27,7 +27,7 @@ pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
 pub struct CheckConfig {
     /// The kafka partition this config is associated to.
     #[serde(skip)]
-    pub partition: i32,
+    pub partition: u16,
 
     /// The subscription this check configuration is associated to in sentry.
     #[serde(with = "uuid::serde::simple")]

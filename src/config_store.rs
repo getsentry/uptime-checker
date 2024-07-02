@@ -12,7 +12,7 @@ pub type TickBucket = Vec<Arc<CheckConfig>>;
 /// interval pattern. Each tick contains the set of checks that are assigned to that second.
 pub type TickBuckets = Vec<TickBucket>;
 
-pub type PartitionedTickBuckets = HashMap<i32, TickBuckets>;
+pub type PartitionedTickBuckets = HashMap<u16, TickBuckets>;
 
 /// Ticks represent a location within the TickBuckets. They are guaranteed to be within the
 /// MAX_CHECK_INTERVAL_SECS range.
@@ -70,7 +70,7 @@ pub struct ConfigStore {
     /// partitions for the uptime-checker are re-balanced, partitions will be added and removed.
     /// Storing TickBuckets for each partition makes dropping an entire partition of configs during
     /// removal simple.
-    partitioned_buckets: HashMap<i32, TickBuckets>,
+    partitioned_buckets: HashMap<u16, TickBuckets>,
 
     /// Mapping of each subscription_id's config
     configs: HashMap<Uuid, Arc<CheckConfig>>,
@@ -114,7 +114,7 @@ impl ConfigStore {
     }
 
     /// Drop an entire partition of check configurations.
-    pub fn drop_partition(&mut self, partition: i32) {
+    pub fn drop_partition(&mut self, partition: u16) {
         let Some(buckets) = self.partitioned_buckets.remove(&partition) else {
             return;
         };

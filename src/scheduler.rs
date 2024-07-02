@@ -38,7 +38,7 @@ pub async fn run_scheduler(
             // checks completes we can mark that partition as having completed for this tick
             let partitions: Vec<_> = configs.iter().map(|c| c.partition).collect();
 
-            let mut partitioned_join_sets: HashMap<i32, JoinSet<_>> = partitions
+            let mut partitioned_join_sets: HashMap<_, JoinSet<_>> = partitions
                 .into_iter()
                 .map(|p| (p, JoinSet::new()))
                 .collect();
