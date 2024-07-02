@@ -86,10 +86,12 @@ pub struct CheckResult {
     pub span_id: SpanId,
 
     /// Timestamp in milliseconds of when the check was schedule to run
+    #[serde(rename = "scheduled_check_time_ms")]
     #[serde_as(as = "serde_with::TimestampMilliSeconds")]
     pub scheduled_check_time: DateTime<Utc>,
 
     /// Timestamp in milliseconds of when the check was actually ran
+    #[serde(rename = "actual_check_time_ms")]
     #[serde_as(as = "serde_with::TimestampMilliSeconds")]
     pub actual_check_time: DateTime<Utc>,
 
@@ -120,8 +122,8 @@ mod tests {
   },
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
   "span_id": "9c1d886a44bafc94",
-  "scheduled_check_time": 1717614062978,
-  "actual_check_time": 1717614068008,
+  "scheduled_check_time_ms": 1717614062978,
+  "actual_check_time_ms": 1717614068008,
   "duration_ms": 100,
   "request_info": {
     "request_type": "HEAD",
@@ -144,8 +146,8 @@ mod tests {
   "status_reason": null,
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
   "span_id": "9c1d886a44bafc94",
-  "scheduled_check_time": 1717614062978,
-  "actual_check_time": 1717614068008,
+  "scheduled_check_time_ms": 1717614062978,
+  "actual_check_time_ms": 1717614068008,
   "duration_ms": 50,
   "request_info": {
     "request_type": "HEAD",
