@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::sync::RwLock;
 use std::{collections::HashMap, fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use tracing::{error, trace};
 use uuid::Uuid;
 
 use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
@@ -80,6 +82,10 @@ pub struct ConfigStore {
 /// A RwLockable ConfigStore.
 pub type RwConfigStore = RwLock<ConfigStore>;
 
+fn make_empty_tick_buckets() -> TickBuckets {
+    (0..MAX_CHECK_INTERVAL_SECS).map(|_| vec![]).collect()
+}
+
 impl ConfigStore {
     pub fn new() -> ConfigStore {
         ConfigStore {
@@ -96,14 +102,21 @@ impl ConfigStore {
     pub fn add_config(&mut self, config: Arc<CheckConfig>) {
         self.configs.insert(config.subscription_id, config.clone());
 
-        let bucket = self
+        if !self.partitioned_buckets.contains_key(&config.partition) {
+            // TODO(epurkhiser): This means we're not calling update_partitions correctly. Right
+            // now since we're manually adding configs we can't panic, but in the future we should
+            // consider panicing or having this return a Result.
+            error!("Partition {} is not known!", config.partition);
+        }
+
+        let buckets = self
             .partitioned_buckets
             .entry(config.partition)
-            .or_insert_with(|| (0..MAX_CHECK_INTERVAL_SECS).map(|_| vec![]).collect());
+            .or_insert_with(make_empty_tick_buckets);
 
         // Insert the configuration into the appropriate slots
         for slot in config.slots() {
-            bucket[slot].push(config.clone());
+            buckets[slot].push(config.clone());
         }
     }
 
@@ -121,8 +134,39 @@ impl ConfigStore {
         }
     }
 
-    /// Drop an entire partition of check configurations.
-    pub fn drop_partition(&mut self, partition: u16) {
+    /// Get all check configs across all partitions and buckets.
+    pub fn all_configs(&self) -> Vec<Arc<CheckConfig>> {
+        self.configs.values().cloned().collect()
+    }
+
+    /// Get all check configs that are scheduled for a given tick.
+    pub fn get_configs(&self, tick: Tick) -> TickBucket {
+        self.partitioned_buckets
+            .values()
+            .flat_map(move |b| b[tick.index].iter().cloned())
+            .collect()
+    }
+
+    /// Update the set of partitions that the ConfigStore is responsible for.
+    pub fn update_partitions(&mut self, new_partitions: &HashSet<u16>) {
+        let known_partitions: HashSet<_> = self.partitioned_buckets.keys().cloned().collect();
+
+        // Drop partitions that we are no longer responsible for
+        for removed_part in known_partitions.difference(new_partitions) {
+            self.drop_partition(*removed_part);
+        }
+
+        // Add new partitions
+        for new_partiton in new_partitions.difference(&known_partitions) {
+            self.partitioned_buckets
+                .entry(*new_partiton)
+                .or_insert_with(make_empty_tick_buckets);
+        }
+    }
+
+    /// Drop an entire partition of check configurations. This does NOT update the known set of
+    /// partitions. Use update_partitions.
+    fn drop_partition(&mut self, partition: u16) {
         let Some(buckets) = self.partitioned_buckets.remove(&partition) else {
             return;
         };
@@ -133,14 +177,8 @@ impl ConfigStore {
             .for_each(|config| {
                 self.configs.remove(&config.subscription_id);
             });
-    }
 
-    /// Get all check configs that are scheduled for a given tick.
-    pub fn get_configs(&self, tick: Tick) -> TickBucket {
-        self.partitioned_buckets
-            .values()
-            .flat_map(move |b| b[tick.index].iter().cloned())
-            .collect()
+        trace!("Dropped configs in partition {}", partition);
     }
 }
 
@@ -261,6 +299,37 @@ mod tests {
 
         let no_configs = store.get_configs(Tick::new(1, Utc::now()));
         assert!(no_configs.is_empty());
+    }
+
+    #[test]
+    fn test_update_partitions() {
+        let mut store = ConfigStore::new();
+
+        // We are responsible for partitions 0 and 2
+        store.update_partitions(&vec![0, 2].into_iter().collect());
+
+        store.add_config(Arc::new(CheckConfig::default()));
+        store.add_config(Arc::new(CheckConfig {
+            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128),
+            interval: CheckInterval::FiveMinutes,
+            ..Default::default()
+        }));
+        store.add_config(Arc::new(CheckConfig {
+            partition: 2,
+            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128 * 2),
+            ..Default::default()
+        }));
+
+        assert_eq!(store.configs.len(), 3);
+        assert_eq!(store.partitioned_buckets.len(), 2);
+
+        // Udpate with new set of partitions only including partition 0
+        store.update_partitions(&vec![0].into_iter().collect());
+
+        // Partition 2 has been dropped
+        assert_eq!(store.configs.len(), 2);
+        assert_eq!(store.partitioned_buckets.len(), 1);
+        assert!(store.partitioned_buckets.contains_key(&0));
     }
 
     #[test]
