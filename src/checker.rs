@@ -31,7 +31,7 @@ async fn do_request(
     let timeout = check_config
         .timeout
         .to_std()
-        .expect("Timout duration could not be converted to std::time::Duration");
+        .expect("Timeout duration could not be converted to std::time::Duration");
 
     let head_response = match client
         .head(&check_config.url)
