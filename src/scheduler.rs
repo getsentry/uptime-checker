@@ -80,6 +80,7 @@ pub async fn run_scheduler(
             // ticks (crash-loop, etc)
             for (partition, mut join_set) in partitioned_join_sets {
                 tokio::spawn(async move {
+                    let checks_ran = join_set.len();
                     while join_set.join_next().await.is_some() {}
                     let execution_duration = tick_start.elapsed();
 
@@ -87,6 +88,7 @@ pub async fn run_scheduler(
                         result = %tick,
                         duration = ?execution_duration,
                         partition,
+                        checks_ran,
                         "Tick check execution complete"
                     );
                 });
