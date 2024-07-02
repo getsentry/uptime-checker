@@ -3396,6 +3396,7 @@ dependencies = [
  "similar-asserts",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "uuid",
