@@ -23,7 +23,7 @@ pub async fn run_scheduler(
         KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
     ));
 
-    let schduler = tokio::spawn(async move {
+    let scheduler = tokio::spawn(async move {
         let mut interval = time::interval(time::Duration::from_secs(1));
 
         let start = Utc::now();
@@ -104,5 +104,5 @@ pub async fn run_scheduler(
         }
     });
 
-    Ok(schduler)
+    Ok(scheduler)
 }
