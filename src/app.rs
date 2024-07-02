@@ -24,24 +24,27 @@ pub fn execute() -> io::Result<()> {
 
     info!(config = ?config);
 
-    let mut config_store = ConfigStore::new();
-
-    // XXX: Example config while we build out the consumer that loads configs
-    config_store.add_config(Arc::new(CheckConfig {
-        partition: 0,
-        url: "https://downtime-simulator-test1.vercel.app".to_string(),
-        subscription_id: uuid!("663399a09e6340a79c3c7a3f26878904"),
-        interval: CheckInterval::FiveMinutes,
-        timeout: TimeDelta::seconds(5),
-    }));
-
     match app.command {
         cli::Commands::Run => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap()
             .block_on(async {
-                run_scheduler(&config, Arc::new(config_store))
+                let config_store = Arc::new(ConfigStore::new_rw());
+
+                // XXX: Example config while we build out the consumer that loads configs
+                config_store
+                    .write()
+                    .expect("Lock poisoned")
+                    .add_config(Arc::new(CheckConfig {
+                        partition: 0,
+                        url: "https://downtime-simulator-test1.vercel.app".to_string(),
+                        subscription_id: uuid!("663399a09e6340a79c3c7a3f26878904"),
+                        interval: CheckInterval::FiveMinutes,
+                        timeout: TimeDelta::seconds(5),
+                    }));
+
+                run_scheduler(&config, config_store.clone())
                     .await
                     .expect("Failed to run scheduler");
                 ctrl_c().await
