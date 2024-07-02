@@ -5,7 +5,8 @@ pub mod config;
 
 use chrono::TimeDelta;
 use clap::Parser;
-use tokio::signal::ctrl_c;
+use tokio::{join, signal::ctrl_c};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use uuid::uuid;
 
@@ -44,10 +45,19 @@ pub fn execute() -> io::Result<()> {
                         timeout: TimeDelta::seconds(5),
                     }));
 
-                run_scheduler(&config, config_store.clone())
-                    .await
-                    .expect("Failed to run scheduler");
-                ctrl_c().await
+                let shutdown_signal = CancellationToken::new();
+
+                let check_scheduler =
+                    run_scheduler(&config, config_store.clone(), shutdown_signal.clone());
+
+                ctrl_c().await.expect("Failed to listen for ctrl-c signal");
+
+                shutdown_signal.cancel();
+
+                // TODO(epurkhiser): Do we need to be concerned about the error results here?
+                let _ = join!(check_scheduler);
+
+                Ok(())
             }),
     }
 }

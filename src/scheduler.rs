@@ -5,6 +5,7 @@ use chrono::Utc;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{self, Instant};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 use crate::app::config::Config;
@@ -12,10 +13,11 @@ use crate::checker::Checker;
 use crate::config_store::{RwConfigStore, Tick};
 use crate::producer::ResultProducer;
 
-pub async fn run_scheduler(
+pub fn run_scheduler(
     config: &Config,
     config_store: Arc<RwConfigStore>,
-) -> Result<JoinHandle<()>, ()> {
+    shutdown: CancellationToken,
+) -> JoinHandle<()> {
     let checker = Arc::new(Checker::new());
 
     let producer = Arc::new(ResultProducer::new(
@@ -23,7 +25,7 @@ pub async fn run_scheduler(
         KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
     ));
 
-    let scheduler = tokio::spawn(async move {
+    tokio::spawn(async move {
         let mut interval = time::interval(time::Duration::from_secs(1));
 
         let start = Utc::now();
@@ -96,16 +98,13 @@ pub async fn run_scheduler(
         };
 
         info!("Starting scheduler");
-        loop {
-            // TODO: Probably need graceful shutdown via a CancellationToken
-
+        while !shutdown.is_cancelled() {
             let interval_tick = interval.tick().await;
             let tick = Tick::from_time(start + interval_tick.duration_since(instant));
 
             debug!(tick = %tick, "Scheduler ticking");
             schedule_checks(tick);
         }
-    });
-
-    Ok(scheduler)
+        info!("Scheduler shutdown");
+    })
 }

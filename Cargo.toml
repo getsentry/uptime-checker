@@ -28,6 +28,7 @@ sentry-kafka-schemas = "0.1.99"
 serde_with = { version = "3.8.1", features = ["chrono"] }
 rmp-serde = "1.3.0"
 serde_repr = "0.1.19"
+tokio-util = "0.7.11"
 
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
