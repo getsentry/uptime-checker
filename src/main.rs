@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 mod app;
 mod checker;
+mod config_consumer;
 mod config_store;
 mod logging;
 mod producer;
