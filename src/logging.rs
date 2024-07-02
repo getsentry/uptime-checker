@@ -89,7 +89,7 @@ pub fn init(config: LoggingConfig) {
             ..Default::default()
         });
 
-        // We manually deinitalize sentry later
+        // We manually deinitialize sentry later
         std::mem::forget(guard)
     }
 

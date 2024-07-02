@@ -14,7 +14,7 @@ pub enum CheckInterval {
     FiveMinutes = ONE_MINUTE * 5,
     TenMinutes = ONE_MINUTE * 10,
     TwentyMinutes = ONE_MINUTE * 20,
-    ThirtyMintues = ONE_MINUTE * 30,
+    ThirtyMinutes = ONE_MINUTE * 30,
     SixtyMinutes = ONE_MINUTE * 60,
 }
 
