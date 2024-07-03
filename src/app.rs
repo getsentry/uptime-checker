@@ -11,6 +11,7 @@ use tracing::info;
 use uuid::uuid;
 
 use crate::{
+    config_consumer::run_config_consumer,
     config_store::ConfigStore,
     logging::{self, LoggingConfig},
     scheduler::run_scheduler,
@@ -47,6 +48,9 @@ pub fn execute() -> io::Result<()> {
 
                 let shutdown_signal = CancellationToken::new();
 
+                let config_consumer =
+                    run_config_consumer(&config, config_store.clone(), shutdown_signal.clone());
+
                 let check_scheduler =
                     run_scheduler(&config, config_store.clone(), shutdown_signal.clone());
 
@@ -55,7 +59,7 @@ pub fn execute() -> io::Result<()> {
                 shutdown_signal.cancel();
 
                 // TODO(epurkhiser): Do we need to be concerned about the error results here?
-                let _ = join!(check_scheduler);
+                let _ = join!(config_consumer, check_scheduler);
 
                 Ok(())
             }),
