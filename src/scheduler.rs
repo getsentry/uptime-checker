@@ -9,18 +9,20 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 use crate::app::config::Config;
+use crate::checker::http_checker::HttpChecker;
 use crate::checker::Checker;
 use crate::config_store::{RwConfigStore, Tick};
-use crate::producer::ResultProducer;
+use crate::producer::kafka_producer::KafkaResultsProducer;
+use crate::producer::ResultsProducer;
 
 pub fn run_scheduler(
     config: &Config,
     config_store: Arc<RwConfigStore>,
     shutdown: CancellationToken,
 ) -> JoinHandle<()> {
-    let checker = Arc::new(Checker::new());
+    let checker = Arc::new(HttpChecker::new());
 
-    let producer = Arc::new(ResultProducer::new(
+    let producer = Arc::new(KafkaResultsProducer::new(
         &config.results_kafka_topic,
         KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
     ));
@@ -65,8 +67,7 @@ pub fn run_scheduler(
                         join_set.spawn(async move {
                             let check_result = job_checker.check_url(&config, &tick).await;
 
-                            if let Err(e) = job_producer.produce_checker_result(&check_result).await
-                            {
+                            if let Err(e) = job_producer.produce_checker_result(&check_result) {
                                 error!(error = ?e, "Failed to produce check result");
                             }
 
