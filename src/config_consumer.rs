@@ -62,10 +62,13 @@ fn update_config_store(
                 .add_config(Arc::new(config));
         }
         // Remove existing configuration
-        None => config_store
-            .write()
-            .expect("Lock poisoned")
-            .remove_config(subscription_id),
+        None => {
+            config_store
+                .write()
+                .expect("Lock poisoned")
+                .remove_config(subscription_id);
+            debug!(%subscription_id, "Removed configuration");
+        }
     }
 
     Ok(message)
