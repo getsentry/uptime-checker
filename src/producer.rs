@@ -16,6 +16,6 @@ pub enum ExtractCodeError {
     Schema(#[from] SchemaError),
 }
 
-pub trait ResultsProducer {
+pub trait ResultsProducer: Send + Sync {
     fn produce_checker_result(&self, result: &CheckResult) -> Result<(), ExtractCodeError>;
 }
