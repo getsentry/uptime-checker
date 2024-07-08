@@ -70,7 +70,7 @@ pub fn run_scheduler(
                                 error!(error = ?e, "Failed to produce check result");
                             }
 
-                            info!(result = ?check_result, "Check complete");
+                            info!(?check_result, ?config, "Check complete");
                         })
                     });
             }
