@@ -14,6 +14,7 @@ use crate::checker::Checker;
 use crate::config_store::{RwConfigStore, Tick};
 use crate::producer::kafka_producer::KafkaResultsProducer;
 use crate::producer::ResultsProducer;
+use crate::types::result::{CheckResult, CheckStatus, CheckStatusReasonType};
 
 pub fn run_scheduler(
     config: &Config,
@@ -28,6 +29,58 @@ pub fn run_scheduler(
     ));
 
     tokio::spawn(async move { scheduler_loop(config_store, checker, producer, shutdown).await })
+}
+
+fn record_result_metrics(result: &CheckResult) {
+    // Record metrics
+    let CheckResult {
+        status,
+        scheduled_check_time,
+        actual_check_time,
+        duration,
+        status_reason,
+        ..
+    } = result;
+
+    let status_label = match status {
+        CheckStatus::Success => "success",
+        CheckStatus::Failure => "failure",
+        CheckStatus::MissedWindow => "missed_window",
+    };
+    let failure_reason = match status_reason.as_ref().map(|r| r.status_type) {
+        Some(CheckStatusReasonType::Failure) => Some("failure"),
+        Some(CheckStatusReasonType::DnsError) => Some("dns_error"),
+        Some(CheckStatusReasonType::Timeout) => Some("timeout"),
+        None => None,
+    };
+
+    // Record duration of check
+    if let Some(duration) = duration {
+        metrics::histogram!(
+            "check_result.duration_ms",
+            "histogram" => "timer",
+            "status" => status_label,
+            "failure_reason" => failure_reason.unwrap_or("ok"),
+        )
+        .record(duration.num_milliseconds() as f64);
+    }
+
+    // Record time between scheduled and actual check
+    metrics::histogram!(
+        "check_result.delay_ms",
+        "histogram" => "timer",
+        "status" => status_label,
+        "failure_reason" => failure_reason.unwrap_or("ok"),
+    )
+    .record((*actual_check_time - *scheduled_check_time).num_milliseconds() as f64);
+
+    // Record status of the check
+    metrics::counter!(
+        "check_result.processed",
+        "status" => status_label,
+        "failure_reason" => failure_reason.unwrap_or("ok"),
+    )
+    .increment(1);
 }
 
 async fn scheduler_loop(
@@ -47,6 +100,8 @@ async fn scheduler_loop(
             .read()
             .expect("Lock poisoned")
             .get_configs(tick);
+
+        metrics::gauge!("scheduler.bucket_size").set(configs.len() as f64);
 
         // We maintain a join set for each partition, this way as each partition worth of
         // checks completes we can mark that partition as having completed for this tick
@@ -80,6 +135,7 @@ async fn scheduler_loop(
                         }
 
                         info!(result = ?check_result, "Check complete");
+                        record_result_metrics(&check_result);
                     })
                 });
         }
