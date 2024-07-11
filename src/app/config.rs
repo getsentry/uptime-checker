@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, net::SocketAddr};
 
 use figment::{
     providers::{Env, Format, Serialized, Yaml},
@@ -25,6 +25,9 @@ pub struct Config {
 
     /// The log format to output.
     pub log_format: logging::LogFormat,
+
+    /// The statsd address to report metrics to.
+    pub statsd_addr: SocketAddr,
 
     /// The kafka cluster to report results to. Expected to be a string of comma separated
     /// addresses.
@@ -58,6 +61,7 @@ impl Default for Config {
             sentry_env: None,
             log_level: logging::Level::Warn,
             log_format: logging::LogFormat::Auto,
+            statsd_addr: "127.0.0.1:8126".parse().unwrap(),
             results_kafka_cluster: vec![],
             results_kafka_topic: "uptime-results".to_owned(),
             configs_kafka_cluster: vec![],
@@ -112,6 +116,7 @@ mod tests {
                 sentry_env: my_env
                 results_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
                 configs_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
+                statsd_addr: 10.0.0.1:8126
                 "#,
             )?;
 
@@ -131,6 +136,7 @@ mod tests {
                     sentry_env: Some(Cow::from("my_env")),
                     log_level: logging::Level::Warn,
                     log_format: logging::LogFormat::Auto,
+                    statsd_addr: "10.0.0.1:8126".parse().unwrap(),
                     results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
@@ -162,6 +168,7 @@ mod tests {
                 "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
                 "10.0.0.1,10.0.0.2:7000",
             );
+            jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
 
             let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
@@ -179,6 +186,7 @@ mod tests {
                     sentry_env: Some(Cow::from("my_env_override")),
                     log_level: logging::Level::Trace,
                     log_format: logging::LogFormat::Json,
+                    statsd_addr: "10.0.0.1:1234".parse().unwrap(),
                     results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
