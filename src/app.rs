@@ -14,6 +14,7 @@ use crate::{
     config_consumer::run_config_consumer,
     config_store::ConfigStore,
     logging::{self, LoggingConfig},
+    metrics::{self, MetricsConfig},
     scheduler::run_scheduler,
     types::check_config::{CheckConfig, CheckInterval},
 };
@@ -23,6 +24,7 @@ pub fn execute() -> io::Result<()> {
     let config = config::Config::extract(&app).expect("Configuration invalid");
 
     logging::init(LoggingConfig::from_config(&config));
+    metrics::init(MetricsConfig::from_config(&config));
 
     info!(config = ?config);
 
