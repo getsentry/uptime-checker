@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use crate::{app::config::Config, config_store::RwConfigStore, types::check_config::CheckConfig};
 
+#[tracing::instrument]
 fn update_config_store(
     config_store: Arc<RwConfigStore>,
     message: Message<KafkaPayload>,
