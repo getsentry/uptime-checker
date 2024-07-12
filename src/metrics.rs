@@ -24,7 +24,7 @@ pub fn init(config: MetricsConfig) {
     let recorder = StatsdBuilder::from(address.ip().to_string(), address.port())
         .with_queue_size(5000)
         .with_buffer_size(1024)
-        .build(Some("prefix"))
+        .build(Some("uptime_checker"))
         .expect("Could not create StatsdRecorder");
 
     metrics::set_global_recorder(recorder).expect("Could not set global metrics recorder")
