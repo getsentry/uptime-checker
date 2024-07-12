@@ -3,12 +3,10 @@ use std::{io, sync::Arc};
 pub mod cli;
 pub mod config;
 
-use chrono::TimeDelta;
 use clap::Parser;
 use tokio::{join, signal::ctrl_c};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use uuid::uuid;
 
 use crate::{
     config_consumer::run_config_consumer,
@@ -16,7 +14,6 @@ use crate::{
     logging::{self, LoggingConfig},
     metrics::{self, MetricsConfig},
     scheduler::run_scheduler,
-    types::check_config::{CheckConfig, CheckInterval},
 };
 
 pub fn execute() -> io::Result<()> {
@@ -35,18 +32,6 @@ pub fn execute() -> io::Result<()> {
             .unwrap()
             .block_on(async {
                 let config_store = Arc::new(ConfigStore::new_rw());
-
-                // XXX: Example config while we build out the consumer that loads configs
-                config_store
-                    .write()
-                    .expect("Lock poisoned")
-                    .add_config(Arc::new(CheckConfig {
-                        partition: 0,
-                        url: "https://downtime-simulator-test1.vercel.app".to_string(),
-                        subscription_id: uuid!("663399a09e6340a79c3c7a3f26878904"),
-                        interval: CheckInterval::FiveMinutes,
-                        timeout: TimeDelta::seconds(5),
-                    }));
 
                 let shutdown_signal = CancellationToken::new();
 
