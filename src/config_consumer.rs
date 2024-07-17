@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, thread};
+use std::{collections::HashMap, sync::Arc, thread, time::Duration};
 
 use chrono::TimeDelta;
 use rust_arroyo::{
@@ -12,14 +12,18 @@ use rust_arroyo::{
     },
     types::{InnerMessage, Message, Partition, Topic},
 };
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::oneshot::{self, Receiver},
+    task::JoinHandle,
+    time::{interval, Instant},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::{app::config::Config, config_store::RwConfigStore, types::check_config::CheckConfig};
 
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 fn update_config_store(
     config_store: Arc<RwConfigStore>,
     message: Message<KafkaPayload>,
@@ -104,7 +108,7 @@ pub fn run_config_consumer(
     config: &Config,
     config_store: Arc<RwConfigStore>,
     shutdown: CancellationToken,
-) -> JoinHandle<()> {
+) -> (JoinHandle<()>, Receiver<()>) {
     // XXX: In the future the consumer group should be derrived from the generation of
     // the deployment. This will allow old deployments to continue consuming
     // configurations until they are shut-down
@@ -119,10 +123,14 @@ pub fn run_config_consumer(
 
     let stream_processor = StreamProcessor::with_kafka(
         consumer_config,
-        ConfigConsumerFactory { config_store },
+        ConfigConsumerFactory {
+            config_store: config_store.clone(),
+        },
         Topic::new(&config.configs_kafka_topic),
         None,
     );
+
+    let wait_booted = wait_for_boot(config_store.clone());
 
     let mut processing_handle = stream_processor.get_handle();
 
@@ -133,7 +141,7 @@ pub fn run_config_consumer(
             .expect("Failed to run config consumer");
     });
 
-    tokio::spawn(async move {
+    let shutdown_handle = tokio::spawn(async move {
         shutdown.cancelled().await;
         processing_handle.signal_shutdown();
         join_handle
@@ -141,22 +149,97 @@ pub fn run_config_consumer(
             .expect("Failed to join config consumer consumer thread");
 
         info!("Config consuemr shutdown");
-    })
+    });
+
+    (shutdown_handle, wait_booted)
+}
+
+/// How long does the consumer need to be idle before we consider it to have "finished" reading the
+/// backlog of configs.
+const BOOT_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// How long will we wait while the consumer has not consumed *anything* before we consider it to
+/// be ready. This handles the case where there is simply nothing in the config topic backlog.
+const BOOT_MAX_IDLE: Duration = Duration::from_secs(10);
+
+/// This function waits for the config_store to have completed the "boot-up" of loading a backlog
+/// of configs.
+///
+/// This works by waiting for the ConfigStore to not have been updated for more than BOOT_MAX_IDLE
+/// time. In practice this means that a new config was not produced into the topic for more than
+/// the number of milliseconds configured. Since new configs are added into the configs topic at a
+/// slow rate, we can be sure we've read all of the backlog when we start idling on updates.
+///
+/// To handle the case where there are NO configs in the topic, we will wait BOOT_MAX_IDLE duration
+/// while the last_update is empty.
+///
+/// XXX: This makes the assumption that the there will NOT be a large volume of configs being
+/// produced at all times, such that the cons
+///
+/// The returned Receiver can be awaited
+fn wait_for_boot(config_store: Arc<RwConfigStore>) -> Receiver<()> {
+    let start = Instant::now();
+    let (boot_finished, boot_finished_rx) = oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        let mut interval = interval(Duration::from_millis(100));
+
+        loop {
+            let tick = interval.tick().await;
+            let elapsed = tick - start;
+
+            let last_update = config_store
+                .read()
+                .expect("Lock poisoned")
+                .get_last_update();
+
+            // If it's been longer than the BOOT_MAX_IDLE and we haven't updated the config store
+            // we can assume there was nothing in the backlog to read.
+            if last_update.is_none() && elapsed >= BOOT_MAX_IDLE {
+                break;
+            }
+
+            if last_update.is_some_and(|t| (tick - t) >= BOOT_IDLE_TIMEOUT) {
+                break;
+            }
+        }
+
+        let boot_time_ms = start.elapsed().as_millis();
+        let total_configs = config_store
+            .read()
+            .expect("Lock poisoned")
+            .all_configs()
+            .len();
+
+        tracing::info!(boot_time_ms, total_configs, "bootup_complete");
+        metrics::gauge!("config_consumer.boot_time_ms").set(boot_time_ms as f64);
+        metrics::gauge!("config_consumer.total_configs").set(total_configs as f64);
+
+        boot_finished.send(()).expect("Failed to report bo");
+    });
+
+    boot_finished_rx
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, task::Poll, time::Duration};
 
     use chrono::Utc;
+    use futures::poll;
     use rust_arroyo::{
         backends::kafka::types::KafkaPayload,
         types::{BrokerMessage, InnerMessage, Message, Partition, Topic},
     };
     use similar_asserts::assert_eq;
+    use tokio::time::sleep;
     use uuid::uuid;
 
-    use crate::{config_store::ConfigStore, types::check_config::CheckConfig};
+    use crate::{
+        config_consumer::{BOOT_IDLE_TIMEOUT, BOOT_MAX_IDLE},
+        config_store::ConfigStore,
+        types::check_config::CheckConfig,
+    };
 
     use super::update_config_store;
 
@@ -236,6 +319,43 @@ mod tests {
         // example_config was removed
         assert_eq!(configs.len(), 0);
         assert_eq!(Arc::strong_count(&example_config), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_wait_for_boot() {
+        let config_store = Arc::new(ConfigStore::new_rw());
+
+        let wait_booted = super::wait_for_boot(config_store.clone());
+        tokio::pin!(wait_booted);
+
+        // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.
+        sleep(BOOT_MAX_IDLE - Duration::from_millis(100)).await;
+
+        // We haven't marked the boot as complete
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Pending);
+
+        // Add a check config
+        config_store
+            .write()
+            .unwrap()
+            .add_config(Arc::new(CheckConfig::default()));
+
+        // Move time forward to the BOOT_MAX_IDLE. This will NOT mark the boot as complete sicne we
+        // just produced a config. We will need to wait another 400ms for it to complete
+        sleep(Duration::from_millis(200)).await;
+
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Pending);
+
+        // Add a check config again (does not matter that it's the same)
+        config_store
+            .write()
+            .unwrap()
+            .add_config(Arc::new(CheckConfig::default()));
+
+        // Advance past the BOOT_IDLE_TIMEOUT, we will now have finished
+        sleep(BOOT_IDLE_TIMEOUT + Duration::from_millis(100)).await;
+
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(())));
     }
 
     // TODO(epurkhiser): We probably want to test the update_partition callback
