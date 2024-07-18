@@ -174,7 +174,7 @@ const BOOT_MAX_IDLE: Duration = Duration::from_secs(10);
 /// while the last_update is empty.
 ///
 /// XXX: This makes the assumption that the there will NOT be a large volume of configs being
-/// produced at all times, such that the cons
+/// produced at all times.
 ///
 /// The returned Receiver can be awaited
 fn wait_for_boot(config_store: Arc<RwConfigStore>) -> Receiver<()> {
