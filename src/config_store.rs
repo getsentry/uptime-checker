@@ -3,6 +3,7 @@ use std::sync::RwLock;
 use std::{collections::HashMap, fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use tokio::time::Instant;
 use tracing::{error, trace};
 use uuid::Uuid;
 
@@ -77,6 +78,9 @@ pub struct ConfigStore {
 
     /// Mapping of each subscription_id's config
     configs: HashMap<Uuid, Arc<CheckConfig>>,
+
+    /// Tracks the last instant the config store was updated.
+    last_update: Option<Instant>,
 }
 
 /// A RwLockable ConfigStore.
@@ -91,6 +95,7 @@ impl ConfigStore {
         ConfigStore {
             partitioned_buckets: HashMap::new(),
             configs: HashMap::new(),
+            last_update: None,
         }
     }
 
@@ -118,6 +123,8 @@ impl ConfigStore {
         for slot in config.slots() {
             buckets[slot].push(config.clone());
         }
+
+        self.last_update = Some(Instant::now());
     }
 
     /// Remove a Check Configuration from the store.
@@ -132,6 +139,8 @@ impl ConfigStore {
         for slot in config.slots() {
             buckets[slot].retain(|c| c.subscription_id != subscription_id);
         }
+
+        self.last_update = Some(Instant::now());
     }
 
     /// Get all check configs across all partitions and buckets.
@@ -162,6 +171,8 @@ impl ConfigStore {
                 .entry(*new_partiton)
                 .or_insert_with(make_empty_tick_buckets);
         }
+
+        self.last_update = Some(Instant::now());
     }
 
     /// Drop an entire partition of check configurations. This does NOT update the known set of
@@ -179,14 +190,22 @@ impl ConfigStore {
             });
 
         trace!("Dropped configs in partition {}", partition);
+
+        self.last_update = Some(Instant::now());
+    }
+
+    /// Retrives the last instant that the config store was updated.
+    pub fn get_last_update(&self) -> Option<Instant> {
+        self.last_update
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use chrono::{DateTime, Utc};
+    use tokio::time::{self};
     use uuid::Uuid;
 
     use crate::{
@@ -360,5 +379,26 @@ mod tests {
         assert_eq!(store.configs.len(), 2);
         assert_eq!(store.partitioned_buckets.len(), 1);
         assert!(store.partitioned_buckets.contains_key(&0));
+    }
+
+    #[tokio::test]
+    async fn test_last_update() {
+        time::pause();
+        let now = time::Instant::now();
+
+        let mut store = ConfigStore::new();
+        assert!(store.get_last_update().is_none());
+
+        // Add config
+        let config = Arc::new(CheckConfig::default());
+        store.add_config(config.clone());
+        assert_eq!(store.get_last_update(), Some(now));
+
+        time::advance(Duration::from_secs(1)).await;
+        let now = time::Instant::now();
+
+        // Remove config
+        store.remove_config(config.subscription_id);
+        assert_eq!(store.get_last_update(), Some(now));
     }
 }
