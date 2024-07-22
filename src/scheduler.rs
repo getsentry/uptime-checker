@@ -1,33 +1,22 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
-use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
-use crate::app::config::Config;
-use crate::checker::http_checker::HttpChecker;
 use crate::checker::Checker;
 use crate::config_store::{RwConfigStore, Tick};
-use crate::producer::kafka_producer::KafkaResultsProducer;
 use crate::producer::ResultsProducer;
 use crate::types::result::{CheckResult, CheckStatus, CheckStatusReasonType};
 
 pub fn run_scheduler(
-    config: &Config,
     config_store: Arc<RwConfigStore>,
+    checker: Arc<impl Checker + 'static>,
+    producer: Arc<impl ResultsProducer + 'static>,
     shutdown: CancellationToken,
 ) -> JoinHandle<()> {
-    let checker = Arc::new(HttpChecker::new());
-
-    let producer = Arc::new(KafkaResultsProducer::new(
-        &config.results_kafka_topic,
-        KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
-    ));
-
     tokio::spawn(async move { scheduler_loop(config_store, checker, producer, shutdown).await })
 }
 
@@ -103,63 +92,43 @@ async fn scheduler_loop(
 
         metrics::gauge!("scheduler.bucket_size").set(configs.len() as f64);
 
-        // We maintain a join set for each partition, this way as each partition worth of
-        // checks completes we can mark that partition as having completed for this tick
-        let partitions: Vec<_> = configs.iter().map(|c| c.partition).collect();
+        let mut join_set = JoinSet::new();
 
-        let mut partitioned_join_sets: HashMap<_, JoinSet<_>> = partitions
-            .into_iter()
-            .map(|p| (p, JoinSet::new()))
-            .collect();
-
-        // TODO(epurkhiser): Check if we skipped any ticks for each of the partition that's
-        // being processed. If we did we should catch up on those.
-        //
-        // TODO(epurkhiser): In the future it may make more sense to know how many
-        // partitions we are assigned and check skipped ticks for ALL partitions, not just
-        // partitions that we have checks to execute for in this tick.
+        // TODO(epurkhiser): Check if we skipped any ticks If we did we should catch up on those.
 
         // TODO: We should put schedule config executions into a worker using mpsc
         for config in configs {
             let job_checker = checker.clone();
             let job_producer = producer.clone();
 
-            partitioned_join_sets
-                .get_mut(&config.partition)
-                .map(|join_set| {
-                    join_set.spawn(async move {
-                        let check_result = job_checker.check_url(&config, &tick).await;
+            join_set.spawn(async move {
+                let check_result = job_checker.check_url(&config, &tick).await;
 
-                        if let Err(e) = job_producer.produce_checker_result(&check_result) {
-                            error!(error = ?e, "Failed to produce check result");
-                        }
+                if let Err(e) = job_producer.produce_checker_result(&check_result) {
+                    error!(error = ?e, "Failed to produce check result");
+                }
 
-                        info!(result = ?check_result, "Check complete");
-                        record_result_metrics(&check_result);
-                    })
-                });
-        }
-
-        // Spawn tasks to wait for each partition to complete.
-        //
-        // TODO(epurkhiser): We'll want to record the tick timestamp for this partition in
-        // redis or some other store so that we can resume processing if we fail to process
-        // ticks (crash-loop, etc)
-        for (partition, mut join_set) in partitioned_join_sets {
-            tokio::spawn(async move {
-                let checks_ran = join_set.len();
-                while join_set.join_next().await.is_some() {}
-                let execution_duration = tick_start.elapsed();
-
-                debug!(
-                    result = %tick,
-                    duration = ?execution_duration,
-                    partition,
-                    checks_ran,
-                    "Tick check execution complete"
-                );
+                info!(result = ?check_result, "Check complete");
+                record_result_metrics(&check_result);
             });
         }
+
+        // Spawn a task to wait for checks to complete.
+        //
+        // TODO(epurkhiser): We'll want to record the tick timestamp  in redis or some other store
+        // so that we can resume processing if we fail to process ticks (crash-loop, etc)
+        tokio::spawn(async move {
+            let checks_ran = join_set.len();
+            while join_set.join_next().await.is_some() {}
+            let execution_duration = tick_start.elapsed();
+
+            debug!(
+                result = %tick,
+                duration = ?execution_duration,
+                checks_ran,
+                "Tick check execution complete"
+            );
+        });
     };
 
     info!("Starting scheduler");

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, thread, time::Duration};
+use std::{collections::HashMap, sync::Arc, thread};
 
 use chrono::TimeDelta;
 use rust_arroyo::{
@@ -12,25 +12,23 @@ use rust_arroyo::{
     },
     types::{InnerMessage, Message, Partition, Topic},
 };
-use tokio::{
-    sync::oneshot::{self, Receiver},
-    task::JoinHandle,
-    time::{interval, Instant},
-};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
-use crate::{app::config::Config, config_store::RwConfigStore, types::check_config::CheckConfig};
+use crate::{app::config::Config, manager::Manager, types::check_config::CheckConfig};
 
 #[tracing::instrument(skip_all)]
-fn update_config_store(
-    config_store: Arc<RwConfigStore>,
+fn register_config(
+    manager: Arc<Manager>,
     message: Message<KafkaPayload>,
 ) -> Result<Message<KafkaPayload>, InvalidMessage> {
     let InnerMessage::BrokerMessage(ref broker_message) = message.inner_message else {
         panic!("Expected BrokerMessage, got {:?}", message.inner_message);
     };
+
+    let partition = broker_message.partition.index;
 
     let key = broker_message.payload.key().ok_or_else(|| {
         error!("Missing message key (subscription_id)");
@@ -57,18 +55,22 @@ fn update_config_store(
                 return Err(InvalidMessage::from(broker_message));
             }
 
-            config.partition = broker_message.partition.index;
+            config.partition = partition;
 
             // Store configuration
             debug!(config = ?config, "Consumed configuration");
-            config_store
+            manager
+                .get_service(partition)
+                .get_config_store()
                 .write()
                 .expect("Lock poisoned")
                 .add_config(Arc::new(config));
         }
         // Remove existing configuration
         None => {
-            config_store
+            manager
+                .get_service(partition)
+                .get_config_store()
                 .write()
                 .expect("Lock poisoned")
                 .remove_config(subscription_id);
@@ -80,24 +82,21 @@ fn update_config_store(
 }
 
 struct ConfigConsumerFactory {
-    config_store: Arc<RwConfigStore>,
+    manager: Arc<Manager>,
 }
 
 impl ProcessingStrategyFactory<KafkaPayload> for ConfigConsumerFactory {
     fn create(&self) -> Box<dyn ProcessingStrategy<KafkaPayload>> {
-        let config_store = self.config_store.clone();
+        let manager = self.manager.clone();
 
         Box::new(RunTask::new(
-            move |message| update_config_store(config_store.clone(), message),
+            move |message| register_config(manager.clone(), message),
             Noop {},
         ))
     }
 
     fn update_partitions(&self, partitions: &HashMap<Partition, u64>) {
-        // Revoke configurations for partitions that are no longer assigned to this consumer.
-        self.config_store
-            .write()
-            .expect("Lock poisoned")
+        self.manager
             .update_partitions(&partitions.keys().map(|p| p.index).collect())
     }
 }
@@ -106,9 +105,9 @@ impl ProcessingStrategyFactory<KafkaPayload> for ConfigConsumerFactory {
 /// added to the ['ConfigStore'] as it is recieved. Null mesages will revoke configs.
 pub fn run_config_consumer(
     config: &Config,
-    config_store: Arc<RwConfigStore>,
+    manager: Arc<Manager>,
     shutdown: CancellationToken,
-) -> (JoinHandle<()>, Receiver<()>) {
+) -> JoinHandle<()> {
     // XXX: In the future the consumer group should be derrived from the generation of
     // the deployment. This will allow old deployments to continue consuming
     // configurations until they are shut-down
@@ -123,14 +122,10 @@ pub fn run_config_consumer(
 
     let stream_processor = StreamProcessor::with_kafka(
         consumer_config,
-        ConfigConsumerFactory {
-            config_store: config_store.clone(),
-        },
+        ConfigConsumerFactory { manager },
         Topic::new(&config.configs_kafka_topic),
         None,
     );
-
-    let wait_booted = wait_for_boot(config_store.clone());
 
     let mut processing_handle = stream_processor.get_handle();
 
@@ -151,101 +146,28 @@ pub fn run_config_consumer(
         info!("Config consuemr shutdown");
     });
 
-    (shutdown_handle, wait_booted)
-}
-
-/// How long does the consumer need to be idle before we consider it to have "finished" reading the
-/// backlog of configs.
-const BOOT_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
-
-/// How long will we wait while the consumer has not consumed *anything* before we consider it to
-/// be ready. This handles the case where there is simply nothing in the config topic backlog.
-const BOOT_MAX_IDLE: Duration = Duration::from_secs(10);
-
-/// This function waits for the config_store to have completed the "boot-up" of loading a backlog
-/// of configs.
-///
-/// This works by waiting for the ConfigStore to not have been updated for more than BOOT_MAX_IDLE
-/// time. In practice this means that a new config was not produced into the topic for more than
-/// the number of milliseconds configured. Since new configs are added into the configs topic at a
-/// slow rate, we can be sure we've read all of the backlog when we start idling on updates.
-///
-/// To handle the case where there are NO configs in the topic, we will wait BOOT_MAX_IDLE duration
-/// while the last_update is empty.
-///
-/// XXX: This makes the assumption that the there will NOT be a large volume of configs being
-/// produced at all times.
-///
-/// The returned Receiver can be awaited
-fn wait_for_boot(config_store: Arc<RwConfigStore>) -> Receiver<()> {
-    let start = Instant::now();
-    let (boot_finished, boot_finished_rx) = oneshot::channel::<()>();
-
-    tokio::spawn(async move {
-        let mut interval = interval(Duration::from_millis(100));
-
-        loop {
-            let tick = interval.tick().await;
-            let elapsed = tick - start;
-
-            let last_update = config_store
-                .read()
-                .expect("Lock poisoned")
-                .get_last_update();
-
-            // If it's been longer than the BOOT_MAX_IDLE and we haven't updated the config store
-            // we can assume there was nothing in the backlog to read.
-            if last_update.is_none() && elapsed >= BOOT_MAX_IDLE {
-                break;
-            }
-
-            if last_update.is_some_and(|t| (tick - t) >= BOOT_IDLE_TIMEOUT) {
-                break;
-            }
-        }
-
-        let boot_time_ms = start.elapsed().as_millis();
-        let total_configs = config_store
-            .read()
-            .expect("Lock poisoned")
-            .all_configs()
-            .len();
-
-        tracing::info!(boot_time_ms, total_configs, "bootup_complete");
-        metrics::gauge!("config_consumer.boot_time_ms").set(boot_time_ms as f64);
-        metrics::gauge!("config_consumer.total_configs").set(total_configs as f64);
-
-        boot_finished.send(()).expect("Failed to report bo");
-    });
-
-    boot_finished_rx
+    shutdown_handle
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, task::Poll, time::Duration};
+    use std::{sync::Arc, vec};
 
     use chrono::Utc;
-    use futures::poll;
     use rust_arroyo::{
         backends::kafka::types::KafkaPayload,
         types::{BrokerMessage, InnerMessage, Message, Partition, Topic},
     };
     use similar_asserts::assert_eq;
-    use tokio::time::sleep;
     use uuid::uuid;
 
-    use crate::{
-        config_consumer::{BOOT_IDLE_TIMEOUT, BOOT_MAX_IDLE},
-        config_store::ConfigStore,
-        types::check_config::CheckConfig,
-    };
+    use crate::{manager::Manager, types::check_config::CheckConfig};
 
-    use super::update_config_store;
+    use super::register_config;
 
     #[test]
     fn test_update_config_store() {
-        let config_store = Arc::new(ConfigStore::new_rw());
+        let manager = Arc::new(Manager::new_simple());
 
         // Example msgpack taken from
         // sentry-kafka-schemas/examples/uptime-configs/1/example.msgpack
@@ -265,7 +187,7 @@ mod tests {
         let message = Message {
             inner_message: InnerMessage::BrokerMessage(BrokerMessage {
                 partition: Partition {
-                    index: 2,
+                    index: 0,
                     topic: Topic::new("uptime-configs"),
                 },
                 payload: KafkaPayload::new(Some(example_uuid.into()), None, Some(example)),
@@ -273,12 +195,17 @@ mod tests {
                 timestamp: Utc::now(),
             }),
         };
-        let _ = update_config_store(config_store.clone(), message);
+        let _ = register_config(manager.clone(), message);
 
-        let configs = config_store.read().unwrap().all_configs();
+        let configs = manager
+            .get_service(0)
+            .get_config_store()
+            .read()
+            .unwrap()
+            .all_configs();
 
         assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].partition, 2);
+        assert_eq!(configs[0].partition, 0);
         assert_eq!(
             configs[0].subscription_id,
             uuid!("d7629c6c-82be-4f67-9ee7-8a0d977856d2")
@@ -287,11 +214,12 @@ mod tests {
 
     #[test]
     fn test_drop_config() {
-        let config_store = Arc::new(ConfigStore::new_rw());
+        let manager = Arc::new(Manager::new_simple());
 
         let example_config = Arc::new(CheckConfig::default());
-
-        config_store
+        manager
+            .get_service(0)
+            .get_config_store()
             .write()
             .unwrap()
             .add_config(example_config.clone());
@@ -300,7 +228,7 @@ mod tests {
         let message = Message {
             inner_message: InnerMessage::BrokerMessage(BrokerMessage {
                 partition: Partition {
-                    index: 2,
+                    index: 0,
                     topic: Topic::new("uptime-configs"),
                 },
                 payload: KafkaPayload::new(
@@ -312,50 +240,18 @@ mod tests {
                 timestamp: Utc::now(),
             }),
         };
-        let _ = update_config_store(config_store.clone(), message);
+        let _ = register_config(manager.clone(), message);
 
-        let configs = config_store.read().unwrap().all_configs();
+        let configs = manager
+            .get_service(0)
+            .get_config_store()
+            .read()
+            .unwrap()
+            .all_configs();
 
         // example_config was removed
         assert_eq!(configs.len(), 0);
         assert_eq!(Arc::strong_count(&example_config), 1);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn test_wait_for_boot() {
-        let config_store = Arc::new(ConfigStore::new_rw());
-
-        let wait_booted = super::wait_for_boot(config_store.clone());
-        tokio::pin!(wait_booted);
-
-        // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.
-        sleep(BOOT_MAX_IDLE - Duration::from_millis(100)).await;
-
-        // We haven't marked the boot as complete
-        assert_eq!(poll!(wait_booted.as_mut()), Poll::Pending);
-
-        // Add a check config
-        config_store
-            .write()
-            .unwrap()
-            .add_config(Arc::new(CheckConfig::default()));
-
-        // Move time forward to the BOOT_MAX_IDLE. This will NOT mark the boot as complete sicne we
-        // just produced a config. We will need to wait another 400ms for it to complete
-        sleep(Duration::from_millis(200)).await;
-
-        assert_eq!(poll!(wait_booted.as_mut()), Poll::Pending);
-
-        // Add a check config again (does not matter that it's the same)
-        config_store
-            .write()
-            .unwrap()
-            .add_config(Arc::new(CheckConfig::default()));
-
-        // Advance past the BOOT_IDLE_TIMEOUT, we will now have finished
-        sleep(BOOT_IDLE_TIMEOUT + Duration::from_millis(100)).await;
-
-        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(())));
     }
 
     // TODO(epurkhiser): We probably want to test the update_partition callback
