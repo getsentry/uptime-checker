@@ -1,5 +1,5 @@
 use chrono::{TimeDelta, Utc};
-use reqwest::{Client, ClientBuilder, Response, StatusCode};
+use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::{SpanId, TraceId};
 use std::error::Error;
 use tokio::time::Instant;
@@ -34,22 +34,6 @@ async fn do_request(
         .timeout
         .to_std()
         .expect("Timeout duration could not be converted to std::time::Duration");
-
-    let head_response = match client
-        .head(&check_config.url)
-        .timeout(timeout)
-        .header("sentry-trace", sentry_trace.to_owned())
-        .send()
-        .await
-    {
-        Ok(response) => response,
-        Err(e) => return (RequestType::Head, Err(e)),
-    };
-
-    // Successful head request
-    if head_response.status() != StatusCode::METHOD_NOT_ALLOWED {
-        return (RequestType::Head, Ok(head_response));
-    }
 
     let result = client
         .get(check_config.url.as_str())
@@ -175,47 +159,9 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
-    use reqwest::StatusCode;
 
     fn make_tick() -> Tick {
         Tick::from_time(Utc::now() - TimeDelta::seconds(60))
-    }
-
-    #[tokio::test]
-    async fn test_simple_head() {
-        let server = MockServer::start();
-        let checker = HttpChecker::new();
-
-        let duration = TimeDelta::milliseconds(50);
-
-        let head_mock = server.mock(|when, then| {
-            when.method(Method::HEAD).path("/head");
-            then.delay(duration.to_std().unwrap()).status(200);
-        });
-
-        let config = CheckConfig {
-            url: server.url("/head").to_string(),
-            ..Default::default()
-        };
-
-        let tick = make_tick();
-        let result = checker.check_url(&config, &tick).await;
-
-        assert_eq!(result.status, CheckStatus::Success);
-        assert!(result.status_reason.is_none());
-        assert_eq!(
-            result.request_info.as_ref().map(|i| i.request_type),
-            Some(RequestType::Head)
-        );
-        assert_eq!(
-            result.request_info.and_then(|i| i.http_status_code),
-            Some(200)
-        );
-        assert_eq!(result.scheduled_check_time, tick.time());
-        assert!(result.actual_check_time > tick.time());
-        assert!(result.duration.is_some_and(|d| d >= duration));
-
-        head_mock.assert();
     }
 
     #[tokio::test]
@@ -223,10 +169,6 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new();
 
-        let head_disallowed_mock = server.mock(|when, then| {
-            when.method(Method::HEAD).path("/no-head");
-            then.status(StatusCode::METHOD_NOT_ALLOWED.as_u16());
-        });
         let get_mock = server.mock(|when, then| {
             when.method(Method::GET)
                 .path("/no-head")
@@ -248,7 +190,6 @@ mod tests {
             Some(RequestType::Get)
         );
 
-        head_disallowed_mock.assert();
         get_mock.assert();
     }
 
@@ -262,7 +203,7 @@ mod tests {
         let checker = HttpChecker::new();
 
         let timeout_mock = server.mock(|when, then| {
-            when.method(Method::HEAD)
+            when.method(Method::GET)
                 .path("/timeout")
                 .header_exists("sentry-trace");
             then.delay((timeout + TimeDelta::milliseconds(200)).to_std().unwrap())
@@ -295,14 +236,14 @@ mod tests {
         let checker = HttpChecker::new();
 
         let head_mock = server.mock(|when, then| {
-            when.method(Method::HEAD)
-                .path("/head")
+            when.method(Method::GET)
+                .path("/get")
                 .header_exists("sentry-trace");
             then.status(400);
         });
 
         let config = CheckConfig {
-            url: server.url("/head").to_string(),
+            url: server.url("/get").to_string(),
             ..Default::default()
         };
 
