@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
 
 // Represents a bucket of checks at a given tick.
-pub type TickBucket = Vec<Arc<CheckConfig>>;
+pub type TickBucket = HashSet<Arc<CheckConfig>>;
 
 /// TickBuckets are used to determine which checks should be executed at which ticks along the
 /// interval pattern. Each tick contains the set of checks that are assigned to that second.
@@ -87,7 +87,7 @@ pub struct ConfigStore {
 pub type RwConfigStore = RwLock<ConfigStore>;
 
 fn make_empty_tick_buckets() -> TickBuckets {
-    (0..MAX_CHECK_INTERVAL_SECS).map(|_| vec![]).collect()
+    (0..MAX_CHECK_INTERVAL_SECS).map(|_| HashSet::new()).collect()
 }
 
 impl ConfigStore {
@@ -105,6 +105,9 @@ impl ConfigStore {
 
     /// Insert a new Check Configuration into the store.
     pub fn add_config(&mut self, config: Arc<CheckConfig>) {
+        if self.configs.contains_key(&config.subscription_id){
+            self.remove_config(config.subscription_id);
+        }
         self.configs.insert(config.subscription_id, config.clone());
 
         if !self.partitioned_buckets.contains_key(&config.partition) {
@@ -121,7 +124,7 @@ impl ConfigStore {
 
         // Insert the configuration into the appropriate slots
         for slot in config.slots() {
-            buckets[slot].push(config.clone());
+            buckets[slot].insert(config.clone());
         }
 
         self.last_update = Some(Instant::now());
@@ -137,7 +140,7 @@ impl ConfigStore {
         };
 
         for slot in config.slots() {
-            buckets[slot].retain(|c| c.subscription_id != subscription_id);
+            buckets[slot].remove(&config.clone());
         }
 
         self.last_update = Some(Instant::now());
@@ -251,16 +254,62 @@ mod tests {
         store.add_config(five_minute_config.clone());
 
         let second_partition_config = Arc::new(CheckConfig {
+            subscription_id: Uuid::from_u128(180),
             partition: 2,
             ..Default::default()
         });
         store.add_config(second_partition_config.clone());
 
-        assert_eq!(store.configs.len(), 2);
-        assert_eq!(store.partitioned_buckets[&0][0].len(), 2);
-        assert_eq!(store.partitioned_buckets[&0][60].len(), 1);
-        assert_eq!(store.partitioned_buckets[&0][60 * 5].len(), 2);
-        assert_eq!(store.partitioned_buckets[&2][0].len(), 1);
+        assert_eq!(store.configs.len(), 3);
+        for slot in (0..60)
+            .map(|c| (60 * c))
+            .collect::<Vec<_>>(){
+            assert!(store.partitioned_buckets[&0][slot].contains(&config));
+            if slot % 300 == 0 {
+                assert_eq!(store.partitioned_buckets[&0][slot].len(), 2);
+                assert!(store.partitioned_buckets[&0][slot].contains(&five_minute_config));
+            } else{
+                assert_eq!(store.partitioned_buckets[&0][slot].len(), 1);
+            }
+            assert!(store.partitioned_buckets[&2][slot].contains(&second_partition_config));
+            assert_eq!(store.partitioned_buckets[&2][slot].len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_add_duplicate_config() {
+        let mut store = ConfigStore::new();
+
+        let mut config = CheckConfig::default();
+        config.interval = CheckInterval::OneMinute;
+
+        let subsciption_id = config.subscription_id;
+
+        let arc_config = Arc::new(config);
+        store.add_config(arc_config.clone());
+
+        for slot in (0..60)
+            .map(|c| (60 * c))
+            .collect::<Vec<_>>(){
+            assert_eq!(store.partitioned_buckets[&0][slot].len(), 1);
+            assert!(store.partitioned_buckets[&0][slot].contains(&arc_config));
+        }
+
+        let mut config = CheckConfig::default();
+        config.interval = CheckInterval::FiveMinutes;
+        let arc_config = Arc::new(config);
+        store.add_config(arc_config.clone());
+
+        for slot in (0..60)
+            .map(|c| (60 * c))
+            .collect::<Vec<_>>(){
+            if slot % 300 == 0 {
+                assert_eq!(store.partitioned_buckets[&0][slot].len(), 1);
+                assert!(store.partitioned_buckets[&0][slot].contains(&arc_config));
+            } else{
+                assert_eq!(store.partitioned_buckets[&0][slot].len(), 0, "slot {} contained values {:#?}", slot, store.partitioned_buckets[&0][slot]);
+            }
+        }
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use chrono::TimeDelta;
 use serde::Deserialize;
 use serde_repr::Deserialize_repr;
@@ -23,7 +24,7 @@ pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
 
 /// The CheckConfig represents a configuration for a single check.
 #[serde_as]
-#[derive(Debug, PartialEq, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CheckConfig {
     /// The kafka partition this config is associated to.
     #[serde(skip)]
@@ -44,6 +45,20 @@ pub struct CheckConfig {
 
     /// The actual HTTP URL to check.
     pub url: String,
+}
+
+impl PartialEq for CheckConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.subscription_id == other.subscription_id
+    }
+}
+
+impl Eq for CheckConfig {}
+
+impl Hash for CheckConfig {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.subscription_id.hash(state);
+    }
 }
 
 impl CheckConfig {
