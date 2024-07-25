@@ -280,32 +280,31 @@ mod tests {
     fn test_add_duplicate_config() {
         let mut store = ConfigStore::new();
 
-        let mut config = CheckConfig::default();
-        config.interval = CheckInterval::OneMinute;
-
-        let subsciption_id = config.subscription_id;
-
-        let arc_config = Arc::new(config);
-        store.add_config(arc_config.clone());
+        let config = Arc::new(CheckConfig {
+            interval: CheckInterval::OneMinute,
+            ..Default::default()
+        });
+        store.add_config(config.clone());
 
         for slot in (0..60)
             .map(|c| (60 * c))
             .collect::<Vec<_>>(){
             assert_eq!(store.partitioned_buckets[&0][slot].len(), 1);
-            assert!(store.partitioned_buckets[&0][slot].contains(&arc_config));
+            assert!(store.partitioned_buckets[&0][slot].contains(&config));
         }
 
-        let mut config = CheckConfig::default();
-        config.interval = CheckInterval::FiveMinutes;
-        let arc_config = Arc::new(config);
-        store.add_config(arc_config.clone());
+        let config = Arc::new(CheckConfig {
+            interval: CheckInterval::FiveMinutes,
+            ..Default::default()
+        });
+        store.add_config(config.clone());
 
         for slot in (0..60)
             .map(|c| (60 * c))
             .collect::<Vec<_>>(){
             if slot % 300 == 0 {
                 assert_eq!(store.partitioned_buckets[&0][slot].len(), 1);
-                assert!(store.partitioned_buckets[&0][slot].contains(&arc_config));
+                assert!(store.partitioned_buckets[&0][slot].contains(&config));
             } else{
                 assert_eq!(store.partitioned_buckets[&0][slot].len(), 0, "slot {} contained values {:#?}", slot, store.partitioned_buckets[&0][slot]);
             }
