@@ -150,21 +150,22 @@ pub fn run_config_consumer(
 #[cfg(test)]
 mod tests {
     use std::{sync::Arc, vec};
-
+    use std::collections::HashMap;
     use chrono::Utc;
     use rust_arroyo::{
         backends::kafka::types::KafkaPayload,
         types::{BrokerMessage, InnerMessage, Message, Partition, Topic},
     };
+    use rust_arroyo::processing::strategies::ProcessingStrategyFactory;
     use similar_asserts::assert_eq;
     use uuid::uuid;
 
     use crate::{manager::Manager, types::check_config::CheckConfig};
+    use crate::app::config::Config;
+    use super::{ConfigConsumerFactory, register_config};
 
-    use super::register_config;
-
-    #[test]
-    fn test_update_config_store() {
+    #[tokio::test]
+    async fn test_update_config_store() {
         let manager = Arc::new(Manager::new_simple());
 
         // Example msgpack taken from
@@ -210,8 +211,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_drop_config() {
+    #[tokio::test]
+    async fn test_drop_config() {
         let manager = Arc::new(Manager::new_simple());
 
         let example_config = Arc::new(CheckConfig::default());
@@ -252,5 +253,30 @@ mod tests {
         assert_eq!(Arc::strong_count(&example_config), 1);
     }
 
-    // TODO(epurkhiser): We probably want to test the update_partition callback
+    #[tokio::test]
+    async fn test_update_partition() {
+        let config = Arc::new(Config::default());
+        let manager = Arc::new(Manager::new(config.clone()));
+        let factory = ConfigConsumerFactory { manager };
+        let mut partitions: HashMap<Partition, u64> = HashMap::new();
+        partitions.insert(Partition {
+            index: 0,
+            topic: Topic::new("uptime-configs"),
+        }, 0);
+        factory.update_partitions(&partitions);
+        assert_eq!(factory.manager.get_service(0).partition, 0);
+        partitions.remove(&Partition {
+            index: 0,
+            topic: Topic::new("uptime-configs"),
+        });
+        partitions.insert(Partition {
+            index: 1,
+            topic: Topic::new("uptime-configs"),
+        }, 1);
+        factory.update_partitions(&partitions);
+        // TODO: Not sure this is the best way to handle this?
+        let result = std::panic::catch_unwind(|| factory.manager.get_service(0));
+        assert!(result.is_err());
+        assert_eq!(factory.manager.get_service(1).partition, 1);
+    }
 }

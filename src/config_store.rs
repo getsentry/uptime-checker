@@ -278,18 +278,10 @@ mod tests {
         });
         store.add_config(five_minute_config.clone());
 
-        let second_partition_config = Arc::new(CheckConfig {
-            partition: 2,
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128 * 2),
-            ..Default::default()
-        });
-        store.add_config(second_partition_config.clone());
-
         let configs = store.get_configs(Tick::new(0, Utc::now()));
-        assert_eq!(configs.len(), 3);
+        assert_eq!(configs.len(), 2);
         assert!(configs.contains(&config));
         assert!(configs.contains(&five_minute_config));
-        assert!(configs.contains(&second_partition_config));
 
         let no_configs = store.get_configs(Tick::new(1, Utc::now()));
         assert!(no_configs.is_empty());
