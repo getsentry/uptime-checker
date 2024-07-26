@@ -1,5 +1,4 @@
-use std::{collections::HashMap, sync::Arc, thread};
-
+use std::{collections::HashMap, sync::Arc};
 use chrono::TimeDelta;
 use rust_arroyo::{
     backends::kafka::{config::KafkaConfig, types::KafkaPayload, InitialOffset},
@@ -87,6 +86,7 @@ struct ConfigConsumerFactory {
 
 impl ProcessingStrategyFactory<KafkaPayload> for ConfigConsumerFactory {
     fn create(&self) -> Box<dyn ProcessingStrategy<KafkaPayload>> {
+        info!("Creating ConfigConsumerFactory strategy");
         let manager = self.manager.clone();
 
         Box::new(RunTask::new(
@@ -129,7 +129,7 @@ pub fn run_config_consumer(
 
     let mut processing_handle = stream_processor.get_handle();
 
-    let join_handle = thread::spawn(move || {
+    let join_handle = tokio::spawn(async move {
         info!("Starting config consumer");
         stream_processor
             .run()
@@ -138,12 +138,13 @@ pub fn run_config_consumer(
 
     tokio::spawn(async move {
         shutdown.cancelled().await;
+        info!("Shutting down config consumer");
         processing_handle.signal_shutdown();
         join_handle
-            .join()
+            .await
             .expect("Failed to join config consumer consumer thread");
 
-        info!("Config consuemr shutdown");
+        info!("Config consumer shutdown");
     })
 }
 

@@ -17,6 +17,7 @@ pub fn run_scheduler(
     producer: Arc<impl ResultsProducer + 'static>,
     shutdown: CancellationToken,
 ) -> JoinHandle<()> {
+    info!("Starting scheduler");
     tokio::spawn(async move { scheduler_loop(config_store, checker, producer, shutdown).await })
 }
 
@@ -89,6 +90,7 @@ async fn scheduler_loop(
             .read()
             .expect("Lock poisoned")
             .get_configs(tick);
+        info!("Scheduler tick: {} Bucket size: {}", tick, configs.len());
 
         metrics::gauge!("scheduler.bucket_size").set(configs.len() as f64);
 

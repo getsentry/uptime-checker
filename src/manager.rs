@@ -4,6 +4,7 @@ use std::{
 };
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use rust_arroyo::backends::kafka::config::KafkaConfig;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -57,7 +58,7 @@ impl PartitionedService {
         self.shutdown_signal.clone()
     }
 
-    pub fn stop(&self){
+    pub fn stop(&self) {
         self.shutdown_signal.cancel()
     }
 }
@@ -86,9 +87,8 @@ impl Manager {
         manager
     }
 
-    pub fn start(&self, manager: Arc<Manager>) {
-        let _config_consumer =
-            run_config_consumer(&self.config, manager, self.shutdown_signal.clone());
+    pub fn start(&self, manager: Arc<Manager>) -> JoinHandle<()> {
+        run_config_consumer(&self.config, manager, self.shutdown_signal.clone())
     }
 
     pub async fn shutdown(&self) {
@@ -124,7 +124,7 @@ impl Manager {
 
     fn register_partition(&self, partition: u16) {
         info!(partition, "Registering new partition: {}", partition);
-        match self.services.write().unwrap().entry(partition){
+        match self.services.write().unwrap().entry(partition) {
             Occupied(_) => {
                 error!("Attempted to register already registered partition: {}", partition);
             }
@@ -139,7 +139,7 @@ impl Manager {
         info!(partition, "Unregistering revoked partition: {}", partition);
         let Some(service) = self.services.write().unwrap().remove(&partition) else {
             error!("Attempted to unregister a partition that is not registered: {}", partition);
-            return
+            return;
         };
         service.stop();
     }
@@ -154,35 +154,35 @@ mod tests {
     use tracing_test::traced_test;
 
     #[test]
-    fn test_partitioned_service_get_config_store(){
+    fn test_partitioned_service_get_config_store() {
         let service = PartitionedService::new(Arc::new(Config::default()), 0);
         service.get_config_store();
     }
 
     #[tokio::test]
-    async fn test_start_stop(){
+    async fn test_start_stop() {
         let service = PartitionedService::new(Arc::new(Config::default()), 0);
         let shutdown_signal = service.start();
-        assert_eq!(shutdown_signal.is_cancelled(), false);
+        assert!(!shutdown_signal.is_cancelled());
         service.stop();
         assert!(shutdown_signal.is_cancelled());
     }
 
     #[tokio::test]
-    async fn test_manager_get_service(){
+    async fn test_manager_get_service() {
         let manager = Manager::new_simple();
         assert_eq!(manager.get_service(0).partition, 0);
     }
 
     #[tokio::test]
     #[should_panic(expected = "Cannot access unregistered partition")]
-    async fn test_manager_get_service_fail(){
+    async fn test_manager_get_service_fail() {
         let manager = Manager::new_simple();
         manager.get_service(1);
     }
 
     #[tokio::test]
-    async fn test_manager_register_partition(){
+    async fn test_manager_register_partition() {
         let manager = Manager::new_simple();
         manager.register_partition(1);
         assert_eq!(manager.get_service(1).partition, 1);
@@ -190,7 +190,7 @@ mod tests {
 
     #[tokio::test]
     #[traced_test]
-    async fn test_manager_double_register_partition(){
+    async fn test_manager_double_register_partition() {
         let manager = Manager::new_simple();
         manager.register_partition(1);
         manager.register_partition(1);
@@ -199,22 +199,22 @@ mod tests {
 
     #[tokio::test]
     #[should_panic(expected = "Cannot access unregistered partition")]
-    async fn test_manager_unregister_partition(){
+    async fn test_manager_unregister_partition() {
         let manager = Manager::new_simple();
         manager.unregister_partition(0);
-        manager.get_service(0).partition;
+        manager.get_service(0);
     }
 
     #[tokio::test]
     #[traced_test]
-    async fn test_manager_unregister_unregistered_partition(){
+    async fn test_manager_unregister_unregistered_partition() {
         let manager = Manager::new_simple();
         manager.unregister_partition(1);
         assert!(logs_contain("Attempted to unregister a partition that is not registered: 1"));
     }
 
     #[tokio::test]
-    async fn test_manager_update_partitions(){
+    async fn test_manager_update_partitions() {
         let manager = Manager::new_simple();
 
         let new_partitions: HashSet<u16> = [0, 1, 2, 3].iter().cloned().collect();
@@ -235,8 +235,4 @@ mod tests {
             std::panic::catch_unwind(|| manager.get_service(partition)).is_err()
         }), "Partition still exists");
     }
-
-
-
-
 }
