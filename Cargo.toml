@@ -23,6 +23,7 @@ sentry = { version = "0.34.0", features = ["tracing"] }
 thiserror = "1.0.61"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json"] }
+tracing-test = "0.2.5"
 console = "0.15.8"
 sentry-kafka-schemas = "0.1.101"
 serde_with = { version = "3.8.1", features = ["chrono"] }
