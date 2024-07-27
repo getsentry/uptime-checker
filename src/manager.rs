@@ -48,7 +48,7 @@ impl PartitionedService {
             KafkaConfig::new_config(self.config.results_kafka_cluster.to_owned(), None),
         ));
 
-        let check_scheduler = run_scheduler(
+        run_scheduler(
             self.config_store.clone(),
             checker,
             producer,

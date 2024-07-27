@@ -136,7 +136,7 @@ pub fn run_config_consumer(
             .expect("Failed to run config consumer");
     });
 
-    let shutdown_handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         shutdown.cancelled().await;
         processing_handle.signal_shutdown();
         join_handle
@@ -144,9 +144,7 @@ pub fn run_config_consumer(
             .expect("Failed to join config consumer consumer thread");
 
         info!("Config consuemr shutdown");
-    });
-
-    shutdown_handle
+    })
 }
 
 #[cfg(test)]
