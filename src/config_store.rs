@@ -1,10 +1,8 @@
-use std::collections::HashSet;
 use std::sync::RwLock;
 use std::{collections::HashMap, fmt, sync::Arc};
-
+use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use tokio::time::Instant;
-use tracing::{error, trace};
 use uuid::Uuid;
 
 use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
@@ -15,8 +13,6 @@ pub type TickBucket = HashSet<Arc<CheckConfig>>;
 /// TickBuckets are used to determine which checks should be executed at which ticks along the
 /// interval pattern. Each tick contains the set of checks that are assigned to that second.
 pub type TickBuckets = Vec<TickBucket>;
-
-pub type PartitionedTickBuckets = HashMap<u16, TickBuckets>;
 
 /// Ticks represent a location within the TickBuckets. They are guaranteed to be within the
 /// MAX_CHECK_INTERVAL_SECS range.
@@ -65,16 +61,11 @@ impl fmt::Display for Tick {
 /// to retrieve the checks that are scheduled for a given tick.
 ///
 /// CheckConfigs are stored into TickBuckets based on their interval. Each bucket contains the
-/// checks that should be executed at that tick. Each configuration includes the partition it
-/// belongs to, the ConfigStore will group configurations by partition and supports dropping entire
-/// partitions of CheckConfigs.
+/// checks that should be executed at that tick.
 #[derive(Debug)]
 pub struct ConfigStore {
-    /// A ConfigStore is derived from configurations loaded from Kafka, when the assigned
-    /// partitions for the uptime-checker are re-balanced, partitions will be added and removed.
-    /// Storing TickBuckets for each partition makes dropping an entire partition of configs during
-    /// removal simple.
-    partitioned_buckets: HashMap<u16, TickBuckets>,
+    /// A vector of buckets. Each bucket represents a single tick worth of configs.
+    tick_buckets: TickBuckets,
 
     /// Mapping of each subscription_id's config
     configs: HashMap<Uuid, Arc<CheckConfig>>,
@@ -93,7 +84,7 @@ fn make_empty_tick_buckets() -> TickBuckets {
 impl ConfigStore {
     pub fn new() -> ConfigStore {
         ConfigStore {
-            partitioned_buckets: HashMap::new(),
+            tick_buckets: make_empty_tick_buckets(),
             configs: HashMap::new(),
             last_update: None,
         }
@@ -110,21 +101,9 @@ impl ConfigStore {
         }
         self.configs.insert(config.subscription_id, config.clone());
 
-        if !self.partitioned_buckets.contains_key(&config.partition) {
-            // TODO(epurkhiser): This means we're not calling update_partitions correctly. Right
-            // now since we're manually adding configs we can't panic, but in the future we should
-            // consider panicing or having this return a Result.
-            error!("Partition {} is not known!", config.partition);
-        }
-
-        let buckets = self
-            .partitioned_buckets
-            .entry(config.partition)
-            .or_insert_with(make_empty_tick_buckets);
-
         // Insert the configuration into the appropriate slots
         for slot in config.slots() {
-            buckets[slot].insert(config.clone());
+            self.tick_buckets[slot].insert(config.clone());
         }
 
         self.last_update = Some(Instant::now());
@@ -135,66 +114,22 @@ impl ConfigStore {
         let Some(config) = self.configs.remove(&subscription_id) else {
             return;
         };
-        let Some(buckets) = self.partitioned_buckets.get_mut(&config.partition) else {
-            return;
-        };
 
         for slot in config.slots() {
-            buckets[slot].remove(&config.clone());
+            self.tick_buckets[slot].remove(&config.clone());
         }
 
         self.last_update = Some(Instant::now());
     }
 
-    /// Get all check configs across all partitions and buckets.
+    /// Get all check configs across all buckets.
     pub fn all_configs(&self) -> Vec<Arc<CheckConfig>> {
         self.configs.values().cloned().collect()
     }
 
     /// Get all check configs that are scheduled for a given tick.
     pub fn get_configs(&self, tick: Tick) -> TickBucket {
-        self.partitioned_buckets
-            .values()
-            .flat_map(move |b| b[tick.index].iter().cloned())
-            .collect()
-    }
-
-    /// Update the set of partitions that the ConfigStore is responsible for.
-    pub fn update_partitions(&mut self, new_partitions: &HashSet<u16>) {
-        let known_partitions: HashSet<_> = self.partitioned_buckets.keys().cloned().collect();
-
-        // Drop partitions that we are no longer responsible for
-        for removed_part in known_partitions.difference(new_partitions) {
-            self.drop_partition(*removed_part);
-        }
-
-        // Add new partitions
-        for new_partiton in new_partitions.difference(&known_partitions) {
-            self.partitioned_buckets
-                .entry(*new_partiton)
-                .or_insert_with(make_empty_tick_buckets);
-        }
-
-        self.last_update = Some(Instant::now());
-    }
-
-    /// Drop an entire partition of check configurations. This does NOT update the known set of
-    /// partitions. Use update_partitions.
-    fn drop_partition(&mut self, partition: u16) {
-        let Some(buckets) = self.partitioned_buckets.remove(&partition) else {
-            return;
-        };
-
-        buckets
-            .iter()
-            .flat_map(|b| b.iter().cloned())
-            .for_each(|config| {
-                self.configs.remove(&config.subscription_id);
-            });
-
-        trace!("Dropped configs in partition {}", partition);
-
-        self.last_update = Some(Instant::now());
+        self.tick_buckets[tick.index].clone()
     }
 
     /// Retrives the last instant that the config store was updated.
@@ -239,8 +174,8 @@ mod tests {
         store.add_config(config.clone());
 
         assert_eq!(store.configs.len(), 1);
-        assert_eq!(store.partitioned_buckets[&0][0].len(), 1);
-        assert_eq!(store.partitioned_buckets[&0][60].len(), 1);
+        assert_eq!(store.tick_buckets[0].len(), 1);
+        assert_eq!(store.tick_buckets[60].len(), 1);
 
         // Another config with a 5 min interval should be in every 5th slot
         let five_minute_config = Arc::new(CheckConfig {
@@ -253,28 +188,20 @@ mod tests {
         });
         store.add_config(five_minute_config.clone());
 
-        let second_partition_config = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(180),
-            partition: 2,
-            ..Default::default()
-        });
-        store.add_config(second_partition_config.clone());
-
-        assert_eq!(store.configs.len(), 3);
+        assert_eq!(store.configs.len(), 2);
         for slot in (0..60)
             .map(|c| (60 * c))
             .collect::<Vec<_>>(){
-            assert!(store.partitioned_buckets[&0][slot].contains(&config));
+            assert!(store.tick_buckets[slot].contains(&config));
             if slot % 300 == 0 {
-                assert_eq!(store.partitioned_buckets[&0][slot].len(), 2);
-                assert!(store.partitioned_buckets[&0][slot].contains(&five_minute_config));
+                assert_eq!(store.tick_buckets[slot].len(), 2);
+                assert!(store.tick_buckets[slot].contains(&five_minute_config));
             } else{
-                assert_eq!(store.partitioned_buckets[&0][slot].len(), 1);
+                assert_eq!(store.tick_buckets[slot].len(), 1);
             }
-            assert!(store.partitioned_buckets[&2][slot].contains(&second_partition_config));
-            assert_eq!(store.partitioned_buckets[&2][slot].len(), 1);
         }
     }
+
 
     #[test]
     fn test_add_duplicate_config() {
@@ -288,9 +215,9 @@ mod tests {
 
         for slot in (0..60)
             .map(|c| (60 * c))
-            .collect::<Vec<_>>(){
-            assert_eq!(store.partitioned_buckets[&0][slot].len(), 1);
-            assert!(store.partitioned_buckets[&0][slot].contains(&config));
+            .collect::<Vec<_>>() {
+            assert_eq!(store.tick_buckets[slot].len(), 1);
+            assert!(store.tick_buckets[slot].contains(&config));
         }
 
         let config = Arc::new(CheckConfig {
@@ -301,12 +228,12 @@ mod tests {
 
         for slot in (0..60)
             .map(|c| (60 * c))
-            .collect::<Vec<_>>(){
+            .collect::<Vec<_>>() {
             if slot % 300 == 0 {
-                assert_eq!(store.partitioned_buckets[&0][slot].len(), 1);
-                assert!(store.partitioned_buckets[&0][slot].contains(&config));
-            } else{
-                assert_eq!(store.partitioned_buckets[&0][slot].len(), 0, "slot {} contained values {:#?}", slot, store.partitioned_buckets[&0][slot]);
+                assert_eq!(store.tick_buckets[slot].len(), 1);
+                assert!(store.tick_buckets[slot].contains(&config));
+            } else {
+                assert_eq!(store.tick_buckets[slot].len(), 0, "slot {} contained values {:#?}", slot, store.tick_buckets[slot]);
             }
         }
     }
@@ -327,14 +254,14 @@ mod tests {
 
         store.remove_config(config.subscription_id);
         assert_eq!(store.configs.len(), 1);
-        assert_eq!(store.partitioned_buckets[&0][0].len(), 1);
-        assert_eq!(store.partitioned_buckets[&0][60].len(), 0);
-        assert_eq!(store.partitioned_buckets[&0][60 * 5].len(), 1);
+        assert_eq!(store.tick_buckets[0].len(), 1);
+        assert_eq!(store.tick_buckets[60].len(), 0);
+        assert_eq!(store.tick_buckets[60 * 5].len(), 1);
 
         store.remove_config(five_minute_config.subscription_id);
         assert_eq!(store.configs.len(), 0);
-        assert_eq!(store.partitioned_buckets[&0][0].len(), 0);
-        assert_eq!(store.partitioned_buckets[&0][60 * 5].len(), 0);
+        assert_eq!(store.tick_buckets[0].len(), 0);
+        assert_eq!(store.tick_buckets[60 * 5].len(), 0);
     }
 
     #[test]
@@ -366,67 +293,6 @@ mod tests {
 
         let no_configs = store.get_configs(Tick::new(1, Utc::now()));
         assert!(no_configs.is_empty());
-    }
-
-    #[test]
-    fn test_update_partitions() {
-        let mut store = ConfigStore::new();
-
-        // We are responsible for partitions 0 and 2
-        store.update_partitions(&vec![0, 2].into_iter().collect());
-
-        store.add_config(Arc::new(CheckConfig::default()));
-        store.add_config(Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128),
-            interval: CheckInterval::FiveMinutes,
-            ..Default::default()
-        }));
-        store.add_config(Arc::new(CheckConfig {
-            partition: 2,
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128 * 2),
-            ..Default::default()
-        }));
-
-        assert_eq!(store.configs.len(), 3);
-        assert_eq!(store.partitioned_buckets.len(), 2);
-
-        // Udpate with new set of partitions only including partition 0
-        store.update_partitions(&vec![0].into_iter().collect());
-
-        // Partition 2 has been dropped
-        assert_eq!(store.configs.len(), 2);
-        assert_eq!(store.partitioned_buckets.len(), 1);
-        assert!(store.partitioned_buckets.contains_key(&0));
-    }
-
-    #[test]
-    fn test_drop_partition() {
-        let mut store = ConfigStore::new();
-
-        let config = Arc::new(CheckConfig::default());
-        store.add_config(config.clone());
-
-        let five_minute_config = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128),
-            interval: CheckInterval::FiveMinutes,
-            ..Default::default()
-        });
-        store.add_config(five_minute_config.clone());
-
-        let second_partition_config = Arc::new(CheckConfig {
-            partition: 2,
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128 * 2),
-            ..Default::default()
-        });
-        store.add_config(second_partition_config.clone());
-
-        assert_eq!(store.configs.len(), 3);
-        assert_eq!(store.partitioned_buckets.len(), 2);
-
-        store.drop_partition(2);
-        assert_eq!(store.configs.len(), 2);
-        assert_eq!(store.partitioned_buckets.len(), 1);
-        assert!(store.partitioned_buckets.contains_key(&0));
     }
 
     #[tokio::test]
