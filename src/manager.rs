@@ -87,8 +87,8 @@ impl Manager {
         manager
     }
 
-    pub fn start(&self, manager: Arc<Manager>) -> JoinHandle<()> {
-        run_config_consumer(&self.config, manager, self.shutdown_signal.clone())
+    pub fn start(self: &Arc<Manager>) -> JoinHandle<()> {
+        run_config_consumer(&self.config, self.clone(), self.shutdown_signal.clone())
     }
 
     pub async fn shutdown(&self) {
