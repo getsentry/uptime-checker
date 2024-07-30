@@ -36,7 +36,9 @@ pub fn execute() -> io::Result<()> {
                 info!("Shutting down");
                 manager.shutdown().await;
                 // TODO: This should probably happen in the manager
-                config_consumer_shutdown.await.expect("Failed waiting for config consumer shutdown");
+                config_consumer_shutdown
+                    .await
+                    .expect("Failed waiting for config consumer shutdown");
                 info!("Shut down");
 
                 Ok(())

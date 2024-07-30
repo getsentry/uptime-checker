@@ -1,9 +1,9 @@
+use rust_arroyo::backends::kafka::config::KafkaConfig;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
-use std::collections::hash_map::Entry::{Occupied, Vacant};
-use rust_arroyo::backends::kafka::config::KafkaConfig;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -126,10 +126,16 @@ impl Manager {
         info!(partition, "Registering new partition: {}", partition);
         match self.services.write().unwrap().entry(partition) {
             Occupied(_) => {
-                error!("Attempted to register already registered partition: {}", partition);
+                error!(
+                    "Attempted to register already registered partition: {}",
+                    partition
+                );
             }
             Vacant(entry) => {
-                entry.insert(Arc::new(PartitionedService::new(self.config.clone(), partition)));
+                entry.insert(Arc::new(PartitionedService::new(
+                    self.config.clone(),
+                    partition,
+                )));
             }
         }
         self.get_service(partition).start();
@@ -138,7 +144,10 @@ impl Manager {
     fn unregister_partition(&self, partition: u16) {
         info!(partition, "Unregistering revoked partition: {}", partition);
         let Some(service) = self.services.write().unwrap().remove(&partition) else {
-            error!("Attempted to unregister a partition that is not registered: {}", partition);
+            error!(
+                "Attempted to unregister a partition that is not registered: {}",
+                partition
+            );
             return;
         };
         service.stop();
@@ -147,10 +156,10 @@ impl Manager {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc};
-    use std::collections::HashSet;
     use crate::app::config::Config;
     use crate::manager::{Manager, PartitionedService};
+    use std::collections::HashSet;
+    use std::sync::Arc;
     use tracing_test::traced_test;
 
     #[test]
@@ -194,7 +203,9 @@ mod tests {
         let manager = Manager::new_simple();
         manager.register_partition(1);
         manager.register_partition(1);
-        assert!(logs_contain("Attempted to register already registered partition: 1"));
+        assert!(logs_contain(
+            "Attempted to register already registered partition: 1"
+        ));
     }
 
     #[tokio::test]
@@ -210,7 +221,9 @@ mod tests {
     async fn test_manager_unregister_unregistered_partition() {
         let manager = Manager::new_simple();
         manager.unregister_partition(1);
-        assert!(logs_contain("Attempted to unregister a partition that is not registered: 1"));
+        assert!(logs_contain(
+            "Attempted to unregister a partition that is not registered: 1"
+        ));
     }
 
     #[tokio::test]
@@ -219,20 +232,32 @@ mod tests {
 
         let new_partitions: HashSet<u16> = [0, 1, 2, 3].iter().cloned().collect();
         manager.update_partitions(&new_partitions);
-        assert!(new_partitions.iter().all(|&partition| {
-            let service = manager.get_service(partition);
-            service.partition == partition
-        }), "One or more partitions did not match");
+        assert!(
+            new_partitions.iter().all(|&partition| {
+                let service = manager.get_service(partition);
+                service.partition == partition
+            }),
+            "One or more partitions did not match"
+        );
 
         let updated_partitions: HashSet<u16> = [1, 3].iter().cloned().collect();
         manager.update_partitions(&updated_partitions);
-        assert!(updated_partitions.iter().all(|&partition| {
-            let service = manager.get_service(partition);
-            service.partition == partition
-        }), "One or more partitions did not match");
+        assert!(
+            updated_partitions.iter().all(|&partition| {
+                let service = manager.get_service(partition);
+                service.partition == partition
+            }),
+            "One or more partitions did not match"
+        );
 
-        assert!(new_partitions.difference(&updated_partitions).all(|&partition| {
-            std::panic::catch_unwind(|| manager.get_service(partition)).is_err()
-        }), "Partition still exists");
+        assert!(
+            new_partitions
+                .difference(&updated_partitions)
+                .all(|&partition| {
+                    std::panic::catch_unwind(|| manager.get_service(partition)).is_err()
+                }),
+            "Partition still exists"
+        );
     }
 }
+

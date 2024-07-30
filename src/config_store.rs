@@ -1,7 +1,7 @@
+use chrono::{DateTime, Utc};
+use std::collections::HashSet;
 use std::sync::RwLock;
 use std::{collections::HashMap, fmt, sync::Arc};
-use std::collections::HashSet;
-use chrono::{DateTime, Utc};
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -78,7 +78,9 @@ pub struct ConfigStore {
 pub type RwConfigStore = RwLock<ConfigStore>;
 
 fn make_empty_tick_buckets() -> TickBuckets {
-    (0..MAX_CHECK_INTERVAL_SECS).map(|_| HashSet::new()).collect()
+    (0..MAX_CHECK_INTERVAL_SECS)
+        .map(|_| HashSet::new())
+        .collect()
 }
 
 impl ConfigStore {
@@ -96,7 +98,7 @@ impl ConfigStore {
 
     /// Insert a new Check Configuration into the store.
     pub fn add_config(&mut self, config: Arc<CheckConfig>) {
-        if self.configs.contains_key(&config.subscription_id){
+        if self.configs.contains_key(&config.subscription_id) {
             self.remove_config(config.subscription_id);
         }
         self.configs.insert(config.subscription_id, config.clone());
@@ -189,19 +191,16 @@ mod tests {
         store.add_config(five_minute_config.clone());
 
         assert_eq!(store.configs.len(), 2);
-        for slot in (0..60)
-            .map(|c| (60 * c))
-            .collect::<Vec<_>>(){
+        for slot in (0..60).map(|c| (60 * c)).collect::<Vec<_>>() {
             assert!(store.tick_buckets[slot].contains(&config));
             if slot % 300 == 0 {
                 assert_eq!(store.tick_buckets[slot].len(), 2);
                 assert!(store.tick_buckets[slot].contains(&five_minute_config));
-            } else{
+            } else {
                 assert_eq!(store.tick_buckets[slot].len(), 1);
             }
         }
     }
-
 
     #[test]
     fn test_add_duplicate_config() {
@@ -213,9 +212,7 @@ mod tests {
         });
         store.add_config(config.clone());
 
-        for slot in (0..60)
-            .map(|c| (60 * c))
-            .collect::<Vec<_>>() {
+        for slot in (0..60).map(|c| (60 * c)).collect::<Vec<_>>() {
             assert_eq!(store.tick_buckets[slot].len(), 1);
             assert!(store.tick_buckets[slot].contains(&config));
         }
@@ -226,14 +223,18 @@ mod tests {
         });
         store.add_config(config.clone());
 
-        for slot in (0..60)
-            .map(|c| (60 * c))
-            .collect::<Vec<_>>() {
+        for slot in (0..60).map(|c| (60 * c)).collect::<Vec<_>>() {
             if slot % 300 == 0 {
                 assert_eq!(store.tick_buckets[slot].len(), 1);
                 assert!(store.tick_buckets[slot].contains(&config));
             } else {
-                assert_eq!(store.tick_buckets[slot].len(), 0, "slot {} contained values {:#?}", slot, store.tick_buckets[slot]);
+                assert_eq!(
+                    store.tick_buckets[slot].len(),
+                    0,
+                    "slot {} contained values {:#?}",
+                    slot,
+                    store.tick_buckets[slot]
+                );
             }
         }
     }
