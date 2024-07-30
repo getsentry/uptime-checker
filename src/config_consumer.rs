@@ -1,4 +1,3 @@
-use std::{collections::HashMap, sync::Arc};
 use chrono::TimeDelta;
 use rust_arroyo::{
     backends::kafka::{config::KafkaConfig, types::KafkaPayload, InitialOffset},
@@ -11,6 +10,7 @@ use rust_arroyo::{
     },
     types::{InnerMessage, Message, Partition, Topic},
 };
+use std::{collections::HashMap, sync::Arc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
@@ -150,20 +150,20 @@ pub fn run_config_consumer(
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, vec};
-    use std::collections::HashMap;
     use chrono::Utc;
+    use rust_arroyo::processing::strategies::ProcessingStrategyFactory;
     use rust_arroyo::{
         backends::kafka::types::KafkaPayload,
         types::{BrokerMessage, InnerMessage, Message, Partition, Topic},
     };
-    use rust_arroyo::processing::strategies::ProcessingStrategyFactory;
     use similar_asserts::assert_eq;
+    use std::collections::HashMap;
+    use std::{sync::Arc, vec};
     use uuid::uuid;
 
-    use crate::{manager::Manager, types::check_config::CheckConfig};
+    use super::{register_config, ConfigConsumerFactory};
     use crate::app::config::Config;
-    use super::{ConfigConsumerFactory, register_config};
+    use crate::{manager::Manager, types::check_config::CheckConfig};
 
     #[tokio::test]
     async fn test_update_config_store() {
@@ -260,20 +260,26 @@ mod tests {
         let manager = Arc::new(Manager::new(config.clone()));
         let factory = ConfigConsumerFactory { manager };
         let mut partitions: HashMap<Partition, u64> = HashMap::new();
-        partitions.insert(Partition {
-            index: 0,
-            topic: Topic::new("uptime-configs"),
-        }, 0);
+        partitions.insert(
+            Partition {
+                index: 0,
+                topic: Topic::new("uptime-configs"),
+            },
+            0,
+        );
         factory.update_partitions(&partitions);
         assert_eq!(factory.manager.get_service(0).partition, 0);
         partitions.remove(&Partition {
             index: 0,
             topic: Topic::new("uptime-configs"),
         });
-        partitions.insert(Partition {
-            index: 1,
-            topic: Topic::new("uptime-configs"),
-        }, 1);
+        partitions.insert(
+            Partition {
+                index: 1,
+                topic: Topic::new("uptime-configs"),
+            },
+            1,
+        );
         factory.update_partitions(&partitions);
         // TODO: Not sure this is the best way to handle this?
         let result = std::panic::catch_unwind(|| factory.manager.get_service(0));
