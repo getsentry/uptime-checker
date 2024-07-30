@@ -44,7 +44,7 @@ fn register_config(
     match broker_message.payload.payload() {
         // Register new configuration
         Some(payload) => {
-            let mut config: CheckConfig = rmp_serde::from_slice(payload).map_err(|err| {
+            let config: CheckConfig = rmp_serde::from_slice(payload).map_err(|err| {
                 error!(?err, "Failed to decode config message");
                 InvalidMessage::from(broker_message)
             })?;
@@ -53,8 +53,6 @@ fn register_config(
                 error!(?key, ?config.subscription_id, "Config key mismatch");
                 return Err(InvalidMessage::from(broker_message));
             }
-
-            config.partition = partition;
 
             // Store configuration
             debug!(config = ?config, "Consumed configuration");
@@ -205,7 +203,6 @@ mod tests {
             .all_configs();
 
         assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].partition, 0);
         assert_eq!(
             configs[0].subscription_id,
             uuid!("d7629c6c-82be-4f67-9ee7-8a0d977856d2")
