@@ -1,10 +1,11 @@
+use futures::Future;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::pin::Pin;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -87,12 +88,17 @@ impl Manager {
         manager
     }
 
-    pub fn start(self: &Arc<Manager>) -> JoinHandle<()> {
-        run_config_consumer(&self.config, self.clone(), self.shutdown_signal.clone())
-    }
+    pub fn start(self: &Arc<Self>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
+        let consumer_join_handle =
+            run_config_consumer(&self.config, self.clone(), self.shutdown_signal.clone());
 
-    pub async fn shutdown(&self) {
-        self.shutdown_signal.cancel();
+        let shutdown_signal = self.shutdown_signal.clone();
+        move || {
+            Box::pin(async move {
+                shutdown_signal.cancel();
+                consumer_join_handle.await.expect("Failed to stop consumer");
+            })
+        }
     }
 
     pub fn get_service(&self, partition: u16) -> Arc<PartitionedService> {

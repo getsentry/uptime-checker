@@ -30,15 +30,13 @@ pub fn execute() -> io::Result<()> {
             .block_on(async {
                 let manager = Arc::new(Manager::new(config.clone()));
 
-                let config_consumer_shutdown = manager.start();
+                let shutdown = manager.start();
                 info!("Manager started");
+
                 ctrl_c().await.expect("Failed to listen for ctrl-c signal");
-                info!("Shutting down");
-                manager.shutdown().await;
-                // TODO: This should probably happen in the manager
-                config_consumer_shutdown
-                    .await
-                    .expect("Failed waiting for config consumer shutdown");
+
+                info!("Waiting for manager to shut down");
+                shutdown().await;
                 info!("Shut down");
 
                 Ok(())
