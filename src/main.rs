@@ -4,6 +4,7 @@ mod app;
 mod checker;
 mod config_consumer;
 mod config_store;
+mod config_waiter;
 mod logging;
 mod manager;
 mod metrics;
