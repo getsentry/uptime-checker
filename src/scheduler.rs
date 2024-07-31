@@ -12,12 +12,13 @@ use crate::producer::ResultsProducer;
 use crate::types::result::{CheckResult, CheckStatus, CheckStatusReasonType};
 
 pub fn run_scheduler(
+    partition: u16,
     config_store: Arc<RwConfigStore>,
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
     shutdown: CancellationToken,
 ) -> JoinHandle<()> {
-    info!("Starting scheduler");
+    info!(partition, "Starting scheduler");
     tokio::spawn(async move { scheduler_loop(config_store, checker, producer, shutdown).await })
 }
 
@@ -133,7 +134,6 @@ async fn scheduler_loop(
         });
     };
 
-    info!("Starting scheduler");
     while !shutdown.is_cancelled() {
         let interval_tick = interval.tick().await;
         let tick = Tick::from_time(start + interval_tick.duration_since(instant));
