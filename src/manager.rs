@@ -1,6 +1,6 @@
 use futures::Future;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::hash_map::Entry::Vacant;
 use std::pin::Pin;
 use std::{
     collections::{HashMap, HashSet},
@@ -130,26 +130,25 @@ impl Manager {
 
     fn register_partition(&self, partition: u16) {
         info!(partition, "Registering new partition: {}", partition);
-        match self.services.write().unwrap().entry(partition) {
-            Occupied(_) => {
-                error!(
-                    "Attempted to register already registered partition: {}",
-                    partition
-                );
-            }
-            Vacant(entry) => {
-                entry.insert(Arc::new(PartitionedService::new(
-                    self.config.clone(),
-                    partition,
-                )));
-            }
-        }
-        self.get_service(partition).start();
+        let mut services = self.services.write().unwrap();
+
+        let Vacant(entry) = services.entry(partition) else {
+            error!(
+                "Attempted to register already registered partition: {}",
+                partition
+            );
+            return;
+        };
+        let service = PartitionedService::new(self.config.clone(), partition);
+        service.start();
+        entry.insert(Arc::new(service));
     }
 
     fn unregister_partition(&self, partition: u16) {
         info!(partition, "Unregistering revoked partition: {}", partition);
-        let Some(service) = self.services.write().unwrap().remove(&partition) else {
+        let mut services = self.services.write().unwrap();
+
+        let Some(service) = services.remove(&partition) else {
             error!(
                 "Attempted to unregister a partition that is not registered: {}",
                 partition
