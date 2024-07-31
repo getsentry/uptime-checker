@@ -11,7 +11,7 @@ use rust_arroyo::{
     types::{InnerMessage, Message, Partition, Topic},
 };
 use std::{collections::HashMap, sync::Arc};
-use tokio::task::JoinHandle;
+use tokio::task::{self, JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 use uuid::Uuid;
@@ -127,7 +127,7 @@ pub fn run_config_consumer(
 
     let mut processing_handle = stream_processor.get_handle();
 
-    let join_handle = tokio::spawn(async move {
+    let join_handle = task::spawn_blocking(|| {
         info!("Starting config consumer");
         stream_processor
             .run()
