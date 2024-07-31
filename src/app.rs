@@ -33,11 +33,11 @@ pub fn execute() -> io::Result<()> {
                 let shutdown = manager.start();
                 info!("Manager started");
 
-                ctrl_c().await.expect("Failed to listen for ctrl-c signal");
+                ctrl_c().await.expect("Failed to listen for SIGINT signal");
 
-                info!("Waiting for manager to shut down");
+                info!("Got SIGINT. Shutting down");
                 shutdown().await;
-                info!("Shut down");
+                info!("Shut down complete");
 
                 Ok(())
             }),
