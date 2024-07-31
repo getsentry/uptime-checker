@@ -1,8 +1,8 @@
-use std::hash::{Hash, Hasher};
 use chrono::TimeDelta;
 use serde::Deserialize;
 use serde_repr::Deserialize_repr;
 use serde_with::serde_as;
+use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
 const ONE_MINUTE: isize = 60;

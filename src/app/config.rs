@@ -147,7 +147,10 @@ mod tests {
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
-                    redis_cluster_nodes: vec!["10.0.0.1:6379".to_owned(), "10.0.0.2:6379".to_owned()],
+                    redis_cluster_nodes: vec![
+                        "10.0.0.1:6379".to_owned(),
+                        "10.0.0.2:6379".to_owned()
+                    ],
                 }
             );
             Ok(())
@@ -201,7 +204,10 @@ mod tests {
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
-                    redis_cluster_nodes: vec!["10.0.0.3:6379".to_owned(), "10.0.0.2:6379".to_owned()],
+                    redis_cluster_nodes: vec![
+                        "10.0.0.3:6379".to_owned(),
+                        "10.0.0.2:6379".to_owned()
+                    ],
                 }
             );
             Ok(())
