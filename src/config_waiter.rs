@@ -1,3 +1,12 @@
+use std::{sync::Arc, time::Duration};
+
+use tokio::{
+    sync::oneshot::{self, Receiver},
+    time::{interval, Instant},
+};
+
+use crate::config_store::RwConfigStore;
+
 /// How long does the consumer need to be idle before we consider it to have "finished" reading the
 /// backlog of configs.
 const BOOT_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -7,7 +16,7 @@ const BOOT_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
 const BOOT_MAX_IDLE: Duration = Duration::from_secs(10);
 
 /// This function waits for the config_store to have completed the "boot-up" of loading a backlog
-/// of configs.
+/// of configs in a partition.
 ///
 /// This works by waiting for the ConfigStore to not have been updated for more than BOOT_MAX_IDLE
 /// time. In practice this means that a new config was not produced into the topic for more than
@@ -21,7 +30,7 @@ const BOOT_MAX_IDLE: Duration = Duration::from_secs(10);
 /// produced at all times.
 ///
 /// The returned Receiver can be awaited
-fn wait_for_boot(config_store: Arc<RwConfigStore>) -> Receiver<()> {
+pub fn wait_for_partition_boot(config_store: Arc<RwConfigStore>, partition: u16) -> Receiver<()> {
     let start = Instant::now();
     let (boot_finished, boot_finished_rx) = oneshot::channel::<()>();
 
@@ -55,11 +64,21 @@ fn wait_for_boot(config_store: Arc<RwConfigStore>) -> Receiver<()> {
             .all_configs()
             .len();
 
-        tracing::info!(boot_time_ms, total_configs, "bootup_complete");
-        metrics::gauge!("config_consumer.boot_time_ms").set(boot_time_ms as f64);
-        metrics::gauge!("config_consumer.total_configs").set(total_configs as f64);
+        tracing::info!(
+            name: "partition_boot_complete",
+            boot_time_ms,
+            total_configs,
+            partition,
+            "Partition {} finished booting",
+            partition
+        );
 
-        boot_finished.send(()).expect("Failed to report bo");
+        metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string())
+            .set(boot_time_ms as f64);
+        metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string())
+            .set(total_configs as f64);
+
+        boot_finished.send(()).expect("Failed to report boot");
     });
 
     boot_finished_rx
@@ -67,11 +86,19 @@ fn wait_for_boot(config_store: Arc<RwConfigStore>) -> Receiver<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::Arc, task::Poll};
+
+    use futures::poll;
+    use tokio::time::sleep;
+
+    use super::*;
+    use crate::{config_store::ConfigStore, types::check_config::CheckConfig};
+
     #[tokio::test(start_paused = true)]
     async fn test_wait_for_boot() {
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let wait_booted = super::wait_for_boot(config_store.clone());
+        let wait_booted = wait_for_partition_boot(config_store.clone(), 0);
         tokio::pin!(wait_booted);
 
         // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.

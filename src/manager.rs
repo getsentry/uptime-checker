@@ -9,6 +9,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+use crate::config_waiter::wait_for_partition_boot;
 use crate::{
     app::config::Config,
     checker::http_checker::HttpChecker,
@@ -50,8 +51,16 @@ impl PartitionedService {
             KafkaConfig::new_config(self.config.results_kafka_cluster.to_owned(), None),
         ));
 
+        let config_store = self.get_config_store();
+        let partition = self.partition;
+
+        // TODO(epurkhiser): We may want to wait to start the scheduler until "booting" completes,
+        // otherwise we may execute checks for old configs in a partition that are removed later in
+        // the log.
+        tokio::spawn(async move { wait_for_partition_boot(config_store, partition).await });
+
         run_scheduler(
-            self.config_store.clone(),
+            self.get_config_store(),
             checker,
             producer,
             self.shutdown_signal.clone(),
@@ -88,6 +97,12 @@ impl Manager {
         manager
     }
 
+    /// Starts the config consumer. When uptime-config partitions are assigned PartitionedService's
+    /// will be started for each partition automatically. Each PartitionedService is responsible for
+    /// scheduling configs belonging to that partition.
+    ///
+    /// The returned shutdown function may be called to stop the consumer and thus shutdown all
+    /// PartitionedService's, stopping check execution.
     pub fn start(self: &Arc<Self>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
         let consumer_join_handle =
             run_config_consumer(&self.config, self.clone(), self.shutdown_signal.clone());
