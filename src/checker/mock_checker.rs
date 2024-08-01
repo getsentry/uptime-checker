@@ -14,9 +14,6 @@ impl MockChecker {
     }
 }
 impl Checker for MockChecker {
-    /// Makes a request to a url to determine whether it is up.
-    /// Up is defined as returning a 2xx within a specific timeframe.
-    #[tracing::instrument]
     async fn check_url(&self, config: &CheckConfig, tick: &Tick) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
