@@ -5,7 +5,6 @@ pub mod config;
 
 use clap::Parser;
 use tokio::signal::ctrl_c;
-use tracing::info;
 
 use crate::{
     logging::{self, LoggingConfig},
@@ -20,7 +19,7 @@ pub fn execute() -> io::Result<()> {
     logging::init(LoggingConfig::from_config(&config));
     metrics::init(MetricsConfig::from_config(&config));
 
-    info!(config = ?config);
+    tracing::info!(config = ?config);
 
     match app.command {
         cli::Commands::Run => tokio::runtime::Builder::new_multi_thread()
@@ -31,13 +30,13 @@ pub fn execute() -> io::Result<()> {
                 let manager = Arc::new(Manager::new(config.clone()));
 
                 let shutdown = manager.start();
-                info!("Manager started");
+                tracing::info!("system.manager_started");
 
                 ctrl_c().await.expect("Failed to listen for SIGINT signal");
 
-                info!("Got SIGINT. Shutting down");
+                tracing::info!("system.got_sigint");
                 shutdown().await;
-                info!("Shut down complete");
+                tracing::info!("system.shutdown");
 
                 Ok(())
             }),

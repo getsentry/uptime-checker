@@ -7,7 +7,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
 
 use crate::config_waiter::wait_for_partition_boot;
 use crate::{
@@ -145,14 +144,11 @@ impl Manager {
     }
 
     fn register_partition(&self, partition: u16) {
-        info!(partition, "Registering new partition: {}", partition);
+        tracing::info!(partition, "partition_update.registered_new");
         let mut services = self.services.write().unwrap();
 
         let Vacant(entry) = services.entry(partition) else {
-            error!(
-                "Attempted to register already registered partition: {}",
-                partition
-            );
+            tracing::error!(partition, "partition_update.already_registered");
             return;
         };
         let service = PartitionedService::new(self.config.clone(), partition);
@@ -161,14 +157,11 @@ impl Manager {
     }
 
     fn unregister_partition(&self, partition: u16) {
-        info!(partition, "Unregistering revoked partition: {}", partition);
+        tracing::info!(partition, "partition_update.unregistering");
         let mut services = self.services.write().unwrap();
 
         let Some(service) = services.remove(&partition) else {
-            error!(
-                "Attempted to unregister a partition that is not registered: {}",
-                partition
-            );
+            tracing::error!(partition, "partition_update.not_registered");
             return;
         };
         service.stop();

@@ -13,7 +13,6 @@ use rust_arroyo::{
 use std::{collections::HashMap, sync::Arc};
 use tokio::task::{self, JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::{app::config::Config, manager::Manager, types::check_config::CheckConfig};
@@ -30,11 +29,11 @@ fn register_config(
     let partition = broker_message.partition.index;
 
     let key = broker_message.payload.key().ok_or_else(|| {
-        error!("Missing message key (subscription_id)");
+        tracing::error!("config_consumer.missing_payload_key");
         InvalidMessage::from(broker_message)
     })?;
     let subscription_id = Uuid::from_slice(key).map_err(|err| {
-        error!(?err, got_key = ?key, "Key must be a valid subscription_id UUID.");
+        tracing::error!(?err, got_key = ?key, "config_consumer.invalid_uuid_message_key");
         InvalidMessage::from(broker_message)
     })?;
 
@@ -45,17 +44,17 @@ fn register_config(
         // Register new configuration
         Some(payload) => {
             let config: CheckConfig = rmp_serde::from_slice(payload).map_err(|err| {
-                error!(?err, "Failed to decode config message");
+                tracing::error!(?err, "config_consumer.invalid_config_message");
                 InvalidMessage::from(broker_message)
             })?;
 
             if config.subscription_id != subscription_id {
-                error!(?key, ?config.subscription_id, "Config key mismatch");
+                tracing::error!(?key, ?config.subscription_id, "config_consumer.key_mismatch");
                 return Err(InvalidMessage::from(broker_message));
             }
 
             // Store configuration
-            debug!(config = ?config, "Consumed configuration");
+            tracing::debug!(config = ?config, "config_consumer.config_added");
             manager
                 .get_service(partition)
                 .get_config_store()
@@ -71,7 +70,7 @@ fn register_config(
                 .write()
                 .expect("Lock poisoned")
                 .remove_config(subscription_id);
-            debug!(%subscription_id, "Removed configuration");
+            tracing::debug!(%subscription_id, "config_consumer.config_removed");
         }
     }
 
@@ -84,7 +83,7 @@ struct ConfigConsumerFactory {
 
 impl ProcessingStrategyFactory<KafkaPayload> for ConfigConsumerFactory {
     fn create(&self) -> Box<dyn ProcessingStrategy<KafkaPayload>> {
-        info!("Creating ConfigConsumerFactory strategy");
+        tracing::info!("config_consumer.creating_processing_strategy");
         let manager = self.manager.clone();
 
         Box::new(RunTask::new(
@@ -128,7 +127,7 @@ pub fn run_config_consumer(
     let mut processing_handle = stream_processor.get_handle();
 
     let join_handle = task::spawn_blocking(|| {
-        info!("Starting config consumer");
+        tracing::info!("config_consumer.started");
         stream_processor
             .run()
             .expect("Failed to run config consumer");
@@ -136,13 +135,13 @@ pub fn run_config_consumer(
 
     tokio::spawn(async move {
         shutdown.cancelled().await;
-        info!("Shutting down config consumer");
+        tracing::info!("config_consumer.shutdown_starting");
         processing_handle.signal_shutdown();
         join_handle
             .await
             .expect("Failed to join config consumer consumer thread");
 
-        info!("Config consumer shutdown");
+        tracing::info!("config_consumer.shutdown_complete");
     })
 }
 

@@ -65,12 +65,10 @@ pub fn wait_for_partition_boot(config_store: Arc<RwConfigStore>, partition: u16)
             .len();
 
         tracing::info!(
-            name: "partition_boot_complete",
             boot_time_ms,
             total_configs,
             partition,
-            "Partition {} finished booting",
-            partition
+            "config_consumer.partition_boot_complete",
         );
 
         metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string())
