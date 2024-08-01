@@ -7,13 +7,13 @@ use crate::types::check_config::CheckConfig;
 use crate::types::result::{CheckResult, CheckStatus};
 
 #[derive(Clone, Debug)]
-pub struct MockChecker {}
-impl MockChecker {
+pub struct DummyChecker {}
+impl DummyChecker {
     pub fn new() -> Self {
         Self {}
     }
 }
-impl Checker for MockChecker {
+impl Checker for DummyChecker {
     async fn check_url(&self, config: &CheckConfig, tick: &Tick) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
