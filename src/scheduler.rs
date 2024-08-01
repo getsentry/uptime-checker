@@ -4,7 +4,6 @@ use chrono::Utc;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
 
 use crate::checker::Checker;
 use crate::config_store::{RwConfigStore, Tick};
@@ -18,7 +17,7 @@ pub fn run_scheduler(
     producer: Arc<impl ResultsProducer + 'static>,
     shutdown: CancellationToken,
 ) -> JoinHandle<()> {
-    info!(partition, "Starting scheduler");
+    tracing::info!(partition, "Starting scheduler");
     tokio::spawn(async move { scheduler_loop(config_store, checker, producer, shutdown).await })
 }
 
@@ -91,7 +90,7 @@ async fn scheduler_loop(
             .read()
             .expect("Lock poisoned")
             .get_configs(tick);
-        info!("Scheduler tick: {} Bucket size: {}", tick, configs.len());
+        tracing::info!("Scheduler tick: {} Bucket size: {}", tick, configs.len());
 
         metrics::gauge!("scheduler.bucket_size").set(configs.len() as f64);
 
@@ -108,10 +107,10 @@ async fn scheduler_loop(
                 let check_result = job_checker.check_url(&config, &tick).await;
 
                 if let Err(e) = job_producer.produce_checker_result(&check_result) {
-                    error!(error = ?e, "Failed to produce check result");
+                    tracing::error!(error = ?e, "Failed to produce check result");
                 }
 
-                info!(result = ?check_result, "Check complete");
+                tracing::info!(result = ?check_result, "Check complete");
                 record_result_metrics(&check_result);
             });
         }
@@ -125,7 +124,7 @@ async fn scheduler_loop(
             while join_set.join_next().await.is_some() {}
             let execution_duration = tick_start.elapsed();
 
-            debug!(
+            tracing::debug!(
                 result = %tick,
                 duration = ?execution_duration,
                 checks_ran,
@@ -139,5 +138,5 @@ async fn scheduler_loop(
         let tick = Tick::from_time(start + interval_tick.duration_since(instant));
         schedule_checks(tick);
     }
-    info!("Scheduler shutdown");
+    tracing::info!("Scheduler shutdown");
 }
