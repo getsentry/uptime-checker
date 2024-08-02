@@ -29,8 +29,6 @@ jobs:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - name: Install Rust Toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update
-      - name: Update cargo
-        run: cargo update
       - name: Lint
         run: cargo clippy --workspace --all-targets --all-features --no-deps -- -D warnings
       - name: Format
