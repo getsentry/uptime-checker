@@ -1,20 +1,15 @@
-use rust_arroyo::backends::kafka::config::KafkaConfig;
-use rust_arroyo::backends::kafka::producer::KafkaProducer;
-use rust_arroyo::types::{Topic, TopicOrPartition};
-use sentry_kafka_schemas::Schema;
 use crate::producer::{ExtractCodeError, ResultsProducer};
 use crate::types::result::CheckResult;
+use sentry_kafka_schemas::Schema;
 
 pub struct DummyResultsProducer {
     schema: Schema,
 }
 
 impl DummyResultsProducer {
-    pub fn new(topic_name: &str) -> Self {
+    pub fn new(_topic_name: &str) -> Self {
         let schema = sentry_kafka_schemas::get_schema("uptime-results", None).unwrap();
-        Self {
-            schema,
-        }
+        Self { schema }
     }
 }
 
@@ -25,3 +20,4 @@ impl ResultsProducer for DummyResultsProducer {
         Ok(())
     }
 }
+

@@ -1,10 +1,10 @@
-use chrono::Utc;
-use sentry::protocol::{SpanId, TraceId};
-use uuid::Uuid;
 use crate::checker::Checker;
 use crate::config_store::Tick;
 use crate::types::check_config::CheckConfig;
 use crate::types::result::{CheckResult, CheckStatus};
+use chrono::Utc;
+use sentry::protocol::{SpanId, TraceId};
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct DummyChecker {}
@@ -38,3 +38,4 @@ impl Checker for DummyChecker {
         }
     }
 }
+
