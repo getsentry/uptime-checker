@@ -1,3 +1,4 @@
+pub mod dummy_producer;
 pub mod kafka_producer;
 
 use sentry_kafka_schemas::SchemaError;
