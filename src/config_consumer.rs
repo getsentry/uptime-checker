@@ -164,7 +164,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_config_store() {
-        let manager = Arc::new(Manager::new_simple());
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
+        manager.update_partitions(&vec![0u16].into_iter().collect());
 
         // Example msgpack taken from
         // sentry-kafka-schemas/examples/uptime-configs/1/example.msgpack
@@ -210,7 +211,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_drop_config() {
-        let manager = Arc::new(Manager::new_simple());
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
+        manager.update_partitions(&vec![0u16].into_iter().collect());
 
         let example_config = Arc::new(CheckConfig::default());
         manager
@@ -252,8 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_partition() {
-        let config = Arc::new(Config::default());
-        let manager = Arc::new(Manager::new(config.clone()));
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         let factory = ConfigConsumerFactory { manager };
         let mut partitions: HashMap<Partition, u64> = HashMap::new();
         partitions.insert(

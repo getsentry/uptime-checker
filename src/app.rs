@@ -27,9 +27,7 @@ pub fn execute() -> io::Result<()> {
             .build()
             .unwrap()
             .block_on(async {
-                let manager = Arc::new(Manager::new(config.clone()));
-
-                let shutdown = manager.start();
+                let shutdown = Manager::start(config);
                 tracing::info!("system.manager_started");
 
                 ctrl_c().await.expect("Failed to listen for SIGINT signal");

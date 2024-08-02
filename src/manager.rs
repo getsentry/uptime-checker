@@ -6,6 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::config_waiter::wait_for_partition_boot;
@@ -28,90 +29,89 @@ pub struct PartitionedService {
 }
 
 impl PartitionedService {
-    pub fn new(config: Arc<Config>, partition: u16) -> Self {
-        Self {
-            config,
-            partition,
-            config_store: Arc::new(ConfigStore::new_rw()),
-            shutdown_signal: CancellationToken::new(),
-        }
-    }
+    pub fn start(config: Arc<Config>, partition: u16) -> (Self, JoinHandle<()>) {
+        let config_store = Arc::new(ConfigStore::new_rw());
 
-    pub fn get_config_store(&self) -> Arc<RwConfigStore> {
-        self.config_store.clone()
-    }
-
-    /// Begin scheduling checks for this partition.
-    pub fn start(&self) -> CancellationToken {
         let checker = Arc::new(HttpChecker::new());
-
         let producer = Arc::new(KafkaResultsProducer::new(
-            &self.config.results_kafka_topic,
-            KafkaConfig::new_config(self.config.results_kafka_cluster.to_owned(), None),
+            &config.results_kafka_topic,
+            KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
         ));
 
-        let config_store = self.get_config_store();
-        let partition = self.partition;
+        let waiter_config_store = config_store.clone();
 
         // TODO(epurkhiser): We may want to wait to start the scheduler until "booting" completes,
         // otherwise we may execute checks for old configs in a partition that are removed later in
         // the log.
-        tokio::spawn(async move { wait_for_partition_boot(config_store, partition).await });
+        tokio::spawn(async move { wait_for_partition_boot(waiter_config_store, partition).await });
 
-        run_scheduler(
-            self.partition,
-            self.get_config_store(),
+        let shutdown_signal = CancellationToken::new();
+        let scheduler_join_handle = run_scheduler(
+            partition,
+            config_store.clone(),
             checker,
             producer,
-            self.shutdown_signal.clone(),
+            shutdown_signal.clone(),
         );
-        self.shutdown_signal.clone()
+
+        let service = Self {
+            config,
+            partition,
+            config_store,
+            shutdown_signal,
+        };
+
+        (service, scheduler_join_handle)
     }
 
     pub fn get_partition(&self) -> u16 {
         self.partition
     }
 
-    pub fn stop(&self) {
-        self.shutdown_signal.cancel()
+    pub fn get_config_store(&self) -> Arc<RwConfigStore> {
+        self.config_store.clone()
     }
+
+    pub fn stop(&self) {
+        self.shutdown_signal.cancel();
+    }
+}
+
+#[derive(Debug)]
+struct ServiceHandle {
+    service: Arc<PartitionedService>,
+    join_handle: JoinHandle<()>,
 }
 
 #[derive(Debug)]
 pub struct Manager {
     config: Arc<Config>,
-    services: RwLock<HashMap<u16, Arc<PartitionedService>>>,
+    services: RwLock<HashMap<u16, ServiceHandle>>,
     shutdown_signal: CancellationToken,
 }
 
 impl Manager {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self {
-            config,
-            services: RwLock::new(HashMap::new()),
-            shutdown_signal: CancellationToken::new(),
-        }
-    }
-
-    /// Instantiates a new manager with a single partition and a default config
-    pub fn new_simple() -> Self {
-        let config = Arc::new(Config::default());
-        let manager = Self::new(config);
-        manager.register_partition(0);
-        manager
-    }
-
     /// Starts the config consumer. When uptime-config partitions are assigned PartitionedService's
     /// will be started for each partition automatically. Each PartitionedService is responsible for
     /// scheduling configs belonging to that partition.
     ///
     /// The returned shutdown function may be called to stop the consumer and thus shutdown all
     /// PartitionedService's, stopping check execution.
-    pub fn start(self: &Arc<Self>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
-        let consumer_join_handle =
-            run_config_consumer(&self.config, self.clone(), self.shutdown_signal.clone());
+    pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
+        let manager = Arc::new(Self {
+            config,
+            services: RwLock::new(HashMap::new()),
+            shutdown_signal: CancellationToken::new(),
+        });
 
-        let shutdown_signal = self.shutdown_signal.clone();
+        let consumer_join_handle = run_config_consumer(
+            &manager.config,
+            manager.clone(),
+            manager.shutdown_signal.clone(),
+        );
+
+        let shutdown_signal = manager.shutdown_signal.clone();
+
         move || {
             Box::pin(async move {
                 shutdown_signal.cancel();
@@ -126,6 +126,7 @@ impl Manager {
             .unwrap()
             .get(&partition)
             .expect("Cannot access unregistered partition")
+            .service
             .clone()
     }
 
@@ -155,20 +156,25 @@ impl Manager {
             tracing::error!(partition, "partition_update.already_registered");
             return;
         };
-        let service = PartitionedService::new(self.config.clone(), partition);
-        service.start();
-        entry.insert(Arc::new(service));
+
+        let (service, join_handle) = PartitionedService::start(self.config.clone(), partition);
+        entry.insert(ServiceHandle {
+            service: Arc::new(service),
+            join_handle,
+        });
     }
 
     fn unregister_partition(&self, partition: u16) {
         tracing::info!(partition, "partition_update.unregistering");
         let mut services = self.services.write().unwrap();
 
-        let Some(service) = services.remove(&partition) else {
+        let Some(service_handle) = services.remove(&partition).take() else {
             tracing::error!(partition, "partition_update.not_registered");
             return;
         };
-        service.stop();
+
+        service_handle.service.stop();
+        // TODO(epurkhiser): We should have a task that waits on the join handles to complete
     }
 }
 
@@ -176,41 +182,54 @@ impl Manager {
 mod tests {
     use crate::app::config::Config;
     use crate::manager::{Manager, PartitionedService};
-    use std::collections::HashSet;
-    use std::sync::Arc;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Arc, RwLock};
+    use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
 
-    #[test]
-    fn test_partitioned_service_get_config_store() {
-        let service = PartitionedService::new(Arc::new(Config::default()), 0);
+    impl Manager {
+        pub fn start_without_consumer(config: Arc<Config>) -> Arc<Self> {
+            Arc::new(Self {
+                config,
+                services: RwLock::new(HashMap::new()),
+                shutdown_signal: CancellationToken::new(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_partitioned_service_get_config_store() {
+        let (service, join_handle) = PartitionedService::start(Arc::new(Config::default()), 0);
         service.get_config_store();
+        service.stop();
+        join_handle.await.unwrap();
     }
 
     #[tokio::test]
     async fn test_start_stop() {
-        let service = PartitionedService::new(Arc::new(Config::default()), 0);
-        let shutdown_signal = service.start();
-        assert!(!shutdown_signal.is_cancelled());
+        let (service, join_handle) = PartitionedService::start(Arc::new(Config::default()), 0);
         service.stop();
-        assert!(shutdown_signal.is_cancelled());
+        join_handle.await.unwrap();
     }
 
     #[tokio::test]
     async fn test_manager_get_service() {
-        let manager = Manager::new_simple();
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
+        manager.register_partition(0);
         assert_eq!(manager.get_service(0).partition, 0);
     }
 
     #[tokio::test]
     #[should_panic(expected = "Cannot access unregistered partition")]
     async fn test_manager_get_service_fail() {
-        let manager = Manager::new_simple();
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
+        manager.register_partition(0);
         manager.get_service(1);
     }
 
     #[tokio::test]
     async fn test_manager_register_partition() {
-        let manager = Manager::new_simple();
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         manager.register_partition(1);
         assert_eq!(manager.get_service(1).partition, 1);
     }
@@ -218,7 +237,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_manager_double_register_partition() {
-        let manager = Manager::new_simple();
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         manager.register_partition(1);
         manager.register_partition(1);
         assert!(logs_contain(
@@ -229,7 +248,8 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "Cannot access unregistered partition")]
     async fn test_manager_unregister_partition() {
-        let manager = Manager::new_simple();
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
+        manager.register_partition(0);
         manager.unregister_partition(0);
         manager.get_service(0);
     }
@@ -237,14 +257,15 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_manager_unregister_unregistered_partition() {
-        let manager = Manager::new_simple();
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         manager.unregister_partition(1);
         assert!(logs_contain("partition_update.not_registered partition=1"));
     }
 
     #[tokio::test]
     async fn test_manager_update_partitions() {
-        let manager = Manager::new_simple();
+        let manager = Manager::start_without_consumer(Arc::new(Config::default()));
+        manager.register_partition(0);
 
         let new_partitions: HashSet<u16> = [0, 1, 2, 3].iter().cloned().collect();
         manager.update_partitions(&new_partitions);
