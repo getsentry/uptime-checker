@@ -39,7 +39,7 @@ pub enum RequestType {
 }
 
 /// Captures the reason for a check's given status
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CheckStatusReason {
     /// The type of the status reason
@@ -50,7 +50,7 @@ pub struct CheckStatusReason {
     pub description: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct RequestInfo {
     /// The type of HTTP method used for the check
@@ -62,7 +62,7 @@ pub struct RequestInfo {
 }
 
 #[serde_as]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CheckResult {
     /// Unique identifier of the uptime check
