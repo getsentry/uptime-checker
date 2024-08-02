@@ -33,6 +33,7 @@ tokio-util = "0.7.11"
 metrics-exporter-statsd = "0.8.0"
 metrics = "0.23.0"
 futures = "0.3.30"
+tokio-stream = "0.1.15"
 
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }

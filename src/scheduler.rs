@@ -1,82 +1,28 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::checker::Checker;
+use crate::check_executor::ScheduledCheck;
 use crate::config_store::{RwConfigStore, Tick};
-use crate::producer::ResultsProducer;
-use crate::types::result::{CheckResult, CheckStatus, CheckStatusReasonType};
 
 pub fn run_scheduler(
     partition: u16,
     config_store: Arc<RwConfigStore>,
-    checker: Arc<impl Checker + 'static>,
-    producer: Arc<impl ResultsProducer + 'static>,
+    executor: UnboundedSender<ScheduledCheck>,
     shutdown: CancellationToken,
 ) -> JoinHandle<()> {
     tracing::info!(partition, "scheduler.starting");
-    tokio::spawn(async move { scheduler_loop(config_store, checker, producer, shutdown).await })
-}
-
-fn record_result_metrics(result: &CheckResult) {
-    // Record metrics
-    let CheckResult {
-        status,
-        scheduled_check_time,
-        actual_check_time,
-        duration,
-        status_reason,
-        ..
-    } = result;
-
-    let status_label = match status {
-        CheckStatus::Success => "success",
-        CheckStatus::Failure => "failure",
-        CheckStatus::MissedWindow => "missed_window",
-    };
-    let failure_reason = match status_reason.as_ref().map(|r| r.status_type) {
-        Some(CheckStatusReasonType::Failure) => Some("failure"),
-        Some(CheckStatusReasonType::DnsError) => Some("dns_error"),
-        Some(CheckStatusReasonType::Timeout) => Some("timeout"),
-        None => None,
-    };
-
-    // Record duration of check
-    if let Some(duration) = duration {
-        metrics::histogram!(
-            "check_result.duration_ms",
-            "histogram" => "timer",
-            "status" => status_label,
-            "failure_reason" => failure_reason.unwrap_or("ok"),
-        )
-        .record(duration.num_milliseconds() as f64);
-    }
-
-    // Record time between scheduled and actual check
-    metrics::histogram!(
-        "check_result.delay_ms",
-        "histogram" => "timer",
-        "status" => status_label,
-        "failure_reason" => failure_reason.unwrap_or("ok"),
-    )
-    .record((*actual_check_time - *scheduled_check_time).num_milliseconds() as f64);
-
-    // Record status of the check
-    metrics::counter!(
-        "check_result.processed",
-        "status" => status_label,
-        "failure_reason" => failure_reason.unwrap_or("ok"),
-    )
-    .increment(1);
+    tokio::spawn(async move { scheduler_loop(config_store, executor, shutdown).await })
 }
 
 async fn scheduler_loop(
     config_store: Arc<RwConfigStore>,
-    checker: Arc<impl Checker + 'static>,
-    producer: Arc<impl ResultsProducer + 'static>,
+    executor: UnboundedSender<ScheduledCheck>,
     shutdown: CancellationToken,
 ) {
     let mut interval = time::interval(time::Duration::from_secs(1));
@@ -94,25 +40,20 @@ async fn scheduler_loop(
 
         metrics::gauge!("scheduler.bucket_size").set(configs.len() as f64);
 
-        let mut join_set = JoinSet::new();
+        let mut results = vec![];
 
         // TODO(epurkhiser): Check if we skipped any ticks If we did we should catch up on those.
 
-        // TODO: We should put schedule config executions into a worker using mpsc
         for config in configs {
-            let job_checker = checker.clone();
-            let job_producer = producer.clone();
+            let (resolve, resolve_rx) = oneshot::channel();
 
-            join_set.spawn(async move {
-                let check_result = job_checker.check_url(&config, &tick).await;
-
-                if let Err(e) = job_producer.produce_checker_result(&check_result) {
-                    tracing::error!(error = ?e, "executor.failed_to_produce_result");
-                }
-
-                tracing::info!(result = ?check_result, "executor.check_complete");
-                record_result_metrics(&check_result);
-            });
+            let scheduled_check = ScheduledCheck {
+                tick,
+                config,
+                resolve,
+            };
+            executor.send(scheduled_check);
+            results.push(resolve_rx);
         }
 
         // Spawn a task to wait for checks to complete.
@@ -120,14 +61,17 @@ async fn scheduler_loop(
         // TODO(epurkhiser): We'll want to record the tick timestamp  in redis or some other store
         // so that we can resume processing if we fail to process ticks (crash-loop, etc)
         tokio::spawn(async move {
-            let checks_ran = join_set.len();
-            while join_set.join_next().await.is_some() {}
+            let checks_scheduled = results.len();
+            while let Some(result) = results.pop() {
+                result.await;
+            }
+
             let execution_duration = tick_start.elapsed();
 
             tracing::debug!(
                 result = %tick,
                 duration = ?execution_duration,
-                checks_ran,
+                checks_scheduled,
                 "scheduler.tick_execution_complete"
             );
         });

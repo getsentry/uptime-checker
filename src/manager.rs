@@ -6,8 +6,10 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
+use crate::check_executor::{run_executor, ScheduledCheck};
 use crate::config_waiter::wait_for_partition_boot;
 use crate::{
     app::config::Config,
@@ -24,14 +26,20 @@ pub struct PartitionedService {
     pub partition: u16,
     config: Arc<Config>,
     config_store: Arc<RwConfigStore>,
+    executor_sender: UnboundedSender<ScheduledCheck>,
     shutdown_signal: CancellationToken,
 }
 
 impl PartitionedService {
-    pub fn new(config: Arc<Config>, partition: u16) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        executor_sender: UnboundedSender<ScheduledCheck>,
+        partition: u16,
+    ) -> Self {
         Self {
             config,
             partition,
+            executor_sender,
             config_store: Arc::new(ConfigStore::new_rw()),
             shutdown_signal: CancellationToken::new(),
         }
@@ -61,8 +69,7 @@ impl PartitionedService {
         run_scheduler(
             self.partition,
             self.get_config_store(),
-            checker,
-            producer,
+            self.executor_sender.clone(),
             self.shutdown_signal.clone(),
         );
         self.shutdown_signal.clone()
@@ -77,6 +84,7 @@ impl PartitionedService {
 pub struct Manager {
     config: Arc<Config>,
     services: RwLock<HashMap<u16, Arc<PartitionedService>>>,
+    executor_sender: Option<UnboundedSender<ScheduledCheck>>,
     shutdown_signal: CancellationToken,
 }
 
@@ -86,6 +94,7 @@ impl Manager {
             config,
             services: RwLock::new(HashMap::new()),
             shutdown_signal: CancellationToken::new(),
+            executor_sender: None,
         }
     }
 
@@ -106,6 +115,18 @@ impl Manager {
     pub fn start(self: &Arc<Self>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
         let consumer_join_handle =
             run_config_consumer(&self.config, self.clone(), self.shutdown_signal.clone());
+
+        let checker = Arc::new(HttpChecker::new());
+
+        let producer = Arc::new(KafkaResultsProducer::new(
+            &self.config.results_kafka_topic,
+            KafkaConfig::new_config(self.config.results_kafka_cluster.to_owned(), None),
+        ));
+
+        let (executor_sender, executor_join_handle) =
+            run_executor(self.config.checker_concurrency, checker, producer);
+
+        self.executor_sender.replace(executor_sender);
 
         let shutdown_signal = self.shutdown_signal.clone();
         move || {
@@ -151,7 +172,14 @@ impl Manager {
             tracing::error!(partition, "partition_update.already_registered");
             return;
         };
-        let service = PartitionedService::new(self.config.clone(), partition);
+        let Some(ref executor_sender) = self.executor_sender else {
+            tracing::error!(partition, "manager.executor_not_started");
+            return;
+        };
+
+        let service =
+            PartitionedService::new(self.config.clone(), executor_sender.clone(), partition);
+
         service.start();
         entry.insert(Arc::new(service));
     }
