@@ -60,6 +60,7 @@ impl PartitionedService {
         tokio::spawn(async move { wait_for_partition_boot(config_store, partition).await });
 
         run_scheduler(
+            self.partition,
             self.get_config_store(),
             checker,
             producer,
