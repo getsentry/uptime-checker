@@ -1,3 +1,4 @@
+pub mod dummy_checker;
 pub mod http_checker;
 
 use std::future::Future;
