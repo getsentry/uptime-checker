@@ -264,7 +264,7 @@ mod tests {
             0,
         );
         factory.update_partitions(&partitions);
-        assert_eq!(factory.manager.get_service(0).partition, 0);
+        assert_eq!(factory.manager.get_service(0).get_partition(), 0);
         partitions.remove(&Partition {
             index: 0,
             topic: Topic::new("uptime-configs"),
@@ -280,6 +280,6 @@ mod tests {
         // TODO: Not sure this is the best way to handle this?
         let result = std::panic::catch_unwind(|| factory.manager.get_service(0));
         assert!(result.is_err());
-        assert_eq!(factory.manager.get_service(1).partition, 1);
+        assert_eq!(factory.manager.get_service(1).get_partition(), 1);
     }
 }
