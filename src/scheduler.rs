@@ -137,8 +137,6 @@ async fn scheduler_loop(
     while !shutdown.is_cancelled() {
         let interval_tick = interval.tick().await;
         let tick = Tick::from_time(start + interval_tick.duration_since(instant));
-
-        debug!(tick = %tick, "Scheduler ticking");
         schedule_checks(tick);
     }
     info!("Scheduler shutdown");
