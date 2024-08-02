@@ -1,18 +1,28 @@
+use std::time::Duration;
+
+use chrono::Utc;
+use sentry::protocol::{SpanId, TraceId};
+use tokio::time;
+use uuid::Uuid;
+
 use crate::checker::Checker;
 use crate::config_store::Tick;
 use crate::types::check_config::CheckConfig;
 use crate::types::result::{CheckResult, CheckStatus};
-use chrono::Utc;
-use sentry::protocol::{SpanId, TraceId};
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
-pub struct DummyChecker {}
+pub struct DummyChecker {
+    delay: Option<Duration>,
+}
+
 impl DummyChecker {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(delay: impl Into<Option<Duration>>) -> Self {
+        Self {
+            delay: delay.into(),
+        }
     }
 }
+
 impl Checker for DummyChecker {
     async fn check_url(&self, config: &CheckConfig, tick: &Tick) -> CheckResult {
         let scheduled_check_time = tick.time();
@@ -23,6 +33,10 @@ impl Checker for DummyChecker {
         let status = CheckStatus::Success;
         let status_reason = None;
         let request_info = None;
+
+        if let Some(delay) = self.delay {
+            time::sleep(delay).await;
+        }
 
         CheckResult {
             guid: Uuid::new_v4(),
