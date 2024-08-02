@@ -21,7 +21,7 @@ use crate::{
 /// Represents the set of services that run per partition.
 #[derive(Debug)]
 pub struct PartitionedService {
-    pub partition: u16,
+    partition: u16,
     config: Arc<Config>,
     config_store: Arc<RwConfigStore>,
     shutdown_signal: CancellationToken,
@@ -66,6 +66,10 @@ impl PartitionedService {
             self.shutdown_signal.clone(),
         );
         self.shutdown_signal.clone()
+    }
+
+    pub fn get_partition(&self) -> u16 {
+        self.partition
     }
 
     pub fn stop(&self) {
