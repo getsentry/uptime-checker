@@ -218,7 +218,7 @@ mod tests {
         manager.register_partition(1);
         manager.register_partition(1);
         assert!(logs_contain(
-            "Attempted to register already registered partition: 1"
+            "partition_update.already_registered partition=1"
         ));
     }
 
@@ -235,9 +235,7 @@ mod tests {
     async fn test_manager_unregister_unregistered_partition() {
         let manager = Manager::new_simple();
         manager.unregister_partition(1);
-        assert!(logs_contain(
-            "Attempted to unregister a partition that is not registered: 1"
-        ));
+        assert!(logs_contain("partition_update.not_registered partition=1"));
     }
 
     #[tokio::test]
