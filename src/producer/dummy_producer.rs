@@ -20,4 +20,3 @@ impl ResultsProducer for DummyResultsProducer {
         Ok(())
     }
 }
-

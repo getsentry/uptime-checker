@@ -38,4 +38,3 @@ impl Checker for DummyChecker {
         }
     }
 }
-
