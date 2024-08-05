@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use chrono::{TimeDelta, Utc};
 use futures::StreamExt;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use uuid::Uuid;
 
 use crate::checker::Checker;
 use crate::config_store::Tick;
@@ -28,6 +30,24 @@ impl ScheduledCheck {
     /// Get the tick this check was scheduled at.
     pub fn get_tick(&self) -> &Tick {
         &self.tick
+    }
+}
+
+impl CheckResult {
+    /// Produce a missed check result from a scheduld check.
+    pub fn missed_from(config: &CheckConfig, tick: &Tick) -> Self {
+        Self {
+            guid: Uuid::new_v4(),
+            subscription_id: config.subscription_id,
+            status: CheckStatus::MissedWindow,
+            status_reason: None,
+            trace_id: Default::default(),
+            span_id: Default::default(),
+            scheduled_check_time: tick.time(),
+            actual_check_time: Utc::now(),
+            duration: None,
+            request_info: None,
+        }
     }
 }
 
@@ -81,18 +101,21 @@ async fn executor_loop(
 
             // TODO(epurkhiser): Record metrics on the size of the size of the queue
 
-            // TODO(epurkhiser): If we're past the check deadline for a check (eg, it's past when
-            // it was scheduled + it's interval) then report the check as missed.
-
             async move {
-                let ScheduledCheck {
-                    config,
-                    tick,
-                    resolve_tx,
-                } = scheduled_check;
-
                 let _ = tokio::spawn(async move {
-                    let check_result = job_checker.check_url(&config, &tick).await;
+                    let config = &scheduled_check.config;
+                    let tick = &scheduled_check.tick;
+
+                    // If a check execution is processed after more than the interval of the check
+                    // config we skip the check, we were too late
+                    let late_by = Utc::now() - tick.time();
+                    let interval = TimeDelta::seconds(config.interval as i64);
+
+                    let check_result = if late_by > interval {
+                        CheckResult::missed_from(config, tick)
+                    } else {
+                        job_checker.check_url(config, tick).await
+                    };
 
                     if let Err(e) = job_producer.produce_checker_result(&check_result) {
                         tracing::error!(error = ?e, "executor.failed_to_produce");
@@ -177,6 +200,7 @@ mod tests {
     use super::*;
     use crate::{
         checker::dummy_checker::DummyChecker, producer::dummy_producer::DummyResultsProducer,
+        types::check_config::CheckInterval,
     };
 
     #[tokio::test(start_paused = true)]
@@ -201,6 +225,7 @@ mod tests {
 
         let result = resolve_rx.await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
+        assert_eq!(result.status, CheckStatus::Success);
     }
 
     #[tokio::test(start_paused = true)]
@@ -252,5 +277,25 @@ mod tests {
         time::sleep(Duration::from_millis(1001)).await;
         assert!(matches!(poll!(resolve_rx_3.as_mut()), Poll::Ready(_)));
         assert!(matches!(poll!(resolve_rx_4.as_mut()), Poll::Ready(_)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_executor_missed() {
+        let checker = Arc::new(DummyChecker::new(Duration::from_secs(1)));
+        let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
+
+        let (sender, _) = run_executor(1, checker, producer);
+
+        let tick = Tick::from_time(Utc::now() - TimeDelta::minutes(2));
+        let config = Arc::new(CheckConfig {
+            subscription_id: Uuid::from_u128(1),
+            interval: CheckInterval::OneMinute,
+            ..Default::default()
+        });
+
+        let result = queue_check(&sender, tick, config.clone()).await.unwrap();
+
+        assert_eq!(result.subscription_id, config.subscription_id);
+        assert_eq!(result.status, CheckStatus::MissedWindow);
     }
 }
