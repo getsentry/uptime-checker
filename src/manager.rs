@@ -9,6 +9,7 @@ use std::{
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::check_executor::{run_executor, CheckSender};
 use crate::config_waiter::wait_for_partition_boot;
 use crate::{
     app::config::Config,
@@ -29,14 +30,12 @@ pub struct PartitionedService {
 }
 
 impl PartitionedService {
-    pub fn start(config: Arc<Config>, partition: u16) -> (Self, JoinHandle<()>) {
+    pub fn start(
+        config: Arc<Config>,
+        executor_sender: CheckSender,
+        partition: u16,
+    ) -> (Self, JoinHandle<()>) {
         let config_store = Arc::new(ConfigStore::new_rw());
-
-        let checker = Arc::new(HttpChecker::new());
-        let producer = Arc::new(KafkaResultsProducer::new(
-            &config.results_kafka_topic,
-            KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
-        ));
 
         let waiter_config_store = config_store.clone();
 
@@ -49,8 +48,7 @@ impl PartitionedService {
         let scheduler_join_handle = run_scheduler(
             partition,
             config_store.clone(),
-            checker,
-            producer,
+            executor_sender,
             shutdown_signal.clone(),
         );
 
@@ -87,6 +85,7 @@ struct ServiceHandle {
 pub struct Manager {
     config: Arc<Config>,
     services: RwLock<HashMap<u16, ServiceHandle>>,
+    executor_sender: CheckSender,
     shutdown_signal: CancellationToken,
 }
 
@@ -98,9 +97,22 @@ impl Manager {
     /// The returned shutdown function may be called to stop the consumer and thus shutdown all
     /// PartitionedService's, stopping check execution.
     pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
+        let checker = Arc::new(HttpChecker::new());
+
+        let producer = Arc::new(KafkaResultsProducer::new(
+            &config.results_kafka_topic,
+            KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
+        ));
+
+        // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
+        // referneces of the Sender (executor_sender) are dropped.
+        let (executor_sender, executor_join_handle) =
+            run_executor(config.checker_concurrency, checker, producer);
+
         let manager = Arc::new(Self {
             config,
             services: RwLock::new(HashMap::new()),
+            executor_sender,
             shutdown_signal: CancellationToken::new(),
         });
 
@@ -116,6 +128,7 @@ impl Manager {
             Box::pin(async move {
                 shutdown_signal.cancel();
                 consumer_join_handle.await.expect("Failed to stop consumer");
+                executor_join_handle.await.expect("Failed to stop executor");
             })
         }
     }
@@ -161,7 +174,9 @@ impl Manager {
             return;
         };
 
-        let (service, join_handle) = PartitionedService::start(self.config.clone(), partition);
+        let (service, join_handle) =
+            PartitionedService::start(self.config.clone(), self.executor_sender.clone(), partition);
+
         entry.insert(ServiceHandle {
             service: Arc::new(service),
             join_handle,
@@ -188,14 +203,17 @@ mod tests {
     use crate::manager::{Manager, PartitionedService};
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
+    use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
 
     impl Manager {
         pub fn start_without_consumer(config: Arc<Config>) -> Arc<Self> {
+            let (executor_sender, _) = mpsc::unbounded_channel();
             Arc::new(Self {
                 config,
                 services: RwLock::new(HashMap::new()),
+                executor_sender,
                 shutdown_signal: CancellationToken::new(),
             })
         }
@@ -203,7 +221,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_partitioned_service_get_config_store() {
-        let (service, join_handle) = PartitionedService::start(Arc::new(Config::default()), 0);
+        let (executor_sender, _) = mpsc::unbounded_channel();
+        let (service, join_handle) =
+            PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
         service.get_config_store();
         service.stop();
         join_handle.await.unwrap();
@@ -211,7 +231,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_stop() {
-        let (service, join_handle) = PartitionedService::start(Arc::new(Config::default()), 0);
+        let (executor_sender, _) = mpsc::unbounded_channel();
+        let (service, join_handle) =
+            PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
         service.stop();
         join_handle.await.unwrap();
     }

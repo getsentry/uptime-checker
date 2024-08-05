@@ -19,6 +19,18 @@ pub struct ScheduledCheck {
     resolve_tx: Sender<CheckResult>,
 }
 
+impl ScheduledCheck {
+    /// Get the scheduled CheckConfig.
+    pub fn get_config(&self) -> &Arc<CheckConfig> {
+        &self.config
+    }
+
+    /// Get the tick this check was scheduled at.
+    pub fn get_tick(&self) -> &Tick {
+        &self.tick
+    }
+}
+
 pub type CheckSender = UnboundedSender<ScheduledCheck>;
 
 pub fn run_executor(
