@@ -26,6 +26,9 @@ pub struct Config {
     /// The log format to output.
     pub log_format: logging::LogFormat,
 
+    /// The number of HTTP checks that will be executed at once.
+    pub checker_concurrency: usize,
+
     /// The statsd address to report metrics to.
     pub statsd_addr: SocketAddr,
 
@@ -63,6 +66,7 @@ impl Default for Config {
         Self {
             sentry_dsn: None,
             sentry_env: None,
+            checker_concurrency: 200,
             log_level: logging::Level::Warn,
             log_format: logging::LogFormat::Auto,
             statsd_addr: "127.0.0.1:8126".parse().unwrap(),
@@ -119,6 +123,7 @@ mod tests {
                 r#"
                 sentry_dsn: my_dsn
                 sentry_env: my_env
+                checker_concurrency: 100
                 results_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
                 configs_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
                 statsd_addr: 10.0.0.1:8126
@@ -140,6 +145,7 @@ mod tests {
                 Config {
                     sentry_dsn: Some("my_dsn".to_owned()),
                     sentry_env: Some(Cow::from("my_env")),
+                    checker_concurrency: 100,
                     log_level: logging::Level::Warn,
                     log_format: logging::LogFormat::Auto,
                     statsd_addr: "10.0.0.1:8126".parse().unwrap(),
@@ -197,6 +203,7 @@ mod tests {
                 Config {
                     sentry_dsn: Some("my_dsn".to_owned()),
                     sentry_env: Some(Cow::from("my_env_override")),
+                    checker_concurrency: 200,
                     log_level: logging::Level::Trace,
                     log_format: logging::LogFormat::Json,
                     statsd_addr: "10.0.0.1:1234".parse().unwrap(),
