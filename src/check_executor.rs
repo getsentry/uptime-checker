@@ -124,7 +124,8 @@ async fn executor_loop(
                     record_result_metrics(&check_result);
                     tracing::info!(result = ?check_result, "executor.check_complete");
 
-                    resolve_tx
+                    scheduled_check
+                        .resolve_tx
                         .send(check_result)
                         .expect("Failed to resolve completed check");
                 })
