@@ -129,6 +129,10 @@ impl Manager {
             .clone()
     }
 
+    pub fn has_service(&self, partition: u16) -> bool {
+        self.services.read().unwrap().contains_key(&partition)
+    }
+
     /// Notify the manager for which parititions it is responsible for.
     ///
     /// Partitions that were previously known will have their services dropped. New partitions will
@@ -246,7 +250,7 @@ mod tests {
     async fn test_manager_update_partitions() {
         let manager = Manager::new_simple();
 
-        let new_partitions: HashSet<u16> = [0, 1, 2, 3].iter().cloned().collect();
+        let new_partitions: HashSet<u16> = [0, 1, 2, 3].into_iter().collect();
         manager.update_partitions(&new_partitions);
         assert!(
             new_partitions.iter().all(|&partition| {
@@ -256,22 +260,19 @@ mod tests {
             "One or more partitions did not match"
         );
 
-        let updated_partitions: HashSet<u16> = [1, 3].iter().cloned().collect();
+        let updated_partitions: HashSet<u16> = [1, 3].into_iter().collect();
         manager.update_partitions(&updated_partitions);
         assert!(
-            updated_partitions.iter().all(|&partition| {
-                let service = manager.get_service(partition);
-                service.partition == partition
-            }),
+            updated_partitions
+                .iter()
+                .all(|&partition| { manager.get_service(partition).partition == partition }),
             "One or more partitions did not match"
         );
 
         assert!(
             new_partitions
                 .difference(&updated_partitions)
-                .all(|&partition| {
-                    std::panic::catch_unwind(|| manager.get_service(partition)).is_err()
-                }),
+                .all(|&partition| { !manager.has_service(partition) }),
             "Partition still exists"
         );
     }

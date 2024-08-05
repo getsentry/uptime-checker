@@ -286,9 +286,7 @@ mod tests {
             1,
         );
         factory.update_partitions(&partitions);
-        // TODO: Not sure this is the best way to handle this?
-        let result = std::panic::catch_unwind(|| factory.manager.get_service(0));
-        assert!(result.is_err());
-        assert_eq!(factory.manager.get_service(1).get_partition(), 1);
+        assert!(!factory.manager.has_service(0));
+        assert!(factory.manager.has_service(1));
     }
 }
