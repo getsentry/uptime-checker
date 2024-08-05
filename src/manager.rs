@@ -27,14 +27,11 @@ pub struct PartitionedService {
     config: Arc<Config>,
     config_store: Arc<RwConfigStore>,
     shutdown_signal: CancellationToken,
+    scheduler_join_handle: JoinHandle<()>,
 }
 
 impl PartitionedService {
-    pub fn start(
-        config: Arc<Config>,
-        executor_sender: CheckSender,
-        partition: u16,
-    ) -> (Self, JoinHandle<()>) {
+    pub fn start(config: Arc<Config>, executor_sender: CheckSender, partition: u16) -> Self {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let waiter_config_store = config_store.clone();
@@ -52,14 +49,13 @@ impl PartitionedService {
             shutdown_signal.clone(),
         );
 
-        let service = Self {
+        Self {
             config,
             partition,
             config_store,
             shutdown_signal,
-        };
-
-        (service, scheduler_join_handle)
+            scheduler_join_handle,
+        }
     }
 
     pub fn get_partition(&self) -> u16 {
@@ -72,19 +68,15 @@ impl PartitionedService {
 
     pub fn stop(&self) {
         self.shutdown_signal.cancel();
+        // TODO: We shuld change this method to mut and async
+        // self.scheduler_join_handle.await.unwrap();
     }
-}
-
-#[derive(Debug)]
-struct ServiceHandle {
-    service: Arc<PartitionedService>,
-    join_handle: JoinHandle<()>,
 }
 
 #[derive(Debug)]
 pub struct Manager {
     config: Arc<Config>,
-    services: RwLock<HashMap<u16, ServiceHandle>>,
+    services: RwLock<HashMap<u16, Arc<PartitionedService>>>,
     executor_sender: CheckSender,
     shutdown_signal: CancellationToken,
 }
@@ -139,7 +131,6 @@ impl Manager {
             .unwrap()
             .get(&partition)
             .expect("Cannot access unregistered partition")
-            .service
             .clone()
     }
 
@@ -174,26 +165,23 @@ impl Manager {
             return;
         };
 
-        let (service, join_handle) =
+        let service =
             PartitionedService::start(self.config.clone(), self.executor_sender.clone(), partition);
-
-        entry.insert(ServiceHandle {
-            service: Arc::new(service),
-            join_handle,
-        });
+        entry.insert(Arc::new(service));
     }
 
     fn unregister_partition(&self, partition: u16) {
         tracing::info!(partition, "partition_update.unregistering");
         let mut services = self.services.write().unwrap();
 
-        let Some(service_handle) = services.remove(&partition).take() else {
+        let Some(service) = services.remove(&partition).take() else {
             tracing::error!(partition, "partition_update.not_registered");
             return;
         };
 
-        service_handle.service.stop();
-        // TODO(epurkhiser): We should have a task that waits on the join handles to complete
+        // TODO(epurkhiser): When `stop` becomes async we'll need a task and queue that we can put
+        // this stop call in to shutdown the service and wait for it to complete async
+        service.stop();
     }
 }
 
@@ -222,20 +210,16 @@ mod tests {
     #[tokio::test]
     async fn test_partitioned_service_get_config_store() {
         let (executor_sender, _) = mpsc::unbounded_channel();
-        let (service, join_handle) =
-            PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
+        let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
         service.get_config_store();
         service.stop();
-        join_handle.await.unwrap();
     }
 
     #[tokio::test]
     async fn test_start_stop() {
         let (executor_sender, _) = mpsc::unbounded_channel();
-        let (service, join_handle) =
-            PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
+        let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
         service.stop();
-        join_handle.await.unwrap();
     }
 
     #[tokio::test]
