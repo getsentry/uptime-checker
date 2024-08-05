@@ -10,7 +10,10 @@ use rust_arroyo::{
     },
     types::{InnerMessage, Message, Partition, Topic},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use tokio::task::{self, JoinHandle};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -117,6 +120,8 @@ pub fn run_config_consumer(
         None,
     );
 
+    let local_manager = manager.clone();
+
     let stream_processor = StreamProcessor::with_kafka(
         consumer_config,
         ConfigConsumerFactory { manager },
@@ -140,6 +145,10 @@ pub fn run_config_consumer(
         join_handle
             .await
             .expect("Failed to join config consumer consumer thread");
+
+        // XXX: Ensure all partitions are revoked once the consumer has shutdown. I would expect
+        // the conumser to do this, but it doesn't seem like it always does?
+        local_manager.update_partitions(&HashSet::new());
 
         tracing::info!("config_consumer.shutdown_complete");
     })
