@@ -26,7 +26,7 @@ pub fn run_executor(
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
 ) -> (CheckSender, JoinHandle<()>) {
-    tracing::info!("Starting check executor");
+    tracing::info!("executor.starting");
 
     let (sender, reciever) = mpsc::unbounded_channel();
     let executor =
@@ -97,6 +97,7 @@ async fn executor_loop(
             }
         })
         .await;
+    tracing::info!("executor.shutdown");
 }
 
 fn record_result_metrics(result: &CheckResult) {
