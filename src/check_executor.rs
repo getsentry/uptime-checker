@@ -120,6 +120,9 @@ async fn executor_loop(
                     let late_by = Utc::now() - tick.time();
                     let interval = TimeDelta::seconds(config.interval as i64);
 
+                    // TODO(epurkhiser): Let's figure out why we're not reporting misses
+                    tracing::info!(%interval, %late_by, "check_executor.lateness");
+
                     let check_result = if late_by > interval {
                         CheckResult::missed_from(config, tick)
                     } else {
@@ -174,6 +177,8 @@ fn record_result_metrics(result: &CheckResult) {
             "failure_reason" => failure_reason.unwrap_or("ok"),
         )
         .record(duration.num_milliseconds() as f64);
+
+        tracing::info!("duration is {}", duration.num_milliseconds() as f64);
     }
 
     // Record time between scheduled and actual check
