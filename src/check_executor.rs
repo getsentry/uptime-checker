@@ -31,10 +31,17 @@ impl ScheduledCheck {
     pub fn get_tick(&self) -> &Tick {
         &self.tick
     }
+
+    /// Report the completion of the scheduled check.
+    pub fn record_result(self, result: CheckResult) {
+        self.resolve_tx
+            .send(result)
+            .expect("Failed to resolve completed check");
+    }
 }
 
 impl CheckResult {
-    /// Produce a missed check result from a scheduld check.
+    /// Produce a missed check result from a scheduled check.
     pub fn missed_from(config: &CheckConfig, tick: &Tick) -> Self {
         Self {
             guid: Uuid::new_v4(),
@@ -67,6 +74,8 @@ pub fn run_executor(
     (sender, executor)
 }
 
+/// Queues a check for execution, returning a oneshot receiver that will be fired once the check
+/// has resolved to a CheckResult.
 pub fn queue_check(
     sender: &CheckSender,
     tick: Tick,
@@ -124,10 +133,7 @@ async fn executor_loop(
                     record_result_metrics(&check_result);
                     tracing::info!(result = ?check_result, "executor.check_complete");
 
-                    scheduled_check
-                        .resolve_tx
-                        .send(check_result)
-                        .expect("Failed to resolve completed check");
+                    scheduled_check.record_result(check_result);
                 })
                 .await;
             }
