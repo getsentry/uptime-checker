@@ -190,6 +190,11 @@ fn record_result_metrics(result: &CheckResult) {
     )
     .record((*actual_check_time - *scheduled_check_time).num_milliseconds() as f64);
 
+    tracing::info!(
+        "delay is {}",
+        (*actual_check_time - *scheduled_check_time).num_milliseconds() as f64
+    );
+
     // Record status of the check
     metrics::counter!(
         "check_result.processed",
