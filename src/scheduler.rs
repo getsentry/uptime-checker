@@ -54,9 +54,11 @@ async fn scheduler_loop(
     tracing::debug!(progress_key, result, "scheduler.redis_stored_tick_value");
     let start = match result {
         Some(result) => {
-            let nanos: i64 = result.parse().unwrap_or(Utc::now().timestamp());
-            Utc.timestamp_nanos(nanos) + tick_frequency
+            let last_completed_check_nanos: i64 = result.parse().unwrap_or(Utc::now().timestamp());
+            Utc.timestamp_nanos(last_completed_check_nanos) + tick_frequency
         }
+        // We truncate the initial date to the nearest second so that we're aligned to the second
+        // boundary here
         None => Utc::now().duration_trunc(TimeDelta::seconds(1)).unwrap(),
     };
     tracing::info!(%start, "scheduler.starting_at");
@@ -184,7 +186,6 @@ mod tests {
             .set(progress_key.clone(), 0)
             .expect("Couldn't save progress of scheduler");
 
-
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let config1 = Arc::new(CheckConfig {
@@ -278,7 +279,10 @@ mod tests {
         let client = Client::open(config.redis_host.clone()).unwrap();
         let mut connection = client.get_connection().expect("Unable to connect to Redis");
         let _: () = connection
-            .set(progress_key.clone(), std::time::Duration::from_secs(2).as_nanos().to_string())
+            .set(
+                progress_key.clone(),
+                std::time::Duration::from_secs(2).as_nanos().to_string(),
+            )
             .expect("Couldn't save progress of scheduler");
 
         let config_store = Arc::new(ConfigStore::new_rw());
