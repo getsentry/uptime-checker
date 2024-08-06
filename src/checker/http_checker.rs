@@ -1,4 +1,5 @@
 use chrono::{TimeDelta, Utc};
+use reqwest::header::HeaderMap;
 use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::{SpanId, TraceId};
 use std::error::Error;
@@ -15,6 +16,9 @@ use crate::types::{
 };
 
 use super::Checker;
+
+const UPTIME_USER_AGENT: &str =
+    "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
 
 /// Responsible for making HTTP requests to check if a domain is up.
 #[derive(Clone, Debug)]
@@ -63,7 +67,11 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
 
 impl HttpChecker {
     pub fn new() -> Self {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
+
         let client = ClientBuilder::new()
+            .default_headers(default_headers)
             .build()
             .expect("Failed to build checker client");
 
@@ -155,7 +163,7 @@ mod tests {
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType, RequestType};
 
-    use super::HttpChecker;
+    use super::{HttpChecker, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
@@ -172,7 +180,8 @@ mod tests {
         let get_mock = server.mock(|when, then| {
             when.method(Method::GET)
                 .path("/no-head")
-                .header_exists("sentry-trace");
+                .header_exists("sentry-trace")
+                .header("User-Agent", UPTIME_USER_AGENT.to_string());
             then.status(200);
         });
 
