@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 const ONE_MINUTE: isize = 60;
 
-/// Valid intervals between the checks
+/// Valid intervals between the checks in seconds.
 #[repr(isize)]
 #[derive(Debug, Copy, Clone, PartialEq, Deserialize_repr)]
 pub enum CheckInterval {
