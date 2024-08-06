@@ -1,10 +1,10 @@
+use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 use std::sync::RwLock;
 use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::time::Instant;
 use uuid::Uuid;
-use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
 
 // Represents a bucket of checks at a given tick.
 pub type TickBucket = HashSet<Arc<CheckConfig>>;
