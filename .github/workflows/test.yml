@@ -10,7 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: shogo82148/actions-setup-redis@v1
+        with:
+          redis-version: "7.x"
       - name: Install Rust Toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update
       - name: Run Cargo Tests
         run: cargo test
+

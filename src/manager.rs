@@ -30,6 +30,10 @@ pub struct PartitionedService {
     scheduler_join_handle: JoinHandle<()>,
 }
 
+pub fn build_progress_key(partition: u16) -> String {
+    format!("scheduler_process::{}", partition).to_string()
+}
+
 impl PartitionedService {
     pub fn start(config: Arc<Config>, executor_sender: CheckSender, partition: u16) -> Self {
         let config_store = Arc::new(ConfigStore::new_rw());
@@ -47,6 +51,8 @@ impl PartitionedService {
             config_store.clone(),
             executor_sender,
             shutdown_signal.clone(),
+            build_progress_key(partition),
+            config.redis_host.clone(),
         );
 
         Self {

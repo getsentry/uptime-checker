@@ -56,9 +56,8 @@ pub struct Config {
     /// The topic to load [`CheckConfig`]s from.
     pub configs_kafka_topic: String,
 
-    /// The general purpose redis cluster to use with this service
-    #[serde_as(as = "serde_with::StringWithSeparator::<CommaSeparator, String>")]
-    pub redis_cluster_nodes: Vec<String>,
+    /// The general purpose redis node to use with this service
+    pub redis_host: String,
 }
 
 impl Default for Config {
@@ -74,7 +73,7 @@ impl Default for Config {
             results_kafka_topic: "uptime-results".to_owned(),
             configs_kafka_cluster: vec![],
             configs_kafka_topic: "uptime-configs".to_owned(),
-            redis_cluster_nodes: vec![],
+            redis_host: "redis://127.0.0.1:6379".to_owned(),
         }
     }
 }
@@ -127,7 +126,7 @@ mod tests {
                 results_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
                 configs_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
                 statsd_addr: 10.0.0.1:8126
-                redis_cluster_nodes: '10.0.0.1:6379,10.0.0.2:6379'
+                redis_host: redis://127.0.0.1:6379
                 "#,
             )?;
 
@@ -153,10 +152,7 @@ mod tests {
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
-                    redis_cluster_nodes: vec![
-                        "10.0.0.1:6379".to_owned(),
-                        "10.0.0.2:6379".to_owned()
-                    ],
+                    redis_host: "redis://127.0.0.1:6379".to_owned(),
                 }
             );
             Ok(())
@@ -185,10 +181,7 @@ mod tests {
                 "10.0.0.1,10.0.0.2:7000",
             );
             jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
-            jail.set_env(
-                "UPTIME_CHECKER_REDIS_CLUSTER_NODES",
-                "10.0.0.3:6379,10.0.0.2:6379",
-            );
+            jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
             let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
                 log_level: Some(logging::Level::Trace),
@@ -211,10 +204,7 @@ mod tests {
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
-                    redis_cluster_nodes: vec![
-                        "10.0.0.3:6379".to_owned(),
-                        "10.0.0.2:6379".to_owned()
-                    ],
+                    redis_host: "10.0.0.3:6379".to_owned(),
                 }
             );
             Ok(())

@@ -4,7 +4,6 @@ use std::sync::RwLock;
 use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::time::Instant;
 use uuid::Uuid;
-
 use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
 
 // Represents a bucket of checks at a given tick.

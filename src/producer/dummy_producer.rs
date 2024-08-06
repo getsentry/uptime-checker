@@ -8,7 +8,7 @@ pub struct DummyResultsProducer {
 
 impl DummyResultsProducer {
     pub fn new(_topic_name: &str) -> Self {
-        let schema = sentry_kafka_schemas::get_schema("uptime-results", None).unwrap();
+        let schema = sentry_kafka_schemas::get_schema(_topic_name, None).unwrap();
         Self { schema }
     }
 }
