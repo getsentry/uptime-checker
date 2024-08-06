@@ -1,4 +1,4 @@
-use futures::Future;
+use futures::{Future, StreamExt};
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::Vacant;
 use std::pin::Pin;
@@ -6,7 +6,9 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinHandle;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::check_executor::{run_executor, CheckSender};
@@ -72,10 +74,10 @@ impl PartitionedService {
         self.config_store.clone()
     }
 
-    pub fn stop(&self) {
+    pub async fn stop(self) {
         self.shutdown_signal.cancel();
-        // TODO: We shuld change this method to mut and async
-        // self.scheduler_join_handle.await.unwrap();
+        self.scheduler_join_handle.await.unwrap();
+        tracing::info!(partition = self.partition, "partitioned_service.shutdown");
     }
 }
 
@@ -84,6 +86,7 @@ pub struct Manager {
     config: Arc<Config>,
     services: RwLock<HashMap<u16, Arc<PartitionedService>>>,
     executor_sender: CheckSender,
+    shutdown_sender: UnboundedSender<PartitionedService>,
     shutdown_signal: CancellationToken,
 }
 
@@ -107,10 +110,13 @@ impl Manager {
         let (executor_sender, executor_join_handle) =
             run_executor(config.checker_concurrency, checker, producer);
 
+        let (shutdown_sender, shutdown_service_rx) = mpsc::unbounded_channel();
+
         let manager = Arc::new(Self {
             config,
             services: RwLock::new(HashMap::new()),
             executor_sender,
+            shutdown_sender,
             shutdown_signal: CancellationToken::new(),
         });
 
@@ -122,11 +128,26 @@ impl Manager {
 
         let shutdown_signal = manager.shutdown_signal.clone();
 
+        // process shutdown serrvices as they are shutdown. All services must be shutdown before
+        // the manager is completely stopped
+        //
+        // Shutdowns are processed concurrently so each shutdown will be started immedieatly.
+        let services_join_handle = tokio::spawn(async move {
+            let shutdown_stream: UnboundedReceiverStream<_> = shutdown_service_rx.into();
+
+            shutdown_stream
+                .for_each_concurrent(None, |service| service.stop())
+                .await
+        });
+
         move || {
             Box::pin(async move {
                 shutdown_signal.cancel();
                 consumer_join_handle.await.expect("Failed to stop consumer");
                 executor_join_handle.await.expect("Failed to stop executor");
+                services_join_handle
+                    .await
+                    .expect("Failed to stop partitioned services");
             })
         }
     }
@@ -185,9 +206,9 @@ impl Manager {
             return;
         };
 
-        // TODO(epurkhiser): When `stop` becomes async we'll need a task and queue that we can put
-        // this stop call in to shutdown the service and wait for it to complete async
-        service.stop();
+        self.shutdown_sender
+            .send(Arc::into_inner(service).expect("Cannot take ownership of service"))
+            .expect("Cannot queue service for shutdown");
     }
 }
 
@@ -197,19 +218,29 @@ mod tests {
     use crate::manager::{Manager, PartitionedService};
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
-    use tokio::sync::mpsc;
+    use tokio::sync::mpsc::{self};
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
 
     impl Manager {
         pub fn start_without_consumer(config: Arc<Config>) -> Arc<Self> {
             let (executor_sender, _) = mpsc::unbounded_channel();
-            Arc::new(Self {
+            let (shutdown_sender, mut shutdown_service_rx) = mpsc::unbounded_channel();
+
+            let manager = Arc::new(Self {
                 config,
                 services: RwLock::new(HashMap::new()),
                 executor_sender,
+                shutdown_sender,
                 shutdown_signal: CancellationToken::new(),
-            })
+            });
+
+            // For mocking purposes just recieve shutdowns, no need to do anything with them
+            tokio::spawn(async move { while shutdown_service_rx.recv().await.is_some() {} });
+
+            // return the service shutdown reciever. If ownership of it is not given to the
+            // caller it will be dropped and we won't be able to register services for shutdown
+            manager
         }
     }
 
@@ -218,14 +249,14 @@ mod tests {
         let (executor_sender, _) = mpsc::unbounded_channel();
         let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
         service.get_config_store();
-        service.stop();
+        service.stop().await;
     }
 
     #[tokio::test]
     async fn test_start_stop() {
         let (executor_sender, _) = mpsc::unbounded_channel();
         let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
-        service.stop();
+        service.stop().await;
     }
 
     #[tokio::test]
@@ -267,6 +298,7 @@ mod tests {
         let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         manager.register_partition(0);
         manager.unregister_partition(0);
+
         manager.get_service(0);
     }
 
