@@ -171,29 +171,27 @@ fn record_result_metrics(result: &CheckResult) {
     // Record duration of check
     if let Some(duration) = duration {
         metrics::histogram!(
-            "check_result.duration_ms",
+            "check_result.duration",
             "histogram" => "timer",
             "status" => status_label,
             "failure_reason" => failure_reason.unwrap_or("ok"),
         )
-        .record(duration.num_milliseconds() as f64);
-
-        tracing::info!("duration is {}", duration.num_milliseconds() as f64);
+        .record(duration.to_std().unwrap().as_secs_f64());
     }
 
     // Record time between scheduled and actual check
+    let delay = (*actual_check_time - *scheduled_check_time)
+        .to_std()
+        .unwrap()
+        .as_secs_f64();
+
     metrics::histogram!(
-        "check_result.delay_ms",
+        "check_result.delay",
         "histogram" => "timer",
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
     )
-    .record((*actual_check_time - *scheduled_check_time).num_milliseconds() as f64);
-
-    tracing::info!(
-        "delay is {}",
-        (*actual_check_time - *scheduled_check_time).num_milliseconds() as f64
-    );
+    .record(delay);
 
     // Record status of the check
     metrics::counter!(
