@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-      - uses: shogo82148/actions-setup-redis@v1
+      - uses: shogo82148/actions-setup-redis@428a144f11914412a8f52902296e134dd2e0f925
         with:
           redis-version: "7.x"
       - name: Install Rust Toolchain
