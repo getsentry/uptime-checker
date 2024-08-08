@@ -45,9 +45,9 @@ impl PartitionedService {
         // TODO(epurkhiser): We may want to wait to start the scheduler until "booting" completes,
         // otherwise we may execute checks for old configs in a partition that are removed later in
         // the log.
-        tokio::spawn(async move { wait_for_partition_boot(waiter_config_store, partition).await });
-
         let shutdown_signal = CancellationToken::new();
+        let config_loaded = wait_for_partition_boot(waiter_config_store, partition, shutdown_signal.clone());
+
         let scheduler_join_handle = run_scheduler(
             partition,
             config_store.clone(),
@@ -55,6 +55,7 @@ impl PartitionedService {
             shutdown_signal.clone(),
             build_progress_key(partition),
             config.redis_host.clone(),
+            config_loaded,
         );
 
         Self {
