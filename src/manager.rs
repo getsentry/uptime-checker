@@ -46,7 +46,8 @@ impl PartitionedService {
         // otherwise we may execute checks for old configs in a partition that are removed later in
         // the log.
         let shutdown_signal = CancellationToken::new();
-        let config_loaded = wait_for_partition_boot(waiter_config_store, partition, shutdown_signal.clone());
+        let config_loaded =
+            wait_for_partition_boot(waiter_config_store, partition, shutdown_signal.clone());
 
         let scheduler_join_handle = run_scheduler(
             partition,
