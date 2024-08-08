@@ -1,11 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
+use crate::config_store::RwConfigStore;
 use tokio::{
     sync::oneshot::{self, Receiver},
     time::{interval, Instant},
 };
-
-use crate::config_store::RwConfigStore;
+use tokio_util::sync::CancellationToken;
 
 /// How long does the consumer need to be idle before we consider it to have "finished" reading the
 /// backlog of configs.
@@ -30,14 +30,18 @@ const BOOT_MAX_IDLE: Duration = Duration::from_secs(10);
 /// produced at all times.
 ///
 /// The returned Receiver can be awaited
-pub fn wait_for_partition_boot(config_store: Arc<RwConfigStore>, partition: u16) -> Receiver<()> {
+pub fn wait_for_partition_boot(
+    config_store: Arc<RwConfigStore>,
+    partition: u16,
+    shutdown: CancellationToken,
+) -> Receiver<bool> {
     let start = Instant::now();
-    let (boot_finished, boot_finished_rx) = oneshot::channel::<()>();
+    let (boot_finished, boot_finished_rx) = oneshot::channel::<bool>();
 
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_millis(100));
 
-        loop {
+        while !shutdown.is_cancelled() {
             let tick = interval.tick().await;
             let elapsed = tick - start;
 
@@ -64,19 +68,34 @@ pub fn wait_for_partition_boot(config_store: Arc<RwConfigStore>, partition: u16)
             .all_configs()
             .len();
 
-        tracing::info!(
-            boot_time_ms,
-            total_configs,
-            partition,
-            "config_consumer.partition_boot_complete",
-        );
+        let boot_string = format!(
+            "config_consumer.partition_boot_{}",
+            if shutdown.is_cancelled() {
+                "cancelled"
+            } else {
+                "complete"
+            }
+        )
+        .to_string();
+        tracing::info!(boot_time_ms, total_configs, partition, boot_string);
 
-        metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string())
-            .set(boot_time_ms as f64);
-        metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string())
-            .set(total_configs as f64);
+        if !shutdown.is_cancelled() {
+            tracing::info!(
+                boot_time_ms,
+                total_configs,
+                partition,
+                "config_consumer.partition_boot_complete",
+            );
 
-        boot_finished.send(()).expect("Failed to report boot");
+            metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string())
+                .set(boot_time_ms as f64);
+            metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string())
+                .set(total_configs as f64);
+        }
+
+        boot_finished
+            .send(!shutdown.is_cancelled())
+            .expect("Failed to report boot");
     });
 
     boot_finished_rx
@@ -96,7 +115,8 @@ mod tests {
     async fn test_wait_for_boot() {
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let wait_booted = wait_for_partition_boot(config_store.clone(), 0);
+        let shutdown_signal = CancellationToken::new();
+        let wait_booted = wait_for_partition_boot(config_store.clone(), 0, shutdown_signal.clone());
         tokio::pin!(wait_booted);
 
         // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.
@@ -126,6 +146,40 @@ mod tests {
         // Advance past the BOOT_IDLE_TIMEOUT, we will now have finished
         sleep(BOOT_IDLE_TIMEOUT + Duration::from_millis(100)).await;
 
-        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(())));
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(true)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_wait_for_boot_cancel() {
+        let config_store = Arc::new(ConfigStore::new_rw());
+
+        let shutdown_signal = CancellationToken::new();
+        let wait_booted = wait_for_partition_boot(config_store.clone(), 0, shutdown_signal.clone());
+        tokio::pin!(wait_booted);
+
+        // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.
+        sleep(BOOT_MAX_IDLE - Duration::from_millis(100)).await;
+
+        // We haven't marked the boot as complete
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Pending);
+
+        // Add a check config
+        config_store
+            .write()
+            .unwrap()
+            .add_config(Arc::new(CheckConfig::default()));
+
+        // Move time forward to the BOOT_MAX_IDLE. This will NOT mark the boot as complete sicne we
+        // just produced a config. We will need to wait another 400ms for it to complete
+        sleep(Duration::from_millis(200)).await;
+
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Pending);
+
+        shutdown_signal.cancel();
+        // Move the time forward a little so that the loop iterates again and the cancel can take
+        // place
+        sleep(Duration::from_millis(1)).await;
+        // Boot should be finished, but cancelled
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(false)));
     }
 }
