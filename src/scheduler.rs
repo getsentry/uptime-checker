@@ -4,13 +4,14 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use std::time::Duration;
+use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Instant};
-
 use tokio_util::sync::CancellationToken;
 
 use crate::check_executor::{queue_check, CheckSender};
 use crate::config_store::{RwConfigStore, Tick};
+use crate::config_waiter::BootResult;
 use redis::{AsyncCommands, Client};
 
 pub fn run_scheduler(
@@ -20,9 +21,11 @@ pub fn run_scheduler(
     shutdown: CancellationToken,
     progress_key: String,
     redis_host: String,
+    config_loaded_receiver: Receiver<BootResult>,
 ) -> JoinHandle<()> {
     tracing::info!(partition, "scheduler.starting");
     tokio::spawn(async move {
+        let _ = config_loaded_receiver.await;
         scheduler_loop(
             config_store,
             executor_sender,
@@ -157,13 +160,14 @@ mod tests {
     use redis::{Client, Commands};
     use similar_asserts::assert_eq;
     use std::sync::Arc;
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, oneshot};
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
     use uuid::Uuid;
 
     use super::run_scheduler;
 
+    use crate::config_waiter::BootResult;
     use crate::manager::build_progress_key;
     use crate::{
         config_store::ConfigStore,
@@ -204,6 +208,7 @@ mod tests {
         }
 
         let (executor_tx, mut executor_rx) = mpsc::unbounded_channel();
+        let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
 
         let join_handle = run_scheduler(
@@ -213,7 +218,9 @@ mod tests {
             shutdown_token.clone(),
             build_progress_key(0),
             config.redis_host.clone(),
+            boot_rx,
         );
+        let _ = boot_tx.send(BootResult::Started);
 
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
@@ -303,6 +310,7 @@ mod tests {
         }
 
         let (executor_tx, mut executor_rx) = mpsc::unbounded_channel();
+        let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
 
         let join_handle = run_scheduler(
@@ -312,7 +320,10 @@ mod tests {
             shutdown_token.clone(),
             progress_key.clone(),
             config.redis_host.clone(),
+            boot_rx,
         );
+
+        let _ = boot_tx.send(BootResult::Started);
 
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
