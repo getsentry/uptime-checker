@@ -1,6 +1,5 @@
-use std::{sync::Arc, time::Duration};
-
 use crate::config_store::RwConfigStore;
+use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::oneshot::{self, Receiver},
     time::{interval, Instant},
@@ -14,6 +13,12 @@ const BOOT_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long will we wait while the consumer has not consumed *anything* before we consider it to
 /// be ready. This handles the case where there is simply nothing in the config topic backlog.
 const BOOT_MAX_IDLE: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum BootResult {
+    Started,
+    Cancelled,
+}
 
 /// This function waits for the config_store to have completed the "boot-up" of loading a backlog
 /// of configs in a partition.
@@ -34,9 +39,9 @@ pub fn wait_for_partition_boot(
     config_store: Arc<RwConfigStore>,
     partition: u16,
     shutdown: CancellationToken,
-) -> Receiver<bool> {
+) -> Receiver<BootResult> {
     let start = Instant::now();
-    let (boot_finished, boot_finished_rx) = oneshot::channel::<bool>();
+    let (boot_finished, boot_finished_rx) = oneshot::channel::<BootResult>();
 
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_millis(100));
@@ -78,23 +83,25 @@ pub fn wait_for_partition_boot(
         )
         .to_string();
         tracing::info!(boot_time_ms, total_configs, partition, boot_string);
-
-        if !shutdown.is_cancelled() {
-            tracing::info!(
-                boot_time_ms,
-                total_configs,
-                partition,
-                "config_consumer.partition_boot_complete",
-            );
-
-            metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string())
-                .set(boot_time_ms as f64);
-            metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string())
-                .set(total_configs as f64);
+        if shutdown.is_cancelled() {
+            boot_finished.send(BootResult::Cancelled).expect("Failed to report boot cancellation");
+            return
         }
 
+        tracing::info!(
+            boot_time_ms,
+            total_configs,
+            partition,
+            "config_consumer.partition_boot_complete",
+        );
+
+        metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string())
+            .set(boot_time_ms as f64);
+        metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string())
+            .set(total_configs as f64);
+
         boot_finished
-            .send(!shutdown.is_cancelled())
+            .send(BootResult::Started)
             .expect("Failed to report boot");
     });
 
@@ -146,7 +153,7 @@ mod tests {
         // Advance past the BOOT_IDLE_TIMEOUT, we will now have finished
         sleep(BOOT_IDLE_TIMEOUT + Duration::from_millis(100)).await;
 
-        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(true)));
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(BootResult::Started)));
     }
 
     #[tokio::test(start_paused = true)]
@@ -180,6 +187,6 @@ mod tests {
         // place
         sleep(Duration::from_millis(1)).await;
         // Boot should be finished, but cancelled
-        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(false)));
+        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(BootResult::Cancelled)));
     }
 }

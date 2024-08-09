@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::check_executor::{queue_check, CheckSender};
 use crate::config_store::{RwConfigStore, Tick};
 use redis::{AsyncCommands, Client};
+use crate::config_waiter::BootResult;
 
 pub fn run_scheduler(
     partition: u16,
@@ -20,7 +21,7 @@ pub fn run_scheduler(
     shutdown: CancellationToken,
     progress_key: String,
     redis_host: String,
-    config_loaded_receiver: Receiver<bool>,
+    config_loaded_receiver: Receiver<BootResult>,
 ) -> JoinHandle<()> {
     tracing::info!(partition, "scheduler.starting");
     tokio::spawn(async move {
@@ -174,6 +175,7 @@ mod tests {
             result::{CheckResult, CheckStatus},
         },
     };
+    use crate::config_waiter::BootResult;
 
     #[traced_test]
     #[tokio::test(start_paused = true)]
@@ -206,7 +208,7 @@ mod tests {
         }
 
         let (executor_tx, mut executor_rx) = mpsc::unbounded_channel();
-        let (boot_tx, boot_rx) = oneshot::channel::<bool>();
+        let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
 
         let join_handle = run_scheduler(
@@ -218,7 +220,7 @@ mod tests {
             config.redis_host.clone(),
             boot_rx,
         );
-        let _ = boot_tx.send(true);
+        let _ = boot_tx.send(BootResult::Started);
 
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
@@ -308,7 +310,7 @@ mod tests {
         }
 
         let (executor_tx, mut executor_rx) = mpsc::unbounded_channel();
-        let (boot_tx, boot_rx) = oneshot::channel::<bool>();
+        let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
 
         let join_handle = run_scheduler(
@@ -321,7 +323,7 @@ mod tests {
             boot_rx,
         );
 
-        let _ = boot_tx.send(true);
+        let _ = boot_tx.send(BootResult::Started);
 
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
