@@ -84,8 +84,10 @@ pub fn wait_for_partition_boot(
         .to_string();
         tracing::info!(boot_time_ms, total_configs, partition, boot_string);
         if shutdown.is_cancelled() {
-            boot_finished.send(BootResult::Cancelled).expect("Failed to report boot cancellation");
-            return
+            boot_finished
+                .send(BootResult::Cancelled)
+                .expect("Failed to report boot cancellation");
+            return;
         }
 
         tracing::info!(
@@ -153,7 +155,10 @@ mod tests {
         // Advance past the BOOT_IDLE_TIMEOUT, we will now have finished
         sleep(BOOT_IDLE_TIMEOUT + Duration::from_millis(100)).await;
 
-        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(BootResult::Started)));
+        assert_eq!(
+            poll!(wait_booted.as_mut()),
+            Poll::Ready(Ok(BootResult::Started))
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -187,6 +192,9 @@ mod tests {
         // place
         sleep(Duration::from_millis(1)).await;
         // Boot should be finished, but cancelled
-        assert_eq!(poll!(wait_booted.as_mut()), Poll::Ready(Ok(BootResult::Cancelled)));
+        assert_eq!(
+            poll!(wait_booted.as_mut()),
+            Poll::Ready(Ok(BootResult::Cancelled))
+        );
     }
 }

@@ -11,8 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::check_executor::{queue_check, CheckSender};
 use crate::config_store::{RwConfigStore, Tick};
-use redis::{AsyncCommands, Client};
 use crate::config_waiter::BootResult;
+use redis::{AsyncCommands, Client};
 
 pub fn run_scheduler(
     partition: u16,
@@ -167,6 +167,7 @@ mod tests {
 
     use super::run_scheduler;
 
+    use crate::config_waiter::BootResult;
     use crate::manager::build_progress_key;
     use crate::{
         config_store::ConfigStore,
@@ -175,7 +176,6 @@ mod tests {
             result::{CheckResult, CheckStatus},
         },
     };
-    use crate::config_waiter::BootResult;
 
     #[traced_test]
     #[tokio::test(start_paused = true)]
