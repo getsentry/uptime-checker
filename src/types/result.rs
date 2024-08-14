@@ -81,8 +81,8 @@ pub struct CheckResult {
 
     /// Trace ID associated with the check-in made
     pub trace_id: TraceId,
-    ///
-    /// Trace ID associated with the check-in made
+
+    /// Span ID associated with the check-in made
     pub span_id: SpanId,
 
     /// Timestamp in milliseconds of when the check was schedule to run
