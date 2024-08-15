@@ -367,22 +367,6 @@ mod tests {
             duration: Some(Duration::seconds(1)),
             request_info: None,
         });
-        let abc = CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config2.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-        };
-        let result_json = json!(abc);
-        tracing::info!(result = ?abc, "executor.check_complete_debug");
-        tracing::info!(result = ?result_json, "executor.check_complete_json");
-
         shutdown_token.cancel();
         // XXX: Without this loop we end up stuck forever, we should try to understand that better
         while executor_rx.recv().await.is_some() {}
