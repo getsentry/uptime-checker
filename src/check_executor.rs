@@ -153,6 +153,7 @@ fn record_result_metrics(result: &CheckResult) {
         actual_check_time,
         duration,
         status_reason,
+        request_info,
         ..
     } = result;
 
@@ -167,6 +168,11 @@ fn record_result_metrics(result: &CheckResult) {
         Some(CheckStatusReasonType::Timeout) => Some("timeout"),
         None => None,
     };
+    let status_code = match  request_info.as_ref().and_then(|a| a.http_status_code){
+        None => "none".to_string(),
+        Some(status) => status.to_string()
+    };
+
 
     // Record duration of check
     if let Some(duration) = duration {
@@ -175,6 +181,7 @@ fn record_result_metrics(result: &CheckResult) {
             "histogram" => "timer",
             "status" => status_label,
             "failure_reason" => failure_reason.unwrap_or("ok"),
+            "status_code" => status_code.clone(),
         )
         .record(duration.to_std().unwrap().as_secs_f64());
     }
@@ -190,6 +197,7 @@ fn record_result_metrics(result: &CheckResult) {
         "histogram" => "timer",
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
+        "status_code" => status_code.clone(),
     )
     .record(delay);
 
@@ -198,6 +206,7 @@ fn record_result_metrics(result: &CheckResult) {
         "check_result.processed",
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
+        "status_code" => status_code,
     )
     .increment(1);
 }
@@ -241,6 +250,7 @@ mod tests {
         let result = resolve_rx.await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Success);
+
     }
 
     #[tokio::test(start_paused = true)]
