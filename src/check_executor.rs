@@ -250,7 +250,6 @@ mod tests {
         let result = resolve_rx.await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Success);
-
     }
 
     #[tokio::test(start_paused = true)]
