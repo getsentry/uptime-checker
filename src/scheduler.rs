@@ -160,7 +160,6 @@ mod tests {
     use redis::{Client, Commands};
     use similar_asserts::assert_eq;
     use std::sync::Arc;
-    use serde_json::json;
     use tokio::sync::{mpsc, oneshot};
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
@@ -367,6 +366,7 @@ mod tests {
             duration: Some(Duration::seconds(1)),
             request_info: None,
         });
+
         shutdown_token.cancel();
         // XXX: Without this loop we end up stuck forever, we should try to understand that better
         while executor_rx.recv().await.is_some() {}
