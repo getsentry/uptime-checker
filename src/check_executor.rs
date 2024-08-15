@@ -168,11 +168,10 @@ fn record_result_metrics(result: &CheckResult) {
         Some(CheckStatusReasonType::Timeout) => Some("timeout"),
         None => None,
     };
-    let status_code = match  request_info.as_ref().and_then(|a| a.http_status_code){
+    let status_code = match request_info.as_ref().and_then(|a| a.http_status_code) {
         None => "none".to_string(),
-        Some(status) => status.to_string()
+        Some(status) => status.to_string(),
     };
-
 
     // Record duration of check
     if let Some(duration) = duration {
