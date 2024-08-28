@@ -102,9 +102,16 @@ impl Manager {
     pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
         let checker = Arc::new(HttpChecker::new());
 
+        let kafka_overrides = HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
+
+        let kafka_config = KafkaConfig::new_config(
+            config.results_kafka_cluster.to_owned(),
+            Some(kafka_overrides),
+        );
+
         let producer = Arc::new(KafkaResultsProducer::new(
             &config.results_kafka_topic,
-            KafkaConfig::new_config(config.results_kafka_cluster.to_owned(), None),
+            kafka_config,
         ));
 
         // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
