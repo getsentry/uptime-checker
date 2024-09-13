@@ -2,14 +2,17 @@ use chrono::TimeDelta;
 use serde::Deserialize;
 use serde_repr::Deserialize_repr;
 use serde_with::serde_as;
-use std::hash::{Hash, Hasher};
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 use uuid::Uuid;
 
 const ONE_MINUTE: isize = 60;
 
 /// Valid intervals between the checks in seconds.
 #[repr(isize)]
-#[derive(Debug, Copy, Clone, PartialEq, Deserialize_repr)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize_repr)]
 pub enum CheckInterval {
     OneMinute = ONE_MINUTE,
     FiveMinutes = ONE_MINUTE * 5,
@@ -22,9 +25,28 @@ pub enum CheckInterval {
 /// The largest check interval
 pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
 
+/// Request methods available for the check configuration.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum RequestMethod {
+    Get,
+    Post,
+    Head,
+    Put,
+    Delete,
+    Patch,
+    Options,
+}
+
+impl Default for RequestMethod {
+    fn default() -> Self {
+        Self::Get
+    }
+}
+
 /// The CheckConfig represents a configuration for a single check.
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct CheckConfig {
     /// The subscription this check configuration is associated to in sentry.
     #[serde(with = "uuid::serde::simple")]
@@ -41,15 +63,19 @@ pub struct CheckConfig {
 
     /// The actual HTTP URL to check.
     pub url: String,
-}
 
-impl PartialEq for CheckConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.subscription_id == other.subscription_id
-    }
-}
+    /// The HTTP method to use to make the request.
+    #[serde(default)]
+    pub request_method: RequestMethod,
 
-impl Eq for CheckConfig {}
+    /// Additional HTTP headers to pass through to the request.
+    #[serde(default)]
+    pub request_headers: HashMap<String, String>,
+
+    /// The body to pass through to the request.
+    #[serde(default)]
+    pub request_body: String,
+}
 
 impl Hash for CheckConfig {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -79,6 +105,7 @@ impl CheckConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
 
     use chrono::TimeDelta;
     use similar_asserts::assert_eq;
@@ -86,7 +113,7 @@ mod tests {
 
     use crate::types::check_config::MAX_CHECK_INTERVAL_SECS;
 
-    use super::{CheckConfig, CheckInterval};
+    use super::{CheckConfig, CheckInterval, RequestMethod};
 
     impl Default for CheckConfig {
         fn default() -> Self {
@@ -95,12 +122,15 @@ mod tests {
                 interval: CheckInterval::OneMinute,
                 timeout: TimeDelta::seconds(10),
                 url: "https://example.com".to_string(),
+                request_method: Default::default(),
+                request_headers: Default::default(),
+                request_body: Default::default(),
             }
         }
     }
 
     #[test]
-    fn test_serialize_msgpack_roundtrip() {
+    fn test_serialize_msgpack_roundtrip_simple() {
         // Example msgpack taken from
         // sentry-kafka-schemas/examples/uptime-configs/1/example.msgpack
         let example = vec![
@@ -121,6 +151,56 @@ mod tests {
                 timeout: TimeDelta::milliseconds(500),
                 interval: CheckInterval::FiveMinutes,
                 url: "http://sentry.io".to_string(),
+                request_method: RequestMethod::Get,
+                request_headers: HashMap::new(),
+                request_body: "".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_serialize_msgpack_roundtrip_post() {
+        // Example msgpack taken from
+        // sentry-kafka-schemas/examples/uptime-configs/1/example-post.msgpack
+        let example = vec![
+            0x87, 0xaf, 0x73, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e,
+            0x5f, 0x69, 0x64, 0xd9, 0x20, 0x64, 0x37, 0x36, 0x32, 0x39, 0x63, 0x36, 0x63, 0x38,
+            0x32, 0x62, 0x65, 0x34, 0x66, 0x36, 0x37, 0x39, 0x65, 0x65, 0x37, 0x38, 0x61, 0x30,
+            0x64, 0x39, 0x37, 0x37, 0x38, 0x35, 0x36, 0x64, 0x32, 0xa3, 0x75, 0x72, 0x6c, 0xb0,
+            0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x73, 0x65, 0x6e, 0x74, 0x72, 0x79, 0x2e,
+            0x69, 0x6f, 0xb0, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x76, 0x61, 0x6c, 0x5f, 0x73, 0x65,
+            0x63, 0x6f, 0x6e, 0x64, 0x73, 0xcd, 0x01, 0x2c, 0xaa, 0x74, 0x69, 0x6d, 0x65, 0x6f,
+            0x75, 0x74, 0x5f, 0x6d, 0x73, 0xcd, 0x01, 0xf4, 0xae, 0x72, 0x65, 0x71, 0x75, 0x65,
+            0x73, 0x74, 0x5f, 0x6d, 0x65, 0x74, 0x68, 0x6f, 0x64, 0xa4, 0x50, 0x4f, 0x53, 0x54,
+            0xaf, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x5f, 0x68, 0x65, 0x61, 0x64, 0x65,
+            0x72, 0x73, 0x83, 0xad, 0x41, 0x75, 0x74, 0x68, 0x6f, 0x72, 0x69, 0x7a, 0x61, 0x74,
+            0x69, 0x6f, 0x6e, 0xac, 0x42, 0x65, 0x61, 0x72, 0x65, 0x72, 0x20, 0x31, 0x32, 0x33,
+            0x34, 0x35, 0xac, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x54, 0x79, 0x70,
+            0x65, 0xb0, 0x61, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2f,
+            0x6a, 0x73, 0x6f, 0x6e, 0xb2, 0x58, 0x2d, 0x4d, 0x79, 0x2d, 0x43, 0x75, 0x73, 0x74,
+            0x6f, 0x6d, 0x2d, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0xad, 0x65, 0x78, 0x61, 0x6d,
+            0x70, 0x6c, 0x65, 0x20, 0x76, 0x61, 0x6c, 0x75, 0x65, 0xac, 0x72, 0x65, 0x71, 0x75,
+            0x65, 0x73, 0x74, 0x5f, 0x62, 0x6f, 0x64, 0x79, 0xb0, 0x7b, 0x22, 0x6b, 0x65, 0x79,
+            0x22, 0x3a, 0x20, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x7d,
+        ];
+
+        assert_eq!(
+            rmp_serde::from_slice::<CheckConfig>(&example).unwrap(),
+            CheckConfig {
+                subscription_id: uuid!("d7629c6c-82be-4f67-9ee7-8a0d977856d2"),
+                timeout: TimeDelta::milliseconds(500),
+                interval: CheckInterval::FiveMinutes,
+                url: "http://sentry.io".to_string(),
+                request_method: RequestMethod::Post,
+                request_headers: HashMap::from([
+                    ("Authorization".to_string(), "Bearer 12345".to_string()),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                    (
+                        "X-My-Custom-Header".to_string(),
+                        "example value".to_string()
+                    ),
+                ]),
+                request_body: "{\"key\": \"value\"}".to_string()
             }
         );
     }
