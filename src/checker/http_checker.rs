@@ -1,5 +1,5 @@
 use chrono::{TimeDelta, Utc};
-use reqwest::header::HeaderMap;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::{SpanId, TraceId};
 use std::error::Error;
@@ -9,10 +9,7 @@ use uuid::Uuid;
 use crate::config_store::Tick;
 use crate::types::{
     check_config::CheckConfig,
-    result::{
-        CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
-        RequestType,
-    },
+    result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 
 use super::Checker;
@@ -33,20 +30,34 @@ async fn do_request(
     client: &Client,
     check_config: &CheckConfig,
     sentry_trace: &str,
-) -> (RequestType, Result<Response, reqwest::Error>) {
+) -> Result<Response, reqwest::Error> {
     let timeout = check_config
         .timeout
         .to_std()
         .expect("Timeout duration could not be converted to std::time::Duration");
 
-    let result = client
-        .get(check_config.url.as_str())
-        .timeout(timeout)
-        .header("sentry-trace", sentry_trace.to_owned())
-        .send()
-        .await;
+    let url = check_config.url.as_str();
 
-    (RequestType::Get, result)
+    let headers: HeaderMap = check_config
+        .request_headers
+        .clone()
+        .into_iter()
+        .filter_map(|(key, value)| {
+            // Try to convert key and value to HeaderName and HeaderValue
+            let header_name = HeaderName::try_from(key).ok()?;
+            let header_value = HeaderValue::from_str(&value).ok()?;
+            Some((header_name, header_value))
+        })
+        .collect();
+
+    client
+        .request(check_config.request_method.into(), url)
+        .timeout(timeout)
+        .headers(headers)
+        .header("sentry-trace", sentry_trace.to_owned())
+        .body(check_config.request_body.to_owned())
+        .send()
+        .await
 }
 
 /// Check if the request error is a DNS error.
@@ -96,7 +107,7 @@ impl Checker for HttpChecker {
         let trace_header = format!("{}-{}-{}", trace_id, span_id, '0');
 
         let start = Instant::now();
-        let (request_type, response) = do_request(&self.client, config, &trace_header).await;
+        let response = do_request(&self.client, config, &trace_header).await;
         let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
@@ -112,7 +123,7 @@ impl Checker for HttpChecker {
 
         let request_info = Some(RequestInfo {
             http_status_code,
-            request_type,
+            request_type: config.request_method,
         });
 
         let status_reason = match response {
@@ -158,10 +169,13 @@ impl Checker for HttpChecker {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
-    use crate::types::result::{CheckStatus, CheckStatusReasonType, RequestType};
+    use crate::types::result::{CheckStatus, CheckStatusReasonType};
+    use crate::types::shared::RequestMethod;
 
     use super::{HttpChecker, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
@@ -173,7 +187,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_simple_get() {
+    async fn test_default_get() {
         let server = MockServer::start();
         let checker = HttpChecker::new();
 
@@ -196,7 +210,46 @@ mod tests {
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
             result.request_info.as_ref().map(|i| i.request_type),
-            Some(RequestType::Get)
+            Some(RequestMethod::Get)
+        );
+
+        get_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_configured_post() {
+        let server = MockServer::start();
+        let checker = HttpChecker::new();
+
+        let get_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/no-head")
+                .header_exists("sentry-trace")
+                .body("{\"key\":\"value\"}")
+                .header("User-Agent", UPTIME_USER_AGENT.to_string())
+                .header("Authorization", "Bearer my-token".to_string())
+                .header("X-My-Custom-Header", "value".to_string());
+            then.status(200);
+        });
+
+        let config = CheckConfig {
+            url: server.url("/no-head").to_string(),
+            request_method: RequestMethod::Post,
+            request_headers: HashMap::from([
+                ("Authorization".to_string(), "Bearer my-token".to_string()),
+                ("X-My-Custom-Header".to_string(), "value".to_string()),
+            ]),
+            request_body: "{\"key\":\"value\"}".to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick).await;
+
+        assert_eq!(result.status, CheckStatus::Success);
+        assert_eq!(
+            result.request_info.as_ref().map(|i| i.request_type),
+            Some(RequestMethod::Post)
         );
 
         get_mock.assert();

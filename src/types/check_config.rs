@@ -8,6 +8,8 @@ use std::{
 };
 use uuid::Uuid;
 
+use super::shared::RequestMethod;
+
 const ONE_MINUTE: isize = 60;
 
 /// Valid intervals between the checks in seconds.
@@ -24,25 +26,6 @@ pub enum CheckInterval {
 
 /// The largest check interval
 pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
-
-/// Request methods available for the check configuration.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum RequestMethod {
-    Get,
-    Post,
-    Head,
-    Put,
-    Delete,
-    Patch,
-    Options,
-}
-
-impl Default for RequestMethod {
-    fn default() -> Self {
-        Self::Get
-    }
-}
 
 /// The CheckConfig represents a configuration for a single check.
 #[serde_as]
