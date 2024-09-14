@@ -8,9 +8,8 @@ fn emit_version() {
         Command::new("git")
             .args(["rev-parse", "HEAD"])
             .output()
-            .map_err(|e| {
+            .inspect_err(|_e| {
                 println!("cargo:warning=git rev-parse failure, unable to determine revision");
-                e
             })
             .map(|cmd| String::from_utf8(cmd.stdout).unwrap())
             .unwrap_or("unknown-rev".to_string())
