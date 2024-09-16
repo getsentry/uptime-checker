@@ -52,9 +52,11 @@ mod tests {
     use super::KafkaResultsProducer;
     use crate::{
         producer::{ExtractCodeError, ResultsProducer},
-        types::result::{
-            CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
-            RequestType,
+        types::{
+            result::{
+                CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
+            },
+            shared::RequestMethod,
         },
     };
     use chrono::{TimeDelta, Utc};
@@ -78,7 +80,7 @@ mod tests {
             actual_check_time: Utc::now(),
             duration: Some(TimeDelta::seconds(1)),
             request_info: Some(RequestInfo {
-                request_type: RequestType::Head,
+                request_type: RequestMethod::Get,
                 http_status_code: Some(200),
             }),
         };
