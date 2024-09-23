@@ -90,10 +90,10 @@ impl Checker for HttpChecker {
         let trace_id = TraceId::default();
         let span_id = SpanId::default();
 
-        // Format the 'sentry-trace' header. The last byte indicates that we are NOT forcing
-        // sampling on child spans. If we were to set this to '1' it would mean that every
-        // check request made for that customer would be sampled,
-        let trace_header = format!("{}-{}-{}", trace_id, span_id, '0');
+        // Format the 'sentry-trace' header. The last byte indicates that we ARE forcing
+        // sampling on child spans. This allows the customer to have improved visibility into
+        // failures for uptime requests
+        let trace_header = format!("{}-{}-{}", trace_id, span_id, '1');
 
         let start = Instant::now();
         let (request_type, response) = do_request(&self.client, config, &trace_header).await;
