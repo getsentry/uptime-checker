@@ -102,7 +102,7 @@ impl Checker for HttpChecker {
         let span_id = SpanId::default();
 
         // Format the 'sentry-trace' header. The last byte indicates that we are forcing
-        // sampling on child spans (they will be recorded). If we were to set this to '0' 
+        // sampling on child spans (they will be recorded). If we were to set this to '0'
         // it would mean that every check request made for that customer would be NOT sampled,
         let trace_header = format!("{}-{}-{}", trace_id, span_id, '1');
 
