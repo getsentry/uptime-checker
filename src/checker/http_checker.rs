@@ -169,8 +169,6 @@ impl Checker for HttpChecker {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
@@ -235,10 +233,10 @@ mod tests {
         let config = CheckConfig {
             url: server.url("/no-head").to_string(),
             request_method: RequestMethod::Post,
-            request_headers: HashMap::from([
+            request_headers: vec![
                 ("Authorization".to_string(), "Bearer my-token".to_string()),
                 ("X-My-Custom-Header".to_string(), "value".to_string()),
-            ]),
+            ],
             request_body: "{\"key\":\"value\"}".to_string(),
             ..Default::default()
         };
