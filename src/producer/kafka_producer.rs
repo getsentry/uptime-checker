@@ -40,9 +40,10 @@ impl ResultsProducer for KafkaResultsProducer {
         // know whether to mark the check as successful. We never want to just silently drop a result -
         // we'd much prefer to retry it later and produce a miss, so that we at least know that we missed
         // and don't have holes.
-        Ok(self
-            .producer
-            .produce(&self.topic, KafkaPayload::new(None, None, Some(json)))?)
+        Ok(self.producer.produce(
+            &self.topic,
+            KafkaPayload::new(Some(result.subscription_id.into()), None, Some(json)),
+        )?)
     }
 }
 
