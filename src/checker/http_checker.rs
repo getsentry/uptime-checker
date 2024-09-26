@@ -12,6 +12,7 @@ use crate::types::{
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 
+use super::ip_filter::is_external_ip;
 use super::Checker;
 
 const UPTIME_USER_AGENT: &str =
@@ -77,16 +78,25 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
 }
 
 impl HttpChecker {
-    pub fn new() -> Self {
+    fn new_internal(validate_url: bool) -> Self {
         let mut default_headers = HeaderMap::new();
         default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
 
-        let client = ClientBuilder::new()
+        let mut builder = ClientBuilder::new()
             .default_headers(default_headers)
-            .build()
-            .expect("Failed to build checker client");
+            .hickory_dns(true);
+
+        if validate_url {
+            builder = builder.ip_filter(is_external_ip);
+        }
+
+        let client = builder.build().expect("Failed to build checker client");
 
         Self { client }
+    }
+
+    pub fn new() -> Self {
+        Self::new_internal(true)
     }
 }
 
@@ -143,6 +153,11 @@ impl Checker for HttpChecker {
                         status_type: CheckStatusReasonType::DnsError,
                         description: message,
                     }
+                } else if let connect_err = e.is_connect() {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::DnsError,
+                        description: e.to_string(),
+                    }
                 } else {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
@@ -187,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn test_default_get() {
         let server = MockServer::start();
-        let checker = HttpChecker::new();
+        let checker = HttpChecker::new_internal(false);
 
         let get_mock = server.mock(|when, then| {
             when.method(Method::GET)
@@ -217,7 +232,7 @@ mod tests {
     #[tokio::test]
     async fn test_configured_post() {
         let server = MockServer::start();
-        let checker = HttpChecker::new();
+        let checker = HttpChecker::new_internal(false);
 
         let get_mock = server.mock(|when, then| {
             when.method(Method::POST)
@@ -260,7 +275,7 @@ mod tests {
         let server = MockServer::start();
 
         let timeout = TimeDelta::milliseconds(TIMEOUT);
-        let checker = HttpChecker::new();
+        let checker = HttpChecker::new_internal(false);
 
         let timeout_mock = server.mock(|when, then| {
             when.method(Method::GET)
@@ -293,7 +308,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_400() {
         let server = MockServer::start();
-        let checker = HttpChecker::new();
+        let checker = HttpChecker::new_internal(false);
 
         let head_mock = server.mock(|when, then| {
             when.method(Method::GET)
@@ -325,6 +340,68 @@ mod tests {
         );
 
         head_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_restricted_resolution() {
+        let checker = HttpChecker::new();
+
+        let localhost_config = CheckConfig {
+            url: "http://localhost/whatever".to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&localhost_config, &tick).await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::DnsError)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("destination is restricted".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_url() {
+        let checker = HttpChecker::new();
+
+        // Private address space
+        let restricted_ip_config = CheckConfig {
+            url: "http://10.0.0.1/".to_string(),
+            ..Default::default()
+        };
+        let tick = make_tick();
+        let result = checker.check_url(&restricted_ip_config, &tick).await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::DnsError)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("URL contains a restricted IP address as the hostname".to_string())
+        );
+
+        // Unique Local Address
+        let restricted_ipv6_config = CheckConfig {
+            url: "http://[fd12:3456:789a:1::1]/".to_string(),
+            ..Default::default()
+        };
+        let tick = make_tick();
+        let result = checker.check_url(&restricted_ipv6_config, &tick).await;
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("URL contains a restricted IP address as the hostname".to_string())
+        );
     }
 
     // TODO: Figure out how to simulate a DNS failure
