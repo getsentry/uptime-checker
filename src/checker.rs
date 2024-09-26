@@ -1,5 +1,6 @@
 pub mod dummy_checker;
 pub mod http_checker;
+pub mod ip_filter;
 
 use std::future::Future;
 
