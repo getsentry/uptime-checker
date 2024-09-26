@@ -1,3 +1,4 @@
+pub mod dns_resolution;
 pub mod dummy_checker;
 pub mod http_checker;
 

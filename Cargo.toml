@@ -2,7 +2,7 @@
 name = "uptime-checker"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.79"
+rust-version = "1.80"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -35,6 +35,11 @@ metrics = "0.23.0"
 futures = "0.3.30"
 tokio-stream = "0.1.15"
 redis = { version = "0.26.0", features = ["tokio-comp"] }
+hyper-util = "0.1.6"
+tower-service = "0.3.3"
+futures-util = { version = "0.3.28", default-features = false }
+ipnet = "2.10.0"
+url = "2.5.2"
 
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
