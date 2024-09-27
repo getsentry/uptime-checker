@@ -12,6 +12,7 @@ use crate::types::{
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 
+use super::ip_filter::is_external_ip;
 use super::Checker;
 
 const UPTIME_USER_AGENT: &str =
@@ -21,6 +22,18 @@ const UPTIME_USER_AGENT: &str =
 #[derive(Clone, Debug)]
 pub struct HttpChecker {
     client: Client,
+}
+
+struct Options {
+    /// When set to true (the default) resolution to internal network addresses will be restricted.
+    /// This should primarily be disabled for tests.
+    validate_url: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { validate_url: true }
+    }
 }
 
 /// Fetches the response from a URL.
@@ -66,28 +79,33 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
     while let Some(source) = inner.source() {
         inner = source;
 
-        // TODO: Would be better to get specific errors without string matching like this
-        // Not sure if there's a better way
-        let inner_message = inner.to_string();
-        if inner_message.contains("dns error") {
-            return Some(inner.source().unwrap().to_string());
+        if let Some(inner_err) = source.downcast_ref::<hickory_resolver::error::ResolveError>() {
+            return Some(format!("{}", inner_err));
         }
     }
     None
 }
 
 impl HttpChecker {
-    pub fn new() -> Self {
+    fn new_internal(options: Options) -> Self {
         let mut default_headers = HeaderMap::new();
         default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
 
-        let client = ClientBuilder::new()
+        let mut builder = ClientBuilder::new()
             .hickory_dns(true)
-            .default_headers(default_headers)
-            .build()
-            .expect("Failed to build checker client");
+            .default_headers(default_headers);
+
+        if options.validate_url {
+            builder = builder.ip_filter(is_external_ip);
+        }
+
+        let client = builder.build().expect("Failed to build checker client");
 
         Self { client }
+    }
+
+    pub fn new() -> Self {
+        Self::new_internal(Default::default())
     }
 }
 
@@ -176,7 +194,7 @@ mod tests {
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
 
-    use super::{HttpChecker, UPTIME_USER_AGENT};
+    use super::{HttpChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
@@ -188,7 +206,9 @@ mod tests {
     #[tokio::test]
     async fn test_default_get() {
         let server = MockServer::start();
-        let checker = HttpChecker::new();
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
 
         let get_mock = server.mock(|when, then| {
             when.method(Method::GET)
@@ -218,7 +238,9 @@ mod tests {
     #[tokio::test]
     async fn test_configured_post() {
         let server = MockServer::start();
-        let checker = HttpChecker::new();
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
 
         let get_mock = server.mock(|when, then| {
             when.method(Method::POST)
@@ -261,7 +283,9 @@ mod tests {
         let server = MockServer::start();
 
         let timeout = TimeDelta::milliseconds(TIMEOUT);
-        let checker = HttpChecker::new();
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
 
         let timeout_mock = server.mock(|when, then| {
             when.method(Method::GET)
@@ -294,7 +318,9 @@ mod tests {
     #[tokio::test]
     async fn test_simple_400() {
         let server = MockServer::start();
-        let checker = HttpChecker::new();
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
 
         let head_mock = server.mock(|when, then| {
             when.method(Method::GET)
@@ -326,6 +352,68 @@ mod tests {
         );
 
         head_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_restricted_resolution() {
+        let checker = HttpChecker::new_internal(Options { validate_url: true });
+
+        let localhost_config = CheckConfig {
+            url: "http://localhost/whatever".to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&localhost_config, &tick).await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::DnsError)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("destination is restricted".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_url() {
+        let checker = HttpChecker::new_internal(Options { validate_url: true });
+
+        // Private address space
+        let restricted_ip_config = CheckConfig {
+            url: "http://10.0.0.1/".to_string(),
+            ..Default::default()
+        };
+        let tick = make_tick();
+        let result = checker.check_url(&restricted_ip_config, &tick).await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::DnsError)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("destination is restricted".to_string())
+        );
+
+        // Unique Local Address
+        let restricted_ipv6_config = CheckConfig {
+            url: "http://[fd12:3456:789a:1::1]/".to_string(),
+            ..Default::default()
+        };
+        let tick = make_tick();
+        let result = checker.check_url(&restricted_ipv6_config, &tick).await;
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("destination is restricted".to_string())
+        );
     }
 
     // TODO: Figure out how to simulate a DNS failure
