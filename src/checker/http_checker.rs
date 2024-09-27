@@ -82,6 +82,7 @@ impl HttpChecker {
         default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
 
         let client = ClientBuilder::new()
+            .hickory_dns(true)
             .default_headers(default_headers)
             .build()
             .expect("Failed to build checker client");
