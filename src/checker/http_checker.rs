@@ -165,7 +165,7 @@ impl Checker for HttpChecker {
                 } else {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
-                        description: format!("{:?}", e),
+                        description: format!("{:?}", e.without_url()),
                     }
                 }
             }),
