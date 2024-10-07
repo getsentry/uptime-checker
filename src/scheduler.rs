@@ -80,7 +80,7 @@ async fn scheduler_loop(
             .read()
             .expect("Lock poisoned")
             .get_configs(tick);
-        tracing::info!(%tick, bucket_size = configs.len(), "scheduler.tick_scheduled");
+        tracing::debug!(%tick, bucket_size = configs.len(), "scheduler.tick_scheduled");
 
         metrics::gauge!("scheduler.bucket_size").set(configs.len() as f64);
 
