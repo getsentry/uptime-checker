@@ -56,7 +56,7 @@ pub struct CheckConfig {
     #[serde(default)]
     pub request_body: String,
 
-    /// If we should allow sampling on the trace spans
+    /// If we should allow sampling on the trace spans.
     #[serde(default)]
     pub trace_sampling: bool,
 }
