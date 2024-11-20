@@ -55,6 +55,10 @@ pub struct CheckConfig {
     /// The body to pass through to the request.
     #[serde(default)]
     pub request_body: String,
+
+    /// If we should allow sampling on the trace spans.
+    #[serde(default)]
+    pub trace_sampling: bool,
 }
 
 impl Hash for CheckConfig {
@@ -103,6 +107,7 @@ mod tests {
                 request_method: Default::default(),
                 request_headers: Default::default(),
                 request_body: Default::default(),
+                trace_sampling: false,
             }
         }
     }
@@ -131,7 +136,8 @@ mod tests {
                 url: "http://sentry.io".to_string(),
                 request_method: RequestMethod::Get,
                 request_headers: vec![],
-                request_body: "".to_string()
+                request_body: "".to_string(),
+                trace_sampling: false,
             }
         );
     }
@@ -178,7 +184,8 @@ mod tests {
                         "example value".to_string()
                     ),
                 ],
-                request_body: "{\"key\": \"value\"}".to_string()
+                request_body: "{\"key\": \"value\"}".to_string(),
+                trace_sampling: false,
             }
         );
     }
