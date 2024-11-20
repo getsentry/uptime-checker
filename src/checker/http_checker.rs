@@ -109,6 +109,20 @@ impl HttpChecker {
     }
 }
 
+fn make_trace_header(config: &CheckConfig, trace_id: TraceId, span_id: SpanId) -> String {
+    /// Format the 'sentry-trace' header. if we append a 0 to the header,
+    /// we're indicating the trace spans will not be sampled.
+    /// if we don't append a 0, then the default behavior is to sample the trace spans
+    /// according to the service's sampling policy. see
+    /// https://develop.sentry.dev/sdk/telemetry/traces/#header-sentry-trace
+    /// for more information.
+    if config.trace_sampling {
+        format!("{}-{}", trace_id, span_id)
+    } else {
+        format!("{}-{}-{}", trace_id, span_id, '0')
+    }
+}
+
 impl Checker for HttpChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
@@ -116,14 +130,12 @@ impl Checker for HttpChecker {
     async fn check_url(&self, config: &CheckConfig, tick: &Tick) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
-
         let trace_id = TraceId::default();
         let span_id = SpanId::default();
 
-        // Format the 'sentry-trace' header. The last byte indicates that we are NOT forcing
-        // sampling on child spans. If we were to set this to '1' it would mean that every
-        // check request made for that customer would be sampled,
-        let trace_header = format!("{}-{}-{}", trace_id, span_id, '0');
+
+        
+        let trace_header = make_trace_header(config, trace_id, span_id);
 
         let start = Instant::now();
         let response = do_request(&self.client, config, &trace_header).await;
@@ -188,6 +200,7 @@ impl Checker for HttpChecker {
 
 #[cfg(test)]
 mod tests {
+    use crate::checker::http_checker::make_trace_header;
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
@@ -198,6 +211,7 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
+    use sentry::protocol::{SpanId, TraceId};
 
     fn make_tick() -> Tick {
         Tick::from_time(Utc::now() - TimeDelta::seconds(60))
@@ -275,7 +289,6 @@ mod tests {
 
         get_mock.assert();
     }
-
     #[tokio::test]
     async fn test_simple_timeout() {
         static TIMEOUT: i64 = 200;
@@ -416,6 +429,29 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_trace_sampling() {
+        let trace_id = TraceId::default();
+        let span_id = SpanId::default();
+    
+        // Test with sampling disabled
+        let config = CheckConfig {
+            url: "http://localhost/".to_string(),
+            trace_sampling: false,
+            ..Default::default()
+        };
+        let trace_header = make_trace_header(&config, trace_id, span_id);
+        assert_eq!(trace_header, format!("{}-{}-0", trace_id, span_id));
+    
+        // Test with sampling enabled
+        let config_with_sampling = CheckConfig {
+            url: "http://localhost/".to_string(),
+            trace_sampling: true,
+            ..Default::default()
+        };
+        let trace_header_sampling = make_trace_header(&config_with_sampling, trace_id, span_id);
+        assert_eq!(trace_header_sampling, format!("{}-{}", trace_id, span_id));
+    }
     // TODO: Figure out how to simulate a DNS failure
     // assert_eq!(check_domain(&client, "https://hjkhjkljkh.io/".to_string()).await, CheckResult::FAILURE(FailureReason::DnsError("failed to lookup address information: nodename nor servname provided, or not known".to_string())));
 }
