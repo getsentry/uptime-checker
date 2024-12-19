@@ -133,8 +133,6 @@ impl Checker for HttpChecker {
         let trace_id = TraceId::default();
         let span_id = SpanId::default();
 
-
-        
         let trace_header = make_trace_header(config, trace_id, span_id);
 
         let start = Instant::now();
@@ -433,7 +431,7 @@ mod tests {
     async fn test_trace_sampling() {
         let trace_id = TraceId::default();
         let span_id = SpanId::default();
-    
+
         // Test with sampling disabled
         let config = CheckConfig {
             url: "http://localhost/".to_string(),
@@ -442,7 +440,7 @@ mod tests {
         };
         let trace_header = make_trace_header(&config, trace_id, span_id);
         assert_eq!(trace_header, format!("{}-{}-0", trace_id, span_id));
-    
+
         // Test with sampling enabled
         let config_with_sampling = CheckConfig {
             url: "http://localhost/".to_string(),
