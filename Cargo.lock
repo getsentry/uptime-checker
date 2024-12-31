@@ -3620,6 +3620,7 @@ dependencies = [
  "ipnet",
  "metrics",
  "metrics-exporter-statsd",
+ "once_cell",
  "redis",
  "reqwest",
  "rmp-serde",
