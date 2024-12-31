@@ -14,6 +14,7 @@ use crate::config_store::{RwConfigStore, Tick};
 use crate::config_waiter::BootResult;
 use redis::{AsyncCommands, Client};
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_scheduler(
     partition: u16,
     config_store: Arc<RwConfigStore>,
