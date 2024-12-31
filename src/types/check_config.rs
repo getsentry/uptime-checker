@@ -99,9 +99,9 @@ mod tests {
     use similar_asserts::assert_eq;
     use uuid::{uuid, Uuid};
 
+    use super::{CheckConfig, CheckInterval, RequestMethod};
     use crate::types::check_config::MAX_CHECK_INTERVAL_SECS;
     use crate::types::shared::RegionScheduleMode;
-    use super::{CheckConfig, CheckInterval, RequestMethod};
 
     impl Default for CheckConfig {
         fn default() -> Self {

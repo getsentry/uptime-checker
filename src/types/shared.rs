@@ -13,7 +13,6 @@ pub enum RequestMethod {
     Options,
 }
 
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RegionScheduleMode {
