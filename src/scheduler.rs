@@ -178,13 +178,12 @@ mod tests {
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
     use uuid::Uuid;
-    use once_cell::sync::Lazy;
-
 
     use super::run_scheduler;
 
     use crate::config_waiter::BootResult;
     use crate::manager::build_progress_key;
+    use crate::types::shared::RegionScheduleMode;
     use crate::{
         config_store::ConfigStore,
         types::{
@@ -192,9 +191,7 @@ mod tests {
             result::{CheckResult, CheckStatus},
         },
     };
-    use crate::types::shared::RegionScheduleMode;
-    static TEST_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[traced_test]
     #[tokio::test(start_paused = true)]
@@ -320,19 +317,13 @@ mod tests {
 
         let config1 = Arc::new(CheckConfig {
             subscription_id: Uuid::from_u128(1),
-            active_regions: Some(vec![
-                "us_west".to_string(),
-                "us_east".to_string(),
-            ]),
+            active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
         });
         let config2 = Arc::new(CheckConfig {
             subscription_id: Uuid::from_u128(3),
-            active_regions: Some(vec![
-                "us_east".to_string(),
-                "us_west".to_string(),
-            ]),
+            active_regions: Some(vec!["us_east".to_string(), "us_west".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
         });

@@ -96,14 +96,18 @@ impl CheckConfig {
         // Determines if this check should run in the current region at this current tick
 
         // If region configs aren't present, assume we should always run this check
-        if self.active_regions.as_ref().is_none() || self.region_schedule_mode.is_none() {
+        if self.region_schedule_mode.is_none() {
             return true;
         }
 
+        let Some(active_regions) = self.active_regions.as_ref() else {
+            return true;
+        };
+
         let running_region_idx = (tick.time().timestamp() / self.interval as i64)
-            .checked_rem(self.active_regions.as_ref().unwrap().len() as i64)
+            .checked_rem(active_regions.len() as i64)
             .unwrap();
-        self.active_regions.as_ref().unwrap()[running_region_idx as usize] == current_region
+        active_regions[running_region_idx as usize] == current_region
     }
 }
 
