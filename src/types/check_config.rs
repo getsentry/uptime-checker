@@ -109,10 +109,6 @@ impl CheckConfig {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeDelta;
-    use similar_asserts::assert_eq;
-    use uuid::{uuid, Uuid};
-
     use super::{CheckConfig, CheckInterval, RequestMethod};
     use crate::config_store::Tick;
     use crate::types::check_config::MAX_CHECK_INTERVAL_SECS;
