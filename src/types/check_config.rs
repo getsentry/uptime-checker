@@ -5,7 +5,7 @@ use serde_with::serde_as;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
-use super::shared::RequestMethod;
+use super::shared::{RegionScheduleMode, RequestMethod};
 
 const ONE_MINUTE: isize = 60;
 
@@ -59,6 +59,12 @@ pub struct CheckConfig {
     /// If we should allow sampling on the trace spans.
     #[serde(default)]
     pub trace_sampling: bool,
+
+    #[serde(default)]
+    pub active_regions: Option<Vec<String>>,
+
+    #[serde(default)]
+    pub region_schedule_mode: Option<RegionScheduleMode>,
 }
 
 impl Hash for CheckConfig {
@@ -93,9 +99,9 @@ mod tests {
     use similar_asserts::assert_eq;
     use uuid::{uuid, Uuid};
 
-    use crate::types::check_config::MAX_CHECK_INTERVAL_SECS;
-
     use super::{CheckConfig, CheckInterval, RequestMethod};
+    use crate::types::check_config::MAX_CHECK_INTERVAL_SECS;
+    use crate::types::shared::RegionScheduleMode;
 
     impl Default for CheckConfig {
         fn default() -> Self {
@@ -108,6 +114,8 @@ mod tests {
                 request_headers: Default::default(),
                 request_body: Default::default(),
                 trace_sampling: false,
+                active_regions: None,
+                region_schedule_mode: None,
             }
         }
     }
@@ -143,6 +151,8 @@ mod tests {
                 request_headers: vec![],
                 request_body: "".to_string(),
                 trace_sampling: false,
+                active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
+                region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             }
         );
     }
@@ -196,6 +206,8 @@ mod tests {
                 ],
                 request_body: "{\"key\": \"value\"}".to_string(),
                 trace_sampling: false,
+                active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
+                region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             }
         );
     }
