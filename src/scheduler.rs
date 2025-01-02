@@ -14,6 +14,7 @@ use crate::config_store::{RwConfigStore, Tick};
 use crate::config_waiter::BootResult;
 use redis::{AsyncCommands, Client};
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_scheduler(
     partition: u16,
     config_store: Arc<RwConfigStore>,
@@ -22,6 +23,7 @@ pub fn run_scheduler(
     progress_key: String,
     redis_host: String,
     config_loaded_receiver: Receiver<BootResult>,
+    region: String,
 ) -> JoinHandle<()> {
     tracing::info!(partition, "scheduler.starting");
     tokio::spawn(async move {
@@ -32,6 +34,7 @@ pub fn run_scheduler(
             shutdown,
             progress_key,
             redis_host,
+            region,
         )
         .await
     })
@@ -43,6 +46,7 @@ async fn scheduler_loop(
     shutdown: CancellationToken,
     progress_key: String,
     redis_host: String,
+    _region: String,
 ) {
     let client = Client::open(redis_host.clone()).unwrap();
     let mut connection = client
@@ -219,6 +223,7 @@ mod tests {
             build_progress_key(0),
             config.redis_host.clone(),
             boot_rx,
+            config.region.clone(),
         );
         let _ = boot_tx.send(BootResult::Started);
 
@@ -321,6 +326,7 @@ mod tests {
             progress_key.clone(),
             config.redis_host.clone(),
             boot_rx,
+            config.region.clone(),
         );
 
         let _ = boot_tx.send(BootResult::Started);

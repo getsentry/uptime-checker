@@ -57,6 +57,7 @@ impl PartitionedService {
             build_progress_key(partition),
             config.redis_host.clone(),
             config_loaded,
+            config.region.clone(),
         );
 
         Self {
