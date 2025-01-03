@@ -113,7 +113,7 @@ impl CheckConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{CheckConfig, CheckInterval, RequestMethod};
+    use super::{CheckConfig, CheckInterval, RequestMethod, ONE_MINUTE};
     use crate::config_store::Tick;
     use crate::types::check_config::MAX_CHECK_INTERVAL_SECS;
     use crate::types::shared::RegionScheduleMode;
@@ -136,6 +136,17 @@ mod tests {
                 region_schedule_mode: None,
             }
         }
+    }
+
+    pub enum TestInterval {
+        OneSecond = 1,
+        OneMinute = ONE_MINUTE,
+        TwentyMinutes = ONE_MINUTE * 20,
+        OneHour = ONE_MINUTE * 60,
+    }
+
+    macro_rules! v {
+        ($($x:expr),*) => (vec![$($x.to_string()),*]);
     }
 
     #[test]
@@ -328,99 +339,154 @@ mod tests {
             ..Default::default()
         };
         // With 3 regions configured, the US west region should only run once every 3 minutes
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(!multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(!multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(121, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(181, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        // Check other regions run
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
-            &"us_east".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(121, 0).unwrap()),
-            &"eu_west".to_string()
-        ));
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            0,
+            TestInterval::OneSecond,
+            1,
+            vec!["us_west".to_string()],
+            vec!["us_east".to_string(), "eu_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            1,
+            TestInterval::OneSecond,
+            1,
+            vec!["us_east".to_string()],
+            vec!["us_west".to_string(), "eu_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            2,
+            TestInterval::OneSecond,
+            1,
+            vec!["eu_west".to_string()],
+            vec!["us_west".to_string(), "us_east".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            3,
+            TestInterval::OneSecond,
+            1,
+            vec!["us_west".to_string()],
+            vec!["eu_west".to_string(), "us_east".to_string()],
+        );
 
         // Try different spots in the minute
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(29, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(59, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(!multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(83, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(83, 0).unwrap()),
-            &"us_east".to_string()
-        ));
-        assert!(!multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(119, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(119, 0).unwrap()),
-            &"us_east".to_string()
-        ));
-        assert!(!multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(145, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(145, 0).unwrap()),
-            &"eu_west".to_string()
-        ));
-        assert!(!multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(171, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(171, 0).unwrap()),
-            &"eu_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(220, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(200, 0).unwrap()),
-            &"us_west".to_string()
-        ));
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            0,
+            TestInterval::OneSecond,
+            29,
+            vec!["us_west".to_string()],
+            vec!["eu_west".to_string(), "us_east".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            0,
+            TestInterval::OneSecond,
+            59,
+            vec!["us_west".to_string()],
+            vec!["eu_west".to_string(), "us_east".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            1,
+            TestInterval::OneSecond,
+            23,
+            vec!["us_east".to_string()],
+            vec!["eu_west".to_string(), "us_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            1,
+            TestInterval::OneSecond,
+            59,
+            vec!["us_east".to_string()],
+            vec!["eu_west".to_string(), "us_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            2,
+            TestInterval::OneSecond,
+            25,
+            vec!["eu_west".to_string()],
+            vec!["us_east".to_string(), "us_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            2,
+            TestInterval::OneSecond,
+            51,
+            vec!["eu_west".to_string()],
+            vec!["us_east".to_string(), "us_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            3,
+            TestInterval::OneSecond,
+            20,
+            vec!["us_west".to_string()],
+            vec!["us_east".to_string(), "eu_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            3,
+            TestInterval::OneSecond,
+            40,
+            vec!["us_west".to_string()],
+            vec!["us_east".to_string(), "eu_west".to_string()],
+        );
 
         // Try a more complicated start minute
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp(60 * (3 * 12345), 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(!multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp((60 * (3 * 12345)) + 60, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(!multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp((60 * (3 * 12345)) + 120, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config.should_run(
-            Tick::from_time(DateTime::from_timestamp((60 * (3 * 12345)) + 180, 0).unwrap()),
-            &"us_west".to_string()
-        ));
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            12345,
+            TestInterval::OneMinute,
+            0,
+            vec!["us_west".to_string()],
+            vec!["us_east".to_string(), "eu_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            12345,
+            TestInterval::OneMinute,
+            1,
+            vec!["us_east".to_string()],
+            vec!["eu_west".to_string(), "us_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            12345,
+            TestInterval::OneMinute,
+            2,
+            vec!["eu_west".to_string()],
+            vec!["us_west".to_string(), "us_east".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            12345,
+            TestInterval::OneMinute,
+            3,
+            vec!["us_west".to_string()],
+            vec!["us_east".to_string(), "eu_west".to_string()],
+        );
 
         // Try a larger interval to be sure things work
         let multi_region_config_large_interval = CheckConfig {
@@ -434,72 +500,123 @@ mod tests {
             ..Default::default()
         };
         // With 3 regions configured, the US west region should only run once every hour
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(0, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(!multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(60 * 25, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(60 * 25, 0).unwrap()),
-            &"us_east".to_string()
-        ));
-        assert!(!multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(60 * 50, 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(60 * 50, 0).unwrap()),
-            &"eu_west".to_string()
-        ));
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(60 * 71, 0).unwrap()),
-            &"us_west".to_string()
-        ));
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::TwentyMinutes,
+            0,
+            TestInterval::OneMinute,
+            0,
+            vec!["us_west".to_string()],
+            vec!["us_east".to_string(), "eu_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::TwentyMinutes,
+            1,
+            TestInterval::OneMinute,
+            5,
+            vec!["us_east".to_string()],
+            vec!["us_west".to_string(), "eu_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::TwentyMinutes,
+            2,
+            TestInterval::OneMinute,
+            10,
+            vec!["eu_west".to_string()],
+            vec!["us_west".to_string(), "us_east".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::TwentyMinutes,
+            3,
+            TestInterval::OneMinute,
+            11,
+            vec!["us_west".to_string()],
+            vec!["eu_west".to_string(), "us_east".to_string()],
+        );
 
         // Try more complicated times
         // ((60 * 60) * 13423) Is just selecting a random large hour, then we add minutes to it
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 15), 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(!multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 39), 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 39), 0).unwrap()),
-            &"us_east".to_string()
-        ));
-        assert!(!multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 40), 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 40), 0).unwrap()),
-            &"eu_west".to_string()
-        ));
-        assert!(!multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 59), 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 59), 0).unwrap()),
-            &"eu_west".to_string()
-        ));
-        assert!(multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 60), 0).unwrap()),
-            &"us_west".to_string()
-        ));
-        assert!(!multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 60), 0).unwrap()),
-            &"us_east".to_string()
-        ));
-        assert!(!multi_region_config_large_interval.should_run(
-            Tick::from_time(DateTime::from_timestamp(((60 * 60) * 13423) + (60 * 60), 0).unwrap()),
-            &"eu_west".to_string()
-        ));
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            15,
+            vec!["us_west".to_string()],
+            vec!["eu_west".to_string(), "us_east".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            39,
+            vec!["us_east".to_string()],
+            vec!["eu_west".to_string(), "us_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            40,
+            vec!["eu_west".to_string()],
+            vec!["us_east".to_string(), "us_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            59,
+            vec!["eu_west".to_string()],
+            vec!["us_east".to_string(), "us_west".to_string()],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            60,
+            v!["us_west"],
+            v!["us_east", "eu_west"],
+        );
+    }
+
+    fn run_interval_test(
+        config: &CheckConfig,
+        interval: TestInterval,
+        interval_count: i64,
+        offset_type: TestInterval,
+        offset_count: i64,
+        should_run: Vec<String>,
+        should_not_run: Vec<String>,
+    ) {
+        let tick = Tick::from_time(
+            DateTime::from_timestamp(
+                ((interval as i64) * interval_count) + ((offset_type as i64) * offset_count),
+                0,
+            )
+            .unwrap(),
+        );
+        for region in should_run {
+            assert!(
+                config.should_run(tick, &region),
+                "Expected that region {} would run for tick {}",
+                region,
+                tick
+            );
+        }
+        for region in should_not_run {
+            assert!(
+                !config.should_run(tick, &region),
+                "Expected that region {} would not run for tick {}",
+                region,
+                tick
+            );
+        }
     }
 }
