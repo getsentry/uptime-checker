@@ -195,7 +195,7 @@ mod tests {
     #[traced_test]
     #[tokio::test(start_paused = true)]
     async fn test_scheduler() {
-                // We don't want these tests to run at the same time, since they access the external redis.
+        // We don't want these tests to run at the same time, since they access the external redis.
         let _guard = TEST_MUTEX.lock().await;
 
         let config = Config::default();
