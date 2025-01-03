@@ -145,10 +145,6 @@ mod tests {
         OneHour = ONE_MINUTE * 60,
     }
 
-    macro_rules! v {
-        ($($x:expr),*) => (vec![$($x.to_string()),*]);
-    }
-
     #[test]
     fn test_serialize_msgpack_roundtrip_simple() {
         // Example msgpack taken from
@@ -581,8 +577,8 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             60,
-            v!["us_west"],
-            v!["us_east", "eu_west"],
+            vec!["us_west".to_string()],
+            vec!["us_east".to_string(), "eu_west".to_string()],
         );
     }
 
