@@ -100,7 +100,11 @@ impl CheckConfig {
             return true;
         }
 
-        let Some(active_regions) = self.active_regions.as_ref() else {
+        let Some(active_regions) = self
+            .active_regions
+            .as_ref()
+            .filter(|regions| !regions.is_empty())
+        else {
             return true;
         };
 
@@ -299,6 +303,14 @@ mod tests {
             ..Default::default()
         };
         assert!(no_schedule_mode_config.should_run(tick, "us_west"));
+
+        // Shouldn't error if regions are somehow empty, just return true
+        let empty_region_config = CheckConfig {
+            region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+            active_regions: Some(vec![]),
+            ..Default::default()
+        };
+        assert!(empty_region_config.should_run(tick, "us_west"));
 
         // When there's just one region we should also always run
         let one_region_config = CheckConfig {
