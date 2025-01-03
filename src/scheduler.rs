@@ -90,10 +90,8 @@ async fn scheduler_loop(
 
         let mut results = vec![];
 
-        // TODO(epurkhiser): Check if we skipped any ticks If we did we should catch up on those.
-
         for config in configs {
-            if config.should_run(tick, region.clone()) {
+            if config.should_run(tick, &region) {
                 results.push(queue_check(&executor_sender, tick, config));
             } else {
                 tracing::debug!(%config.subscription_id, %tick, "scheduler.skipped_config");
