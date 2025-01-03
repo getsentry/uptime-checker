@@ -92,7 +92,7 @@ impl CheckConfig {
             .collect()
     }
 
-    pub fn should_run(&self, tick: Tick, current_region: &String) -> bool {
+    pub fn should_run(&self, tick: Tick, current_region: &str) -> bool {
         // Determines if this check should run in the current region at this current tick
 
         // If region configs aren't present, assume we should always run this check
@@ -288,12 +288,12 @@ mod tests {
 
         // We should always run if regions aren't configured
         let no_region_config = CheckConfig::default();
-        assert!(no_region_config.should_run(tick, &"us_west".to_string()));
+        assert!(no_region_config.should_run(tick, &&"us_west"));
         let no_active_regions_config = CheckConfig {
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
         };
-        assert!(no_active_regions_config.should_run(tick, &"us_west".to_string()));
+        assert!(no_active_regions_config.should_run(tick, &&"us_west"));
         let no_schedule_mode_config = CheckConfig {
             active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
             ..Default::default()
@@ -308,11 +308,11 @@ mod tests {
         };
         assert!(one_region_config.should_run(
             Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
-            &"us_west".to_string()
+            &"us_west"
         ));
         assert!(one_region_config.should_run(
             Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
-            &"us_west".to_string()
+            &&"us_west"
         ));
 
         // If configured region doesn't match at all we should never run
@@ -341,8 +341,8 @@ mod tests {
             0,
             TestInterval::OneSecond,
             1,
-            vec!["us_west".to_string()],
-            vec!["us_east".to_string(), "eu_west".to_string()],
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -350,8 +350,8 @@ mod tests {
             1,
             TestInterval::OneSecond,
             1,
-            vec!["us_east".to_string()],
-            vec!["us_west".to_string(), "eu_west".to_string()],
+            vec![&"us_east"],
+            vec![&"us_west", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -359,8 +359,8 @@ mod tests {
             2,
             TestInterval::OneSecond,
             1,
-            vec!["eu_west".to_string()],
-            vec!["us_west".to_string(), "us_east".to_string()],
+            vec![&"eu_west"],
+            vec![&"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config,
@@ -368,8 +368,8 @@ mod tests {
             3,
             TestInterval::OneSecond,
             1,
-            vec!["us_west".to_string()],
-            vec!["eu_west".to_string(), "us_east".to_string()],
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
         );
 
         // Try different spots in the minute
@@ -379,8 +379,8 @@ mod tests {
             0,
             TestInterval::OneSecond,
             29,
-            vec!["us_west".to_string()],
-            vec!["eu_west".to_string(), "us_east".to_string()],
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config,
@@ -388,8 +388,8 @@ mod tests {
             0,
             TestInterval::OneSecond,
             59,
-            vec!["us_west".to_string()],
-            vec!["eu_west".to_string(), "us_east".to_string()],
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config,
@@ -397,8 +397,8 @@ mod tests {
             1,
             TestInterval::OneSecond,
             23,
-            vec!["us_east".to_string()],
-            vec!["eu_west".to_string(), "us_west".to_string()],
+            vec![&"us_east"],
+            vec![&"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -406,8 +406,8 @@ mod tests {
             1,
             TestInterval::OneSecond,
             59,
-            vec!["us_east".to_string()],
-            vec!["eu_west".to_string(), "us_west".to_string()],
+            vec![&"us_east"],
+            vec![&"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -415,8 +415,8 @@ mod tests {
             2,
             TestInterval::OneSecond,
             25,
-            vec!["eu_west".to_string()],
-            vec!["us_east".to_string(), "us_west".to_string()],
+            vec![&"eu_west"],
+            vec![&"us_east", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -424,8 +424,8 @@ mod tests {
             2,
             TestInterval::OneSecond,
             51,
-            vec!["eu_west".to_string()],
-            vec!["us_east".to_string(), "us_west".to_string()],
+            vec![&"eu_west"],
+            vec![&"us_east", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -433,8 +433,8 @@ mod tests {
             3,
             TestInterval::OneSecond,
             20,
-            vec!["us_west".to_string()],
-            vec!["us_east".to_string(), "eu_west".to_string()],
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -442,8 +442,8 @@ mod tests {
             3,
             TestInterval::OneSecond,
             40,
-            vec!["us_west".to_string()],
-            vec!["us_east".to_string(), "eu_west".to_string()],
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
         );
 
         // Try a more complicated start minute
@@ -453,8 +453,8 @@ mod tests {
             12345,
             TestInterval::OneMinute,
             0,
-            vec!["us_west".to_string()],
-            vec!["us_east".to_string(), "eu_west".to_string()],
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -462,8 +462,8 @@ mod tests {
             12345,
             TestInterval::OneMinute,
             1,
-            vec!["us_east".to_string()],
-            vec!["eu_west".to_string(), "us_west".to_string()],
+            vec![&"us_east"],
+            vec![&"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -471,8 +471,8 @@ mod tests {
             12345,
             TestInterval::OneMinute,
             2,
-            vec!["eu_west".to_string()],
-            vec!["us_west".to_string(), "us_east".to_string()],
+            vec![&"eu_west"],
+            vec![&"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config,
@@ -480,8 +480,8 @@ mod tests {
             12345,
             TestInterval::OneMinute,
             3,
-            vec!["us_west".to_string()],
-            vec!["us_east".to_string(), "eu_west".to_string()],
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
         );
 
         // Try a larger interval to be sure things work
@@ -502,8 +502,8 @@ mod tests {
             0,
             TestInterval::OneMinute,
             0,
-            vec!["us_west".to_string()],
-            vec!["us_east".to_string(), "eu_west".to_string()],
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -511,8 +511,8 @@ mod tests {
             1,
             TestInterval::OneMinute,
             5,
-            vec!["us_east".to_string()],
-            vec!["us_west".to_string(), "eu_west".to_string()],
+            vec![&"us_east"],
+            vec![&"us_west", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -520,8 +520,8 @@ mod tests {
             2,
             TestInterval::OneMinute,
             10,
-            vec!["eu_west".to_string()],
-            vec!["us_west".to_string(), "us_east".to_string()],
+            vec![&"eu_west"],
+            vec![&"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -529,8 +529,8 @@ mod tests {
             3,
             TestInterval::OneMinute,
             11,
-            vec!["us_west".to_string()],
-            vec!["eu_west".to_string(), "us_east".to_string()],
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
         );
 
         // Try more complicated times
@@ -541,8 +541,8 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             15,
-            vec!["us_west".to_string()],
-            vec!["eu_west".to_string(), "us_east".to_string()],
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -550,8 +550,8 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             39,
-            vec!["us_east".to_string()],
-            vec!["eu_west".to_string(), "us_west".to_string()],
+            vec![&"us_east"],
+            vec![&"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -559,8 +559,8 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             40,
-            vec!["eu_west".to_string()],
-            vec!["us_east".to_string(), "us_west".to_string()],
+            vec![&"eu_west"],
+            vec![&"us_east", &"us_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -568,8 +568,8 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             59,
-            vec!["eu_west".to_string()],
-            vec!["us_east".to_string(), "us_west".to_string()],
+            vec![&"eu_west"],
+            vec![&"us_east", &"us_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -577,8 +577,8 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             60,
-            vec!["us_west".to_string()],
-            vec!["us_east".to_string(), "eu_west".to_string()],
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
         );
     }
 
@@ -588,8 +588,8 @@ mod tests {
         interval_count: i64,
         offset_type: TestInterval,
         offset_count: i64,
-        should_run: Vec<String>,
-        should_not_run: Vec<String>,
+        should_run: Vec<&str>,
+        should_not_run: Vec<&str>,
     ) {
         let tick = Tick::from_time(
             DateTime::from_timestamp(
