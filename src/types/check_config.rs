@@ -100,8 +100,11 @@ impl CheckConfig {
             return true;
         }
 
-        let Some(active_regions) = self.active_regions.as_ref()
-            .filter(|regions| !regions.is_empty()) else {
+        let Some(active_regions) = self
+            .active_regions
+            .as_ref()
+            .filter(|regions| !regions.is_empty())
+        else {
             return true;
         };
 
