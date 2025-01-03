@@ -107,7 +107,7 @@ impl CheckConfig {
         let running_region_idx = (tick.time().timestamp() / self.interval as i64)
             .checked_rem(active_regions.len() as i64)
             .unwrap();
-        &active_regions[running_region_idx as usize] == current_region
+        active_regions[running_region_idx as usize] == current_region
     }
 }
 
@@ -288,17 +288,17 @@ mod tests {
 
         // We should always run if regions aren't configured
         let no_region_config = CheckConfig::default();
-        assert!(no_region_config.should_run(tick, &&"us_west"));
+        assert!(no_region_config.should_run(tick, "us_west"));
         let no_active_regions_config = CheckConfig {
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
         };
-        assert!(no_active_regions_config.should_run(tick, &&"us_west"));
+        assert!(no_active_regions_config.should_run(tick, "us_west"));
         let no_schedule_mode_config = CheckConfig {
             active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
             ..Default::default()
         };
-        assert!(no_schedule_mode_config.should_run(tick, &"us_west".to_string()));
+        assert!(no_schedule_mode_config.should_run(tick, "us_west"));
 
         // When there's just one region we should also always run
         let one_region_config = CheckConfig {
@@ -308,21 +308,21 @@ mod tests {
         };
         assert!(one_region_config.should_run(
             Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
-            &"us_west"
+            "us_west"
         ));
         assert!(one_region_config.should_run(
             Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
-            &&"us_west"
+            "us_west"
         ));
 
         // If configured region doesn't match at all we should never run
         assert!(!one_region_config.should_run(
             Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
-            &"other_region".to_string()
+            "other_region",
         ));
         assert!(!one_region_config.should_run(
             Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
-            &"other_region".to_string()
+            "other_region",
         ));
 
         let multi_region_config = CheckConfig {
@@ -600,7 +600,7 @@ mod tests {
         );
         for region in should_run {
             assert!(
-                config.should_run(tick, &region),
+                config.should_run(tick, region),
                 "Expected that region {} would run for tick {}",
                 region,
                 tick
@@ -608,7 +608,7 @@ mod tests {
         }
         for region in should_not_run {
             assert!(
-                !config.should_run(tick, &region),
+                !config.should_run(tick, region),
                 "Expected that region {} would not run for tick {}",
                 region,
                 tick

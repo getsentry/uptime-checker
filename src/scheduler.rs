@@ -171,7 +171,8 @@ mod tests {
     use chrono::{Duration, Utc};
     use redis::{Client, Commands};
     use similar_asserts::assert_eq;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
     use tokio::sync::{mpsc, oneshot};
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
@@ -189,13 +190,13 @@ mod tests {
             result::{CheckResult, CheckStatus},
         },
     };
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+    static TEST_MUTEX: Mutex<()> = Mutex::const_new(());
 
     #[traced_test]
     #[tokio::test(start_paused = true)]
     async fn test_scheduler() {
-        // We don't want these tests to run at the same time, since they access the external redis.
-        let _guard = TEST_MUTEX.lock().unwrap();
+                // We don't want these tests to run at the same time, since they access the external redis.
+        let _guard = TEST_MUTEX.lock().await;
 
         let config = Config::default();
         let partition = 0;
@@ -297,7 +298,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn test_scheduler_multi_region() {
         // We don't want these tests to run at the same time, since they access the external redis.
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = TEST_MUTEX.lock().await;
         let config = Config {
             region: "us_west".to_string(),
             ..Default::default()
@@ -405,7 +406,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn test_scheduler_start() {
         // We don't want these tests to run at the same time, since they access the external redis.
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = TEST_MUTEX.lock().await;
         // TODO: Better abstraction here
         let config = Config::default();
         let partition = 1;
