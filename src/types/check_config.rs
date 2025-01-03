@@ -1,11 +1,11 @@
+use super::shared::{RegionScheduleMode, RequestMethod};
+use crate::config_store::Tick;
 use chrono::TimeDelta;
 use serde::Deserialize;
 use serde_repr::Deserialize_repr;
 use serde_with::serde_as;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
-
-use super::shared::{RegionScheduleMode, RequestMethod};
 
 const ONE_MINUTE: isize = 60;
 
@@ -91,17 +91,35 @@ impl CheckConfig {
             .map(|c| first_slot + (interval_secs * c))
             .collect()
     }
+
+    pub fn should_run(&self, tick: Tick, current_region: &str) -> bool {
+        // Determines if this check should run in the current region at this current tick
+
+        // If region configs aren't present, assume we should always run this check
+        if self.region_schedule_mode.is_none() {
+            return true;
+        }
+
+        let Some(active_regions) = self.active_regions.as_ref() else {
+            return true;
+        };
+
+        let running_region_idx = (tick.time().timestamp() / self.interval as i64)
+            .checked_rem(active_regions.len() as i64)
+            .unwrap();
+        active_regions[running_region_idx as usize] == current_region
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeDelta;
-    use similar_asserts::assert_eq;
-    use uuid::{uuid, Uuid};
-
-    use super::{CheckConfig, CheckInterval, RequestMethod};
+    use super::{CheckConfig, CheckInterval, RequestMethod, ONE_MINUTE};
+    use crate::config_store::Tick;
     use crate::types::check_config::MAX_CHECK_INTERVAL_SECS;
     use crate::types::shared::RegionScheduleMode;
+    use chrono::{DateTime, TimeDelta, Utc};
+    use similar_asserts::assert_eq;
+    use uuid::{uuid, Uuid};
 
     impl Default for CheckConfig {
         fn default() -> Self {
@@ -118,6 +136,13 @@ mod tests {
                 region_schedule_mode: None,
             }
         }
+    }
+
+    pub enum TestInterval {
+        OneSecond = 1,
+        OneMinute = ONE_MINUTE,
+        TwentyMinutes = ONE_MINUTE * 20,
+        OneHour = ONE_MINUTE * 60,
     }
 
     #[test]
@@ -255,5 +280,339 @@ mod tests {
             five_minute_config_offset.slots(),
             all_slots.skip(15).step_by(60 * 5).collect::<Vec<usize>>()
         );
+    }
+
+    #[test]
+    fn test_should_run() {
+        let tick = Tick::from_time(Utc::now());
+
+        // We should always run if regions aren't configured
+        let no_region_config = CheckConfig::default();
+        assert!(no_region_config.should_run(tick, "us_west"));
+        let no_active_regions_config = CheckConfig {
+            region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+            ..Default::default()
+        };
+        assert!(no_active_regions_config.should_run(tick, "us_west"));
+        let no_schedule_mode_config = CheckConfig {
+            active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
+            ..Default::default()
+        };
+        assert!(no_schedule_mode_config.should_run(tick, "us_west"));
+
+        // When there's just one region we should also always run
+        let one_region_config = CheckConfig {
+            active_regions: Some(vec!["us_west".to_string()]),
+            region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+            ..Default::default()
+        };
+        assert!(one_region_config.should_run(
+            Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
+            "us_west"
+        ));
+        assert!(one_region_config.should_run(
+            Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
+            "us_west"
+        ));
+
+        // If configured region doesn't match at all we should never run
+        assert!(!one_region_config.should_run(
+            Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
+            "other_region",
+        ));
+        assert!(!one_region_config.should_run(
+            Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
+            "other_region",
+        ));
+
+        let multi_region_config = CheckConfig {
+            active_regions: Some(vec![
+                "us_west".to_string(),
+                "us_east".to_string(),
+                "eu_west".to_string(),
+            ]),
+            region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+            ..Default::default()
+        };
+        // With 3 regions configured, the US west region should only run once every 3 minutes
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            0,
+            TestInterval::OneSecond,
+            1,
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            1,
+            TestInterval::OneSecond,
+            1,
+            vec![&"us_east"],
+            vec![&"us_west", &"eu_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            2,
+            TestInterval::OneSecond,
+            1,
+            vec![&"eu_west"],
+            vec![&"us_west", &"us_east"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            3,
+            TestInterval::OneSecond,
+            1,
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
+        );
+
+        // Try different spots in the minute
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            0,
+            TestInterval::OneSecond,
+            29,
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            0,
+            TestInterval::OneSecond,
+            59,
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            1,
+            TestInterval::OneSecond,
+            23,
+            vec![&"us_east"],
+            vec![&"eu_west", &"us_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            1,
+            TestInterval::OneSecond,
+            59,
+            vec![&"us_east"],
+            vec![&"eu_west", &"us_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            2,
+            TestInterval::OneSecond,
+            25,
+            vec![&"eu_west"],
+            vec![&"us_east", &"us_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            2,
+            TestInterval::OneSecond,
+            51,
+            vec![&"eu_west"],
+            vec![&"us_east", &"us_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            3,
+            TestInterval::OneSecond,
+            20,
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            3,
+            TestInterval::OneSecond,
+            40,
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
+        );
+
+        // Try a more complicated start minute
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            12345,
+            TestInterval::OneMinute,
+            0,
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            12345,
+            TestInterval::OneMinute,
+            1,
+            vec![&"us_east"],
+            vec![&"eu_west", &"us_west"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            12345,
+            TestInterval::OneMinute,
+            2,
+            vec![&"eu_west"],
+            vec![&"us_west", &"us_east"],
+        );
+        run_interval_test(
+            &multi_region_config,
+            TestInterval::OneMinute,
+            12345,
+            TestInterval::OneMinute,
+            3,
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
+        );
+
+        // Try a larger interval to be sure things work
+        let multi_region_config_large_interval = CheckConfig {
+            interval: CheckInterval::TwentyMinutes,
+            active_regions: Some(vec![
+                "us_west".to_string(),
+                "us_east".to_string(),
+                "eu_west".to_string(),
+            ]),
+            region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+            ..Default::default()
+        };
+        // With 3 regions configured, the US west region should only run once every hour
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::TwentyMinutes,
+            0,
+            TestInterval::OneMinute,
+            0,
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::TwentyMinutes,
+            1,
+            TestInterval::OneMinute,
+            5,
+            vec![&"us_east"],
+            vec![&"us_west", &"eu_west"],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::TwentyMinutes,
+            2,
+            TestInterval::OneMinute,
+            10,
+            vec![&"eu_west"],
+            vec![&"us_west", &"us_east"],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::TwentyMinutes,
+            3,
+            TestInterval::OneMinute,
+            11,
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
+        );
+
+        // Try more complicated times
+        // ((60 * 60) * 13423) Is just selecting a random large hour, then we add minutes to it
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            15,
+            vec![&"us_west"],
+            vec![&"eu_west", &"us_east"],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            39,
+            vec![&"us_east"],
+            vec![&"eu_west", &"us_west"],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            40,
+            vec![&"eu_west"],
+            vec![&"us_east", &"us_west"],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            59,
+            vec![&"eu_west"],
+            vec![&"us_east", &"us_west"],
+        );
+        run_interval_test(
+            &multi_region_config_large_interval,
+            TestInterval::OneHour,
+            13423,
+            TestInterval::OneMinute,
+            60,
+            vec![&"us_west"],
+            vec![&"us_east", &"eu_west"],
+        );
+    }
+
+    fn run_interval_test(
+        config: &CheckConfig,
+        interval: TestInterval,
+        interval_count: i64,
+        offset_type: TestInterval,
+        offset_count: i64,
+        should_run: Vec<&str>,
+        should_not_run: Vec<&str>,
+    ) {
+        let tick = Tick::from_time(
+            DateTime::from_timestamp(
+                ((interval as i64) * interval_count) + ((offset_type as i64) * offset_count),
+                0,
+            )
+            .unwrap(),
+        );
+        for region in should_run {
+            assert!(
+                config.should_run(tick, region),
+                "Expected that region {} would run for tick {}",
+                region,
+                tick
+            );
+        }
+        for region in should_not_run {
+            assert!(
+                !config.should_run(tick, region),
+                "Expected that region {} would not run for tick {}",
+                region,
+                tick
+            );
+        }
     }
 }
