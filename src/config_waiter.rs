@@ -39,6 +39,7 @@ pub fn wait_for_partition_boot(
     config_store: Arc<RwConfigStore>,
     partition: u16,
     shutdown: CancellationToken,
+    region: String,
 ) -> Receiver<BootResult> {
     let start = Instant::now();
     let (boot_finished, boot_finished_rx) = oneshot::channel::<BootResult>();
@@ -97,9 +98,9 @@ pub fn wait_for_partition_boot(
             "config_consumer.partition_boot_complete",
         );
 
-        metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string())
+        metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string(), "checker_region" => region.to_string())
             .set(boot_time_ms as f64);
-        metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string())
+        metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string(), "checker_region" => region.to_string())
             .set(total_configs as f64);
 
         boot_finished
@@ -125,7 +126,12 @@ mod tests {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let shutdown_signal = CancellationToken::new();
-        let wait_booted = wait_for_partition_boot(config_store.clone(), 0, shutdown_signal.clone());
+        let wait_booted = wait_for_partition_boot(
+            config_store.clone(),
+            0,
+            shutdown_signal.clone(),
+            "us-west".to_string(),
+        );
         tokio::pin!(wait_booted);
 
         // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.
@@ -166,7 +172,7 @@ mod tests {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let shutdown_signal = CancellationToken::new();
-        let wait_booted = wait_for_partition_boot(config_store.clone(), 0, shutdown_signal.clone());
+        let wait_booted = wait_for_partition_boot(config_store.clone(), 0, shutdown_signal.clone(), "us-west".to_string());
         tokio::pin!(wait_booted);
 
         // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.

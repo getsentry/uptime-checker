@@ -86,7 +86,7 @@ async fn scheduler_loop(
             .get_configs(tick);
         tracing::debug!(%tick, bucket_size = configs.len(), "scheduler.tick_scheduled");
 
-        metrics::gauge!("scheduler.bucket_size").set(configs.len() as f64);
+        metrics::gauge!("scheduler.bucket_size", "checker_region" => region.clone()).set(configs.len() as f64);
 
         let mut results = vec![];
 
@@ -269,6 +269,7 @@ mod tests {
             actual_check_time: Utc::now(),
             duration: Some(Duration::seconds(1)),
             request_info: None,
+            region: config.region.clone(),
         });
         scheduled_check2.record_result(CheckResult {
             guid: Uuid::new_v4(),
@@ -281,6 +282,7 @@ mod tests {
             actual_check_time: Utc::now(),
             duration: Some(Duration::seconds(1)),
             request_info: None,
+            region: config.region.clone(),
         });
 
         shutdown_token.cancel();
@@ -377,6 +379,7 @@ mod tests {
             actual_check_time: Utc::now(),
             duration: Some(Duration::seconds(1)),
             request_info: None,
+            region: config.region.clone(),
         });
         scheduled_check2.record_result(CheckResult {
             guid: Uuid::new_v4(),
@@ -389,6 +392,7 @@ mod tests {
             actual_check_time: Utc::now(),
             duration: Some(Duration::seconds(1)),
             request_info: None,
+            region: config.region.clone(),
         });
 
         shutdown_token.cancel();
@@ -483,6 +487,7 @@ mod tests {
             actual_check_time: Utc::now(),
             duration: Some(Duration::seconds(1)),
             request_info: None,
+            region: config.region.clone(),
         });
         scheduled_check2.record_result(CheckResult {
             guid: Uuid::new_v4(),
@@ -495,6 +500,7 @@ mod tests {
             actual_check_time: Utc::now(),
             duration: Some(Duration::seconds(1)),
             request_info: None,
+            region: config.region.clone(),
         });
 
         shutdown_token.cancel();

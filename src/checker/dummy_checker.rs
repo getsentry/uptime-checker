@@ -24,7 +24,7 @@ impl DummyChecker {
 }
 
 impl Checker for DummyChecker {
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick) -> CheckResult {
+    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
         let trace_id = TraceId::default();
@@ -49,6 +49,7 @@ impl Checker for DummyChecker {
             actual_check_time,
             duration,
             request_info,
+            region: region.to_string(),
         }
     }
 }
