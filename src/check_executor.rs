@@ -70,8 +70,9 @@ pub fn run_executor(
     tracing::info!("executor.starting");
 
     let (sender, reciever) = mpsc::unbounded_channel();
-    let executor =
-        tokio::spawn(async move { executor_loop(concurrency, checker, producer, reciever, region).await });
+    let executor = tokio::spawn(async move {
+        executor_loop(concurrency, checker, producer, reciever, region).await
+    });
 
     (sender, executor)
 }
@@ -205,12 +206,12 @@ fn record_result_metrics(result: &CheckResult) {
 
     // Record status of the check
     metrics::counter!(
-        "check_result.processed",
-        "status" => status_label,
-        "failure_reason" => failure_reason.unwrap_or("ok"),
-        "status_code" => status_code,
-        "checker_region" => result.region.clone(),
- )
+           "check_result.processed",
+           "status" => status_label,
+           "failure_reason" => failure_reason.unwrap_or("ok"),
+           "status_code" => status_code,
+           "checker_region" => result.region.clone(),
+    )
     .increment(1);
 }
 

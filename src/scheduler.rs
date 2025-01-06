@@ -86,7 +86,8 @@ async fn scheduler_loop(
             .get_configs(tick);
         tracing::debug!(%tick, bucket_size = configs.len(), "scheduler.tick_scheduled");
 
-        metrics::gauge!("scheduler.bucket_size", "checker_region" => region.clone()).set(configs.len() as f64);
+        metrics::gauge!("scheduler.bucket_size", "checker_region" => region.clone())
+            .set(configs.len() as f64);
 
         let mut results = vec![];
 

@@ -401,7 +401,9 @@ mod tests {
             ..Default::default()
         };
         let tick = make_tick();
-        let result = checker.check_url(&restricted_ip_config, &tick, "us-west").await;
+        let result = checker
+            .check_url(&restricted_ip_config, &tick, "us-west")
+            .await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -421,7 +423,9 @@ mod tests {
             ..Default::default()
         };
         let tick = make_tick();
-        let result = checker.check_url(&restricted_ipv6_config, &tick, "us-west").await;
+        let result = checker
+            .check_url(&restricted_ipv6_config, &tick, "us-west")
+            .await;
         assert_eq!(
             result.status_reason.map(|r| r.description),
             Some("destination is restricted".to_string())

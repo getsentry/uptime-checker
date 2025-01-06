@@ -172,7 +172,12 @@ mod tests {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let shutdown_signal = CancellationToken::new();
-        let wait_booted = wait_for_partition_boot(config_store.clone(), 0, shutdown_signal.clone(), "us-west".to_string());
+        let wait_booted = wait_for_partition_boot(
+            config_store.clone(),
+            0,
+            shutdown_signal.clone(),
+            "us-west".to_string(),
+        );
         tokio::pin!(wait_booted);
 
         // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.
