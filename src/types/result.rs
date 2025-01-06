@@ -97,6 +97,7 @@ pub struct CheckResult {
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,
 
+    /// Region slug that produced the check result
     pub region: String,
 }
 
