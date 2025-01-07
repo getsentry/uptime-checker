@@ -85,8 +85,7 @@ async fn scheduler_loop(
             .expect("Lock poisoned")
             .get_configs(tick);
         tracing::debug!(%tick, bucket_size = configs.len(), "scheduler.tick_scheduled");
-
-        metrics::gauge!("scheduler.bucket_size", "checker_region" => region.clone())
+        metrics::gauge!("scheduler.bucket_size", "uptime_region" => region.clone())
             .set(configs.len() as f64);
 
         let mut results = vec![];
@@ -99,7 +98,7 @@ async fn scheduler_loop(
 
                 metrics::counter!(
                     "scheduler.skipped_region",
-                    "checker_region" => region.clone(),
+                    "uptime_region" => region.clone(),
                 )
                 .increment(1);
             }

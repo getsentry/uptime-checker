@@ -98,9 +98,9 @@ pub fn wait_for_partition_boot(
             "config_consumer.partition_boot_complete",
         );
 
-        metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string(), "checker_region" => region.to_string())
+        metrics::gauge!("config_consumer.partition_boot_time_ms", "partition" => partition.to_string(), "uptime_region" => region.to_string())
             .set(boot_time_ms as f64);
-        metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string(), "checker_region" => region.to_string())
+        metrics::gauge!("config_consumer.partition_total_configs", "partition" => partition.to_string(), "uptime_region" => region.to_string())
             .set(total_configs as f64);
 
         boot_finished

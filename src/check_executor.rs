@@ -183,7 +183,7 @@ fn record_result_metrics(result: &CheckResult) {
             "status" => status_label,
             "failure_reason" => failure_reason.unwrap_or("ok"),
             "status_code" => status_code.clone(),
-            "checker_region" => result.region.clone(),
+            "uptime_region" => result.region.clone(),
         )
         .record(duration.to_std().unwrap().as_secs_f64());
     }
@@ -200,17 +200,17 @@ fn record_result_metrics(result: &CheckResult) {
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
         "status_code" => status_code.clone(),
-        "checker_region" => result.region.clone(),
+        "uptime_region" => result.region.clone(),
     )
     .record(delay);
 
     // Record status of the check
     metrics::counter!(
-           "check_result.processed",
-           "status" => status_label,
-           "failure_reason" => failure_reason.unwrap_or("ok"),
-           "status_code" => status_code,
-           "checker_region" => result.region.clone(),
+        "check_result.processed",
+        "status" => status_label,
+        "failure_reason" => failure_reason.unwrap_or("ok"),
+        "status_code" => status_code,
+        "uptime_region" => result.region.clone(),
     )
     .increment(1);
 }
