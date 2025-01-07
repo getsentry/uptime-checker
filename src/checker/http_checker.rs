@@ -127,7 +127,7 @@ impl Checker for HttpChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     #[tracing::instrument]
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick) -> CheckResult {
+    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
         let trace_id = TraceId::default();
@@ -192,6 +192,7 @@ impl Checker for HttpChecker {
             actual_check_time,
             duration,
             request_info,
+            region: region.to_string(),
         }
     }
 }
@@ -236,7 +237,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick).await;
+        let result = checker.check_url(&config, &tick, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -277,7 +278,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick).await;
+        let result = checker.check_url(&config, &tick, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -313,7 +314,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick).await;
+        let result = checker.check_url(&config, &tick, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
@@ -346,7 +347,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick).await;
+        let result = checker.check_url(&config, &tick, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(
@@ -375,7 +376,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&localhost_config, &tick).await;
+        let result = checker.check_url(&localhost_config, &tick, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -400,7 +401,9 @@ mod tests {
             ..Default::default()
         };
         let tick = make_tick();
-        let result = checker.check_url(&restricted_ip_config, &tick).await;
+        let result = checker
+            .check_url(&restricted_ip_config, &tick, "us-west")
+            .await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -420,7 +423,9 @@ mod tests {
             ..Default::default()
         };
         let tick = make_tick();
-        let result = checker.check_url(&restricted_ipv6_config, &tick).await;
+        let result = checker
+            .check_url(&restricted_ipv6_config, &tick, "us-west")
+            .await;
         assert_eq!(
             result.status_reason.map(|r| r.description),
             Some("destination is restricted".to_string())

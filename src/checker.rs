@@ -18,5 +18,6 @@ pub trait Checker: Send + Sync {
         &self,
         config: &CheckConfig,
         tick: &Tick,
+        region: &str,
     ) -> impl Future<Output = CheckResult> + Send;
 }

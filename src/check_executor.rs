@@ -42,7 +42,7 @@ impl ScheduledCheck {
 
 impl CheckResult {
     /// Produce a missed check result from a scheduled check.
-    pub fn missed_from(config: &CheckConfig, tick: &Tick) -> Self {
+    pub fn missed_from(config: &CheckConfig, tick: &Tick, region: &str) -> Self {
         Self {
             guid: Uuid::new_v4(),
             subscription_id: config.subscription_id,
@@ -54,6 +54,7 @@ impl CheckResult {
             actual_check_time: Utc::now(),
             duration: None,
             request_info: None,
+            region: region.to_string(),
         }
     }
 }
@@ -64,12 +65,14 @@ pub fn run_executor(
     concurrency: usize,
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
+    region: String,
 ) -> (CheckSender, JoinHandle<()>) {
     tracing::info!("executor.starting");
 
     let (sender, reciever) = mpsc::unbounded_channel();
-    let executor =
-        tokio::spawn(async move { executor_loop(concurrency, checker, producer, reciever).await });
+    let executor = tokio::spawn(async move {
+        executor_loop(concurrency, checker, producer, reciever, region).await
+    });
 
     (sender, executor)
 }
@@ -100,6 +103,7 @@ async fn executor_loop(
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
     reciever: UnboundedReceiver<ScheduledCheck>,
+    region: String,
 ) {
     let schedule_check_stream: UnboundedReceiverStream<_> = reciever.into();
 
@@ -107,6 +111,7 @@ async fn executor_loop(
         .for_each_concurrent(concurrency, |scheduled_check| {
             let job_checker = checker.clone();
             let job_producer = producer.clone();
+            let job_region = region.clone();
 
             // TODO(epurkhiser): Record metrics on the size of the size of the queue
 
@@ -121,9 +126,9 @@ async fn executor_loop(
                     let interval = TimeDelta::seconds(config.interval as i64);
 
                     let check_result = if late_by > interval {
-                        CheckResult::missed_from(config, tick)
+                        CheckResult::missed_from(config, tick, &job_region)
                     } else {
-                        job_checker.check_url(config, tick).await
+                        job_checker.check_url(config, tick, &job_region).await
                     };
 
                     if let Err(e) = job_producer.produce_checker_result(&check_result) {
@@ -178,6 +183,7 @@ fn record_result_metrics(result: &CheckResult) {
             "status" => status_label,
             "failure_reason" => failure_reason.unwrap_or("ok"),
             "status_code" => status_code.clone(),
+            "uptime_region" => result.region.clone(),
         )
         .record(duration.to_std().unwrap().as_secs_f64());
     }
@@ -194,6 +200,7 @@ fn record_result_metrics(result: &CheckResult) {
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
         "status_code" => status_code.clone(),
+        "uptime_region" => result.region.clone(),
     )
     .record(delay);
 
@@ -203,6 +210,7 @@ fn record_result_metrics(result: &CheckResult) {
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
         "status_code" => status_code,
+        "uptime_region" => result.region.clone(),
     )
     .increment(1);
 }
@@ -228,7 +236,7 @@ mod tests {
         let checker = Arc::new(DummyChecker::new(Duration::from_secs(1)));
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
-        let (sender, _) = run_executor(1, checker, producer);
+        let (sender, _) = run_executor(1, checker, producer, "us-west".to_string());
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -254,7 +262,7 @@ mod tests {
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
         // Only allow 2 configs to execute concurrently
-        let (sender, _) = run_executor(2, checker, producer);
+        let (sender, _) = run_executor(2, checker, producer, "us-west".to_string());
 
         // Send 4 configs into the executor
         let mut configs: Vec<Receiver<CheckResult>> = (0..4)
@@ -304,7 +312,7 @@ mod tests {
         let checker = Arc::new(DummyChecker::new(Duration::from_secs(1)));
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
-        let (sender, _) = run_executor(1, checker, producer);
+        let (sender, _) = run_executor(1, checker, producer, "us-west".to_string());
 
         let tick = Tick::from_time(Utc::now() - TimeDelta::minutes(2));
         let config = Arc::new(CheckConfig {

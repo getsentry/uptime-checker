@@ -96,6 +96,9 @@ pub struct CheckResult {
 
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,
+
+    /// Region slug that produced the check result
+    pub region: String,
 }
 
 #[cfg(test)]
@@ -122,7 +125,8 @@ mod tests {
   "request_info": {
     "request_type": "HEAD",
     "http_status_code": 500
-  }
+  },
+  "region": "us-west-1"
 }"#;
 
         let check_result = serde_json::from_str::<CheckResult>(json).unwrap();
@@ -146,7 +150,8 @@ mod tests {
   "request_info": {
     "request_type": "HEAD",
     "http_status_code": 200
-  }
+  },
+  "region": "us-west-1"
 }"#;
 
         let check_result = serde_json::from_str::<CheckResult>(json).unwrap();
