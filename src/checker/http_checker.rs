@@ -466,7 +466,6 @@ mod tests {
         get_mock.assert_hits(2);
     }
 
-
     #[tokio::test]
     async fn test_trace_sampling() {
         let trace_id = Uuid::new_v4();
