@@ -1,7 +1,7 @@
 use chrono::{TimeDelta, Utc};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
-use sentry::protocol::{SpanId, TraceId};
+use sentry::protocol::SpanId;
 use std::error::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -14,6 +14,8 @@ use crate::types::{
 
 use super::ip_filter::is_external_ip;
 use super::Checker;
+
+pub const CHECKER_RESULT_NAMESPACE: Uuid = Uuid::from_u128(0x67f0b2d5_e476_4f00_9b99_9e6b95c3b7e3);
 
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
@@ -109,7 +111,7 @@ impl HttpChecker {
     }
 }
 
-fn make_trace_header(config: &CheckConfig, trace_id: TraceId, span_id: SpanId) -> String {
+fn make_trace_header(config: &CheckConfig, trace_id: &Uuid, span_id: SpanId) -> String {
     // Format the 'sentry-trace' header. if we append a 0 to the header,
     // we're indicating the trace spans will not be sampled.
     // if we don't append a 0, then the default behavior is to sample the trace spans
@@ -130,10 +132,10 @@ impl Checker for HttpChecker {
     async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
-        let trace_id = TraceId::default();
         let span_id = SpanId::default();
-
-        let trace_header = make_trace_header(config, trace_id, span_id);
+        let unique_key = format!("{}-{}", config.subscription_id, scheduled_check_time);
+        let guid = Uuid::new_v5(&CHECKER_RESULT_NAMESPACE, unique_key.as_bytes());
+        let trace_header = make_trace_header(config, &guid, span_id);
 
         let start = Instant::now();
         let response = do_request(&self.client, config, &trace_header).await;
@@ -182,11 +184,11 @@ impl Checker for HttpChecker {
         };
 
         CheckResult {
-            guid: Uuid::new_v4(),
+            guid,
             subscription_id: config.subscription_id,
             status,
             status_reason,
-            trace_id,
+            trace_id: guid,
             span_id,
             scheduled_check_time,
             actual_check_time,
@@ -210,7 +212,8 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
-    use sentry::protocol::{SpanId, TraceId};
+    use sentry::protocol::SpanId;
+    use uuid::Uuid;
 
     fn make_tick() -> Tick {
         Tick::from_time(Utc::now() - TimeDelta::seconds(60))
@@ -433,8 +436,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_same_check_same_id() {
+        let server = MockServer::start();
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
+
+        let get_mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/no-head")
+                .header_exists("sentry-trace")
+                .header("User-Agent", UPTIME_USER_AGENT.to_string());
+            then.status(200);
+        });
+
+        let config = CheckConfig {
+            url: server.url("/no-head").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick, "us-west").await;
+        let result_2 = checker.check_url(&config, &tick, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Success);
+        assert_eq!(result_2.status, CheckStatus::Success);
+        assert_eq!(result.guid, result_2.guid);
+        assert_eq!(result.trace_id, result_2.trace_id);
+        get_mock.assert_hits(2);
+    }
+
+    #[tokio::test]
     async fn test_trace_sampling() {
-        let trace_id = TraceId::default();
+        let trace_id = Uuid::new_v4();
         let span_id = SpanId::default();
 
         // Test with sampling disabled
@@ -443,7 +477,7 @@ mod tests {
             trace_sampling: false,
             ..Default::default()
         };
-        let trace_header = make_trace_header(&config, trace_id, span_id);
+        let trace_header = make_trace_header(&config, &trace_id, span_id);
         assert_eq!(trace_header, format!("{}-{}-0", trace_id, span_id));
 
         // Test with sampling enabled
@@ -452,7 +486,7 @@ mod tests {
             trace_sampling: true,
             ..Default::default()
         };
-        let trace_header_sampling = make_trace_header(&config_with_sampling, trace_id, span_id);
+        let trace_header_sampling = make_trace_header(&config_with_sampling, &trace_id, span_id);
         assert_eq!(trace_header_sampling, format!("{}-{}", trace_id, span_id));
     }
     // TODO: Figure out how to simulate a DNS failure

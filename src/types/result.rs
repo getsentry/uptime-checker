@@ -1,5 +1,5 @@
 use chrono::{DateTime, TimeDelta, Utc};
-use sentry::protocol::{SpanId, TraceId};
+use sentry::protocol::SpanId;
 use serde::{Deserialize, Serialize};
 use serde_with::chrono;
 use serde_with::serde_as;
@@ -74,7 +74,8 @@ pub struct CheckResult {
     pub status_reason: Option<CheckStatusReason>,
 
     /// Trace ID associated with the check-in made
-    pub trace_id: TraceId,
+    #[serde(serialize_with = "uuid_simple")]
+    pub trace_id: Uuid,
 
     /// Span ID associated with the check-in made
     pub span_id: SpanId,

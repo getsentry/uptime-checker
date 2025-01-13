@@ -62,7 +62,7 @@ mod tests {
     };
     use chrono::{TimeDelta, Utc};
     use rust_arroyo::backends::kafka::config::KafkaConfig;
-    use sentry::protocol::{SpanId, TraceId};
+    use sentry::protocol::SpanId;
     use uuid::{uuid, Uuid};
 
     pub fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
@@ -75,7 +75,7 @@ mod tests {
                 status_type: CheckStatusReasonType::DnsError,
                 description: "hi".to_string(),
             }),
-            trace_id: TraceId::default(),
+            trace_id: guid,
             span_id: SpanId::default(),
             scheduled_check_time: Utc::now(),
             actual_check_time: Utc::now(),
