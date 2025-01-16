@@ -30,6 +30,7 @@ pub enum CheckStatusReasonType {
     Timeout,
     DnsError,
     Failure,
+    SslError,
 }
 
 /// Captures the reason for a check's given status

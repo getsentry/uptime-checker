@@ -1,3 +1,8 @@
+use crate::config_store::Tick;
+use crate::types::{
+    check_config::CheckConfig,
+    result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
+};
 use chrono::{TimeDelta, Utc};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
@@ -5,12 +10,8 @@ use sentry::protocol::SpanId;
 use std::error::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
-
-use crate::config_store::Tick;
-use crate::types::{
-    check_config::CheckConfig,
-    result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
-};
+use hyper_util::client::legacy::Error as HyperError;
+use native_tls::Error as NativeTlsError;
 
 use super::ip_filter::is_external_ip;
 use super::Checker;
@@ -84,6 +85,22 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
         if let Some(inner_err) = source.downcast_ref::<hickory_resolver::error::ResolveError>() {
             return Some(format!("{}", inner_err));
         }
+    }
+    None
+}
+
+fn ssl_error(err: &reqwest::Error) -> Option<String> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        inner = source;
+        if let Some(e) = source.downcast_ref::<NativeTlsError>() {
+            return Some(e.to_string());
+        }
+        
+    }
+    let err_str = format!("{:?}", err);
+    if err_str.contains("certificate") || err_str.contains("SSL") {
+        return Some(err_str);
     }
     None
 }
@@ -167,11 +184,16 @@ impl Checker for HttpChecker {
                 if e.is_timeout() {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Timeout,
-                        description: format!("{:?}", e),
+                        description: format!("Request timed out"),
                     }
                 } else if let Some(message) = dns_error(&e) {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::DnsError,
+                        description: message,
+                    }
+                } else if let Some(message) = ssl_error(&e) {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::SslError,
                         description: message,
                     }
                 } else {
@@ -322,6 +344,10 @@ mod tests {
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.description.clone()),
+            Some("Request timed out".to_string())
+        );
         assert_eq!(
             result.status_reason.map(|r| r.status_type),
             Some(CheckStatusReasonType::Timeout)
@@ -489,6 +515,118 @@ mod tests {
         let trace_header_sampling = make_trace_header(&config_with_sampling, &trace_id, span_id);
         assert_eq!(trace_header_sampling, format!("{}-{}", trace_id, span_id));
     }
-    // TODO: Figure out how to simulate a DNS failure
-    // assert_eq!(check_domain(&client, "https://hjkhjkljkh.io/".to_string()).await, CheckResult::FAILURE(FailureReason::DnsError("failed to lookup address information: nodename nor servname provided, or not known".to_string())));
+
+    #[tokio::test]
+    async fn test_ssl_errors() {
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
+        let tick = make_tick();
+
+        // Test various SSL certificate errors
+        let test_cases = vec![
+            (
+                "expired",
+                "https://expired.badssl.com/",
+                "The certificate was not trusted.",
+            ),
+            (
+                "wrong.host",
+                "https://wrong.host.badssl.com/",
+                "The certificate was not trusted.",
+            ),
+            (
+                "self-signed",
+                "https://self-signed.badssl.com/",
+                "The certificate was not trusted.",
+            ),
+            (
+                "untrusted-root",
+                "https://untrusted-root.badssl.com/",
+                "The certificate was not trusted.",
+            ),
+            (
+                "revoked",
+                "https://revoked.badssl.com/",
+                "The certificate was not trusted.",
+            ),
+            // ("pinning-test", "https://pinning-test.badssl.com/", "The certificate was not trusted."), for some reason this succeeds
+        ];
+
+        for (name, url, expected_msg) in test_cases {
+            let config = CheckConfig {
+                url: url.to_string(),
+                ..Default::default()
+            };
+
+            let result = checker.check_url(&config, &tick, "us-west").await;
+
+            assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", name);
+            assert_eq!(
+                result.request_info.and_then(|i| i.http_status_code),
+                None,
+                "Test case: {}",
+                name
+            );
+            assert_eq!(
+                result.status_reason.as_ref().map(|r| r.status_type),
+                Some(CheckStatusReasonType::SslError),
+                "Test case: {}",
+                name
+            );
+            assert_eq!(
+                result.status_reason.map(|r| r.description).unwrap(),
+                expected_msg,
+                "Test case: {}",
+                name
+            );
+        }
+
+        // Test various DH key errors
+        let dh_test_cases = vec![
+            ("dh512", "https://dh512.badssl.com/"),
+            ("dh1024", "https://dh1024.badssl.com/"),
+            ("dh-small-subgroup", "https://dh-small-subgroup.badssl.com/"),
+            ("dh-composite", "https://dh-composite.badssl.com/"),
+        ];
+
+        for (name, url) in dh_test_cases {
+            let config = CheckConfig {
+                url: url.to_string(),
+                ..Default::default()
+            };
+
+            let result = checker.check_url(&config, &tick, "us-west").await;
+
+            assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", name);
+            assert_eq!(
+                result.request_info.and_then(|i| i.http_status_code),
+                None,
+                "Test case: {}",
+                name
+            );
+            assert_eq!(
+                result.status_reason.as_ref().map(|r| r.status_type),
+                Some(CheckStatusReasonType::SslError),
+                "Test case: {}",
+                name
+            );
+            // The exact error message may vary by platform, so just verify it contains SSL/TLS error
+            assert!(
+                result
+                    .status_reason
+                    .as_ref()
+                    .map(|r| r.description.clone())
+                    .unwrap()
+                    .contains("handshake failure"),
+                "{}, {:?}",
+                name,
+                result
+                    .status_reason
+                    .as_ref()
+                    .map(|r| r.description.clone())
+                    .unwrap()
+            );
+        }
+    }
 }
