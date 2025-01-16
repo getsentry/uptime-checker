@@ -3796,6 +3796,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-statsd",
  "native-tls",
+ "openssl",
  "redis",
  "reqwest",
  "rmp-serde",

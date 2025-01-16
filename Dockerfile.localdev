@@ -1,0 +1,30 @@
+FROM rust:1.80-alpine3.20 as builder
+
+ARG UPTIME_CHECKER_GIT_REVISION
+ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
+ENV UPTIME_CHECKER_VERSION=0.0.1
+RUN mkdir -p ~/.cargo && \
+    echo '[registries.crates-io]' > ~/.cargo/config && \
+    echo 'protocol = "sparse"' >> ~/.cargo/config
+
+RUN apk add --no-cache libc-dev cmake make g++
+RUN apk add --no-cache pkgconfig openssl-dev
+
+RUN cargo new --bin /app
+WORKDIR /app
+
+# Mount src directory as a volume instead of copying
+RUN mkdir -p /app/src
+VOLUME /app/src
+COPY src /app/src
+
+# Just copy the Cargo.toml files and trigger a build so that we compile our
+# dependencies only. This way we avoid layer cache invalidation if our
+# dependencies haven't changed, resulting in faster builds.
+
+COPY Cargo.toml .
+COPY Cargo.lock .
+ENV RUSTFLAGS="-Ctarget-feature=-crt-static"
+ENV PKG_CONFIG_ALLOW_CROSS=1
+
+RUN cargo build
