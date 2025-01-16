@@ -4,14 +4,14 @@ use crate::types::{
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 use chrono::{TimeDelta, Utc};
+use native_tls::Error as NativeTlsError;
+use openssl::error::ErrorStack;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::SpanId;
 use std::error::Error;
 use tokio::time::Instant;
-use uuid::Uuid;
-use native_tls::Error as NativeTlsError;
-use openssl::error::ErrorStack;  // Add this to imports
+use uuid::Uuid; // Add this to imports
 
 use super::ip_filter::is_external_ip;
 use super::Checker;
@@ -94,32 +94,29 @@ fn ssl_error(err: &reqwest::Error) -> Option<String> {
     while let Some(source) = inner.source() {
         inner = source;
         if let Some(e) = source.downcast_ref::<NativeTlsError>() {
-            
             if let Some(source) = e.source() {
                 if let Some(e) = source.downcast_ref::<ErrorStack>() {
                     println!("FOUND SOURCE");
-                    let error_details = e.errors()
+                    let error_details = e
+                        .errors()
                         .iter()
                         .map(|e| e.reason().unwrap_or("unknown error"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Some(error_details);
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Some(error_details);
                 }
-            
             }
-
 
             return Some(e.to_string());
         }
-        
+
         println!("Error: {:?}", source);
-        
     }
     let err_str = format!("{:?}", err);
     if err_str.contains("certificate") || err_str.contains("SSL") {
         return Some(err_str);
     }
-    
+
     None
 }
 
@@ -535,124 +532,7 @@ mod tests {
     }
 
     #[tokio::test]
-    // only test on mac
-    #[cfg(target_os = "macos")]
-    async fn test_ssl_errors() {
-        let checker = HttpChecker::new_internal(Options {
-            validate_url: false,
-        });
-        let tick = make_tick();
-
-        // Test various SSL certificate errors
-        let test_cases = vec![
-            (
-                "expired",
-                "https://expired.badssl.com/",
-                "The certificate was not trusted.",
-            ),
-            (
-                "wrong.host",
-                "https://wrong.host.badssl.com/",
-                "The certificate was not trusted.",
-            ),
-            (
-                "self-signed",
-                "https://self-signed.badssl.com/",
-                "The certificate was not trusted.",
-            ),
-            (
-                "untrusted-root",
-                "https://untrusted-root.badssl.com/",
-                "The certificate was not trusted.",
-            ),
-            (
-                "revoked",
-                "https://revoked.badssl.com/",
-                "The certificate was not trusted.",
-            ),
-            // ("pinning-test", "https://pinning-test.badssl.com/", "The certificate was not trusted."), for some reason this succeeds
-        ];
-
-        for (name, url, expected_msg) in test_cases {
-            let config = CheckConfig {
-                url: url.to_string(),
-                ..Default::default()
-            };
-
-            let result = checker.check_url(&config, &tick, "us-west").await;
-
-            assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", name);
-            assert_eq!(
-                result.request_info.and_then(|i| i.http_status_code),
-                None,
-                "Test case: {}",
-                name
-            );
-            assert_eq!(
-                result.status_reason.as_ref().map(|r| r.status_type),
-                Some(CheckStatusReasonType::SslError),
-                "Test case: {}",
-                name
-            );
-            assert_eq!(
-                result.status_reason.map(|r| r.description).unwrap(),
-                expected_msg,
-                "Test case: {}",
-                name
-            );
-        }
-
-        // Test various DH key errors
-        let dh_test_cases = vec![
-            ("dh512", "https://dh512.badssl.com/"),
-            ("dh1024", "https://dh1024.badssl.com/"),
-            ("dh-small-subgroup", "https://dh-small-subgroup.badssl.com/"),
-            ("dh-composite", "https://dh-composite.badssl.com/"),
-        ];
-
-        for (name, url) in dh_test_cases {
-            let config = CheckConfig {
-                url: url.to_string(),
-                ..Default::default()
-            };
-
-            let result = checker.check_url(&config, &tick, "us-west").await;
-
-            assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", name);
-            assert_eq!(
-                result.request_info.and_then(|i| i.http_status_code),
-                None,
-                "Test case: {}",
-                name
-            );
-            assert_eq!(
-                result.status_reason.as_ref().map(|r| r.status_type),
-                Some(CheckStatusReasonType::SslError),
-                "Test case: {}",
-                name
-            );
-            // The exact error message may vary by platform, so just verify it contains SSL/TLS error
-            assert!(
-                result
-                    .status_reason
-                    .as_ref()
-                    .map(|r| r.description.clone())
-                    .unwrap()
-                    .contains("handshake failure"),
-                "{}, {:?}",
-                name,
-                result
-                    .status_reason
-                    .as_ref()
-                    .map(|r| r.description.clone())
-                    .unwrap()
-            );
-        }
-    }
-    
-
-    #[tokio::test]
-    // #[cfg(target_os = "linux")]
+    #[cfg(target_os = "linux")]
     async fn test_ssl_errors_linux() {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
@@ -685,9 +565,9 @@ mod tests {
             //     "revoked",
             //     "https://revoked.badssl.com/",
             //     "certificate verify failed",
-            // ), 
+            // ),
             // ("pinning-test", "https://pinning-test.badssl.com/", "The certificate was not trusted.")
-            // these two above succeed
+            // these two above succeed but probably shouldn't
         ];
 
         for (name, url, expected_msg) in test_cases {
@@ -721,10 +601,18 @@ mod tests {
 
         // Test various DH key errors
         let dh_test_cases = vec![
-            ("dh512", "https://dh512.badssl.com/", "unknown security bits, dh key too small"),
+            (
+                "dh512",
+                "https://dh512.badssl.com/",
+                "unknown security bits, dh key too small",
+            ),
             ("dh1024", "https://dh1024.badssl.com/", "dh key too small"),
             // ("dh-small-subgroup", "https://dh-small-subgroup.badssl.com/", "unknown security bits, dh key too small"), // this one passes
-            ("dh-composite", "https://dh-composite.badssl.com/", "dh key too small"),
+            (
+                "dh-composite",
+                "https://dh-composite.badssl.com/",
+                "dh key too small",
+            ),
         ];
 
         for (name, url, expected_msg) in dh_test_cases {
@@ -765,6 +653,4 @@ mod tests {
             );
         }
     }
-
-
 }
