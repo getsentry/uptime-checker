@@ -245,15 +245,15 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
-    use sentry::protocol::SpanId;
-    use uuid::Uuid;
     use rcgen::{Certificate, CertificateParams};
-    use tokio::net::TcpListener;
-    use tokio::io::AsyncWriteExt;
-    use tokio_rustls::TlsAcceptor;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     use rustls::ServerConfig;
-    use rustls::pki_types::{PrivateKeyDer, CertificateDer, PrivatePkcs8KeyDer};
+    use sentry::protocol::SpanId;
     use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+    use tokio_rustls::TlsAcceptor;
+    use uuid::Uuid;
 
     fn make_tick() -> Tick {
         Tick::from_time(Utc::now() - TimeDelta::seconds(60))
@@ -670,18 +670,21 @@ mod tests {
                 "expired" => {
                     params.not_before = time::OffsetDateTime::now_utc() - time::Duration::days(30);
                     params.not_after = time::OffsetDateTime::now_utc() - time::Duration::days(1);
-                },
+                }
                 "wrong_host" => {
                     params = CertificateParams::new(vec!["wronghost.com".to_string()]);
-                },
+                }
                 "self_signed" => {
                     // Default params are self-signed
-                },
+                }
                 _ => {}
             }
 
             let cert = Certificate::from_params(params).unwrap();
-            (cert.serialize_private_key_der(), cert.serialize_der().unwrap())
+            (
+                cert.serialize_private_key_der(),
+                cert.serialize_der().unwrap(),
+            )
         }
 
         // Set up mock HTTPS server
@@ -738,7 +741,12 @@ mod tests {
 
             let result = checker.check_url(&config, &tick, "us-west").await;
 
-            assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", cert_type);
+            assert_eq!(
+                result.status,
+                CheckStatus::Failure,
+                "Test case: {}",
+                cert_type
+            );
             assert_eq!(
                 result.request_info.and_then(|i| i.http_status_code),
                 None,
