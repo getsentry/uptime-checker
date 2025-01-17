@@ -96,7 +96,6 @@ fn ssl_error(err: &reqwest::Error) -> Option<String> {
         if let Some(e) = source.downcast_ref::<NativeTlsError>() {
             if let Some(source) = e.source() {
                 if let Some(e) = source.downcast_ref::<ErrorStack>() {
-                    println!("FOUND SOURCE");
                     let error_details = e
                         .errors()
                         .iter()
@@ -106,11 +105,8 @@ fn ssl_error(err: &reqwest::Error) -> Option<String> {
                     return Some(error_details);
                 }
             }
-
             return Some(e.to_string());
         }
-
-        println!("Error: {:?}", source);
     }
     let err_str = format!("{:?}", err);
     if err_str.contains("certificate") || err_str.contains("SSL") {
@@ -251,7 +247,6 @@ mod tests {
     use httpmock::Method;
     use sentry::protocol::SpanId;
     use uuid::Uuid;
-
     fn make_tick() -> Tick {
         Tick::from_time(Utc::now() - TimeDelta::seconds(60))
     }
@@ -531,126 +526,132 @@ mod tests {
         assert_eq!(trace_header_sampling, format!("{}-{}", trace_id, span_id));
     }
 
-    #[tokio::test]
-    #[cfg(target_os = "linux")]
-    async fn test_ssl_errors_linux() {
-        let checker = HttpChecker::new_internal(Options {
-            validate_url: false,
-        });
-        let tick = make_tick();
+        
+    // NOTE: these tests are disabled because right now they hit the real badssl.com website
+    // TODO: we should decide how we want to test this behavior long term
+    // #[tokio::test]
+    // async fn test_ssl_errors() {
+    // #[tokio::test]
+    // // #[cfg(target_os = "linux")]
+    // async fn test_ssl_errors_linux() {
+    //     let checker = HttpChecker::new_internal(Options {
+    //         validate_url: false,
+    //     });
+    //     let tick = make_tick();
 
-        // Test various`` SSL certificate errors
-        let test_cases = vec![
-            (
-                "expired",
-                "https://expired.badssl.com/",
-                "certificate verify failed",
-            ),
-            (
-                "wrong.host",
-                "https://wrong.host.badssl.com/",
-                "certificate verify failed",
-            ),
-            (
-                "self-signed",
-                "https://self-signed.badssl.com/",
-                "certificate verify failed",
-            ),
-            (
-                "untrusted-root",
-                "https://untrusted-root.badssl.com/",
-                "certificate verify failed",
-            ),
-            // (
-            //     "revoked",
-            //     "https://revoked.badssl.com/",
-            //     "certificate verify failed",
-            // ),
-            // ("pinning-test", "https://pinning-test.badssl.com/", "The certificate was not trusted.")
-            // these two above succeed but probably shouldn't
-        ];
+    //     // Test various`` SSL certificate errors
+    //     let test_cases = vec![
+    //         (
+    //             "expired",
+    //             "https://expired.badssl.com/",
+    //             "certificate verify failed",
+    //         ),
+    //         (
+    //             "wrong.host",
+    //             "https://wrong.host.badssl.com/",
+    //             "certificate verify failed",
+    //         ),
+    //         (
+    //             "self-signed",
+    //             "https://self-signed.badssl.com/",
+    //             "certificate verify failed",
+    //         ),
+    //         (
+    //             "untrusted-root",
+    //             "https://untrusted-root.badssl.com/",
+    //             "certificate verify failed",
+    //         ),
+    //         // (
+    //         //     "revoked",
+    //         //     "https://revoked.badssl.com/",
+    //         //     "certificate verify failed",
+    //         // ),
+    //         // ("pinning-test", "https://pinning-test.badssl.com/", "The certificate was not trusted.")
+    //         // these two above succeed but probably shouldn't
+    //     ];
 
-        for (name, url, expected_msg) in test_cases {
-            let config = CheckConfig {
-                url: url.to_string(),
-                ..Default::default()
-            };
+    //     for (name, url, expected_msg) in test_cases {
+    //         let config = CheckConfig {
+    //             url: url.to_string(),
+    //             ..Default::default()
+    //         };
 
-            let result = checker.check_url(&config, &tick, "us-west").await;
+    //         let result = checker.check_url(&config, &tick, "us-west").await;
 
-            assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", name);
-            assert_eq!(
-                result.request_info.and_then(|i| i.http_status_code),
-                None,
-                "Test case: {}",
-                name
-            );
-            assert_eq!(
-                result.status_reason.as_ref().map(|r| r.status_type),
-                Some(CheckStatusReasonType::SslError),
-                "Test case: {}",
-                name
-            );
-            assert_eq!(
-                result.status_reason.map(|r| r.description).unwrap(),
-                expected_msg,
-                "Test case: {}",
-                name
-            );
-        }
+    //         assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", name);
+    //         assert_eq!(
+    //             result.request_info.and_then(|i| i.http_status_code),
+    //             None,
+    //             "Test case: {}",
+    //             name
+    //         );
+    //         assert_eq!(
+    //             result.status_reason.as_ref().map(|r| r.status_type),
+    //             Some(CheckStatusReasonType::SslError),
+    //             "Test case: {}",
+    //             name
+    //         );
+    //         assert_eq!(
+    //             result.status_reason.map(|r| r.description).unwrap(),
+    //             expected_msg,
+    //             "Test case: {}",
+    //             name
+    //         );
+    //     }
 
-        // Test various DH key errors
-        let dh_test_cases = vec![
-            (
-                "dh512",
-                "https://dh512.badssl.com/",
-                "unknown security bits, dh key too small",
-            ),
-            ("dh1024", "https://dh1024.badssl.com/", "dh key too small"),
-            // ("dh-small-subgroup", "https://dh-small-subgroup.badssl.com/", "unknown security bits, dh key too small"), // this one passes
-            (
-                "dh-composite",
-                "https://dh-composite.badssl.com/",
-                "dh key too small",
-            ),
-        ];
+    //     // Test various DH key errors
+    //     let dh_test_cases = vec![
+    //         (
+    //             "dh512",
+    //             "https://dh512.badssl.com/",
+    //             "unknown security bits, dh key too small",
+    //         ),
+    //         ("dh1024", "https://dh1024.badssl.com/", "dh key too small"),
+    //         // ("dh-small-subgroup", "https://dh-small-subgroup.badssl.com/", "unknown security bits, dh key too small"), // this one passes
+    //         (
+    //             "dh-composite",
+    //             "https://dh-composite.badssl.com/",
+    //             "dh key too small",
+    //         ),
+    //     ];
 
-        for (name, url, expected_msg) in dh_test_cases {
-            let config = CheckConfig {
-                url: url.to_string(),
-                ..Default::default()
-            };
+    //     for (name, url, expected_msg) in dh_test_cases {
+    //         let config = CheckConfig {
+    //             url: url.to_string(),
+    //             ..Default::default()
+    //         };
 
-            let result = checker.check_url(&config, &tick, "us-west").await;
+    //         let result = checker.check_url(&config, &tick, "us-west").await;
 
-            assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", name);
-            assert_eq!(
-                result.request_info.and_then(|i| i.http_status_code),
-                None,
-                "Test case: {}",
-                name
-            );
-            assert_eq!(
-                result.status_reason.as_ref().map(|r| r.status_type),
-                Some(CheckStatusReasonType::SslError),
-                "Test case: {}",
-                name
-            );
-            assert_eq!(
-                result
-                    .status_reason
-                    .as_ref()
-                    .map(|r| r.description.clone())
-                    .unwrap(),
-                expected_msg,
-                "{}, {:?}",
-                name,
-                result
-                    .status_reason
-                    .as_ref()
-                    .map(|r| r.description.clone())
-                    .unwrap()
-            );
-        }
-    }
+    //         assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", name);
+    //         assert_eq!(
+    //             result.request_info.and_then(|i| i.http_status_code),
+    //             None,
+    //             "Test case: {}",
+    //             name
+    //         );
+    //         assert_eq!(
+    //             result.status_reason.as_ref().map(|r| r.status_type),
+    //             Some(CheckStatusReasonType::SslError),
+    //             "Test case: {}",
+    //             name
+    //         );
+    //         assert_eq!(
+    //             result
+    //                 .status_reason
+    //                 .as_ref()
+    //                 .map(|r| r.description.clone())
+    //                 .unwrap(),
+    //             expected_msg,
+    //             "{}, {:?}",
+    //             name,
+    //             result
+    //                 .status_reason
+    //                 .as_ref()
+    //                 .map(|r| r.description.clone())
+    //                 .unwrap()
+    //         );
+        // }
+    // }
 }
+
