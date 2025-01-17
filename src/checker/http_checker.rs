@@ -247,6 +247,14 @@ mod tests {
     use httpmock::Method;
     use sentry::protocol::SpanId;
     use uuid::Uuid;
+    use rcgen::{Certificate, CertificateParams};
+    use tokio::net::TcpListener;
+    use tokio::io::AsyncWriteExt;
+    use tokio_rustls::TlsAcceptor;
+    use rustls::ServerConfig;
+    use rustls::pki_types::{PrivateKeyDer, CertificateDer, PrivatePkcs8KeyDer};
+    use std::sync::Arc;
+
     fn make_tick() -> Tick {
         Tick::from_time(Utc::now() - TimeDelta::seconds(60))
     }
@@ -652,4 +660,103 @@ mod tests {
     //         );
     // }
     // }
+
+    #[tokio::test]
+    async fn test_ssl_errors_linux() {
+        // Helper function to create various bad certificates
+        fn create_bad_cert(cert_type: &str) -> (Vec<u8>, Vec<u8>) {
+            let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+            match cert_type {
+                "expired" => {
+                    params.not_before = time::OffsetDateTime::now_utc() - time::Duration::days(30);
+                    params.not_after = time::OffsetDateTime::now_utc() - time::Duration::days(1);
+                },
+                "wrong_host" => {
+                    params = CertificateParams::new(vec!["wronghost.com".to_string()]);
+                },
+                "self_signed" => {
+                    // Default params are self-signed
+                },
+                _ => {}
+            }
+
+            let cert = Certificate::from_params(params).unwrap();
+            (cert.serialize_private_key_der(), cert.serialize_der().unwrap())
+        }
+
+        // Set up mock HTTPS server
+        async fn setup_test_server(cert_type: &str) -> String {
+            let (key_der, cert_der) = create_bad_cert(cert_type);
+
+            let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
+            let cert = vec![CertificateDer::from(cert_der)];
+
+            let server_config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(cert, key)
+                .unwrap();
+
+            let acceptor = TlsAcceptor::from(Arc::new(server_config));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    let acceptor = acceptor.clone();
+                    tokio::spawn(async move {
+                        if let Ok(mut tls_stream) = acceptor.accept(stream).await {
+                            // Simple HTTP response
+                            let response = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+                            let _ = tls_stream.write_all(response).await;
+                        }
+                    });
+                }
+            });
+
+            format!("https://localhost:{}", addr.port())
+        }
+
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
+        let tick = make_tick();
+
+        // Test various SSL certificate errors
+        let test_cases = vec![
+            ("expired", "certificate verify failed"),
+            ("wrong_host", "certificate verify failed"),
+            ("self_signed", "certificate verify failed"),
+        ];
+
+        for (cert_type, expected_msg) in test_cases {
+            let server_url = setup_test_server(cert_type).await;
+
+            let config = CheckConfig {
+                url: server_url,
+                ..Default::default()
+            };
+
+            let result = checker.check_url(&config, &tick, "us-west").await;
+
+            assert_eq!(result.status, CheckStatus::Failure, "Test case: {}", cert_type);
+            assert_eq!(
+                result.request_info.and_then(|i| i.http_status_code),
+                None,
+                "Test case: {}",
+                cert_type
+            );
+            assert_eq!(
+                result.status_reason.as_ref().map(|r| r.status_type),
+                Some(CheckStatusReasonType::Failure),
+                "Test case: {}",
+                cert_type
+            );
+            assert_eq!(
+                result.status_reason.map(|r| r.description).unwrap(),
+                expected_msg,
+                "Test case: {}",
+                cert_type
+            );
+        }
+    }
 }
