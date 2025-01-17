@@ -195,7 +195,7 @@ impl Checker for HttpChecker {
                 if e.is_timeout() {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Timeout,
-                        description: format!("Request timed out"),
+                        description: "Request timed out".to_string(),
                     }
                 } else if let Some(message) = dns_error(&e) {
                     CheckStatusReason {
