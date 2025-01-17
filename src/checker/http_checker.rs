@@ -526,7 +526,6 @@ mod tests {
         assert_eq!(trace_header_sampling, format!("{}-{}", trace_id, span_id));
     }
 
-        
     // NOTE: these tests are disabled because right now they hit the real badssl.com website
     // TODO: we should decide how we want to test this behavior long term
     // #[tokio::test]
@@ -651,7 +650,6 @@ mod tests {
     //                 .map(|r| r.description.clone())
     //                 .unwrap()
     //         );
-        // }
+    // }
     // }
 }
-
