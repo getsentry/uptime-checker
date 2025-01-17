@@ -204,7 +204,7 @@ impl Checker for HttpChecker {
                     }
                 } else if let Some(message) = ssl_error(&e) {
                     CheckStatusReason {
-                        status_type: CheckStatusReasonType::SslError,
+                        status_type: CheckStatusReasonType::Failure,
                         description: message,
                     }
                 } else {
@@ -586,7 +586,7 @@ mod tests {
     //         );
     //         assert_eq!(
     //             result.status_reason.as_ref().map(|r| r.status_type),
-    //             Some(CheckStatusReasonType::SslError),
+    //             Some(CheckStatusReasonType::Failure),
     //             "Test case: {}",
     //             name
     //         );
@@ -631,7 +631,7 @@ mod tests {
     //         );
     //         assert_eq!(
     //             result.status_reason.as_ref().map(|r| r.status_type),
-    //             Some(CheckStatusReasonType::SslError),
+    //             Some(CheckStatusReasonType::Failure),
     //             "Test case: {}",
     //             name
     //         );

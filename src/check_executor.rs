@@ -168,7 +168,6 @@ fn record_result_metrics(result: &CheckResult) {
         Some(CheckStatusReasonType::Failure) => Some("failure"),
         Some(CheckStatusReasonType::DnsError) => Some("dns_error"),
         Some(CheckStatusReasonType::Timeout) => Some("timeout"),
-        Some(CheckStatusReasonType::SslError) => Some("ssl_error"),
         None => None,
     };
     let status_code = match request_info.as_ref().and_then(|a| a.http_status_code) {
