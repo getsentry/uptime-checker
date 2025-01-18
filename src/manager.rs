@@ -46,8 +46,12 @@ impl PartitionedService {
         // otherwise we may execute checks for old configs in a partition that are removed later in
         // the log.
         let shutdown_signal = CancellationToken::new();
-        let config_loaded =
-            wait_for_partition_boot(waiter_config_store, partition, shutdown_signal.clone());
+        let config_loaded = wait_for_partition_boot(
+            waiter_config_store,
+            partition,
+            shutdown_signal.clone(),
+            config.region.clone(),
+        );
 
         let scheduler_join_handle = run_scheduler(
             partition,
@@ -57,6 +61,7 @@ impl PartitionedService {
             build_progress_key(partition),
             config.redis_host.clone(),
             config_loaded,
+            config.region.clone(),
         );
 
         Self {
@@ -116,8 +121,12 @@ impl Manager {
 
         // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
         // referneces of the Sender (executor_sender) are dropped.
-        let (executor_sender, executor_join_handle) =
-            run_executor(config.checker_concurrency, checker, producer);
+        let (executor_sender, executor_join_handle) = run_executor(
+            config.checker_concurrency,
+            checker,
+            producer,
+            config.region.clone(),
+        );
 
         let (shutdown_sender, shutdown_service_rx) = mpsc::unbounded_channel();
 

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use chrono::Utc;
-use sentry::protocol::{SpanId, TraceId};
+use sentry::protocol::SpanId;
 use tokio::time;
 use uuid::Uuid;
 
@@ -24,10 +24,10 @@ impl DummyChecker {
 }
 
 impl Checker for DummyChecker {
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick) -> CheckResult {
+    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
-        let trace_id = TraceId::default();
+        let trace_id = Uuid::new_v4();
         let span_id = SpanId::default();
         let duration = None;
         let status = CheckStatus::Success;
@@ -49,6 +49,7 @@ impl Checker for DummyChecker {
             actual_check_time,
             duration,
             request_info,
+            region: region.to_string(),
         }
     }
 }

@@ -1,9 +1,11 @@
 use chrono::{DateTime, TimeDelta, Utc};
-use sentry::protocol::{SpanId, TraceId};
+use sentry::protocol::SpanId;
 use serde::{Deserialize, Serialize};
 use serde_with::chrono;
 use serde_with::serde_as;
 use uuid::Uuid;
+
+use super::shared::RequestMethod;
 
 fn uuid_simple<S>(uuid: &Uuid, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -30,14 +32,6 @@ pub enum CheckStatusReasonType {
     Failure,
 }
 
-/// The type of HTTP request used for the check
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum RequestType {
-    Head,
-    Get,
-}
-
 /// Captures the reason for a check's given status
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,7 +48,7 @@ pub struct CheckStatusReason {
 #[serde(rename_all = "snake_case")]
 pub struct RequestInfo {
     /// The type of HTTP method used for the check
-    pub request_type: RequestType,
+    pub request_type: RequestMethod,
 
     /// The status code of the response. May be empty when the request did not receive a response
     /// whatsoever.
@@ -80,7 +74,8 @@ pub struct CheckResult {
     pub status_reason: Option<CheckStatusReason>,
 
     /// Trace ID associated with the check-in made
-    pub trace_id: TraceId,
+    #[serde(serialize_with = "uuid_simple")]
+    pub trace_id: Uuid,
 
     /// Span ID associated with the check-in made
     pub span_id: SpanId,
@@ -102,6 +97,9 @@ pub struct CheckResult {
 
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,
+
+    /// Region slug that produced the check result
+    pub region: String,
 }
 
 #[cfg(test)]
@@ -128,7 +126,8 @@ mod tests {
   "request_info": {
     "request_type": "HEAD",
     "http_status_code": 500
-  }
+  },
+  "region": "us-west-1"
 }"#;
 
         let check_result = serde_json::from_str::<CheckResult>(json).unwrap();
@@ -152,7 +151,8 @@ mod tests {
   "request_info": {
     "request_type": "HEAD",
     "http_status_code": 200
-  }
+  },
+  "region": "us-west-1"
 }"#;
 
         let check_result = serde_json::from_str::<CheckResult>(json).unwrap();

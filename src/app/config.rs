@@ -58,6 +58,9 @@ pub struct Config {
 
     /// The general purpose redis node to use with this service
     pub redis_host: String,
+
+    /// The region that this checker is running in
+    pub region: String,
 }
 
 impl Default for Config {
@@ -74,6 +77,7 @@ impl Default for Config {
             configs_kafka_cluster: vec![],
             configs_kafka_topic: "uptime-configs".to_owned(),
             redis_host: "redis://127.0.0.1:6379".to_owned(),
+            region: "default".to_owned(),
         }
     }
 }
@@ -153,6 +157,7 @@ mod tests {
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     redis_host: "redis://127.0.0.1:6379".to_owned(),
+                    region: "default".to_owned(),
                 }
             );
             Ok(())
@@ -182,6 +187,7 @@ mod tests {
             );
             jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
             jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
+            jail.set_env("UPTIME_CHECKER_REGION", "us-west");
             let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
                 log_level: Some(logging::Level::Trace),
@@ -205,6 +211,7 @@ mod tests {
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     redis_host: "10.0.0.3:6379".to_owned(),
+                    region: "us-west".to_owned(),
                 }
             );
             Ok(())

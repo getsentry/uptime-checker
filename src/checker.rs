@@ -1,5 +1,6 @@
 pub mod dummy_checker;
 pub mod http_checker;
+pub mod ip_filter;
 
 use std::future::Future;
 
@@ -17,5 +18,6 @@ pub trait Checker: Send + Sync {
         &self,
         config: &CheckConfig,
         tick: &Tick,
+        region: &str,
     ) -> impl Future<Output = CheckResult> + Send;
 }

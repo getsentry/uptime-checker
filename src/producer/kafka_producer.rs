@@ -40,9 +40,10 @@ impl ResultsProducer for KafkaResultsProducer {
         // know whether to mark the check as successful. We never want to just silently drop a result -
         // we'd much prefer to retry it later and produce a miss, so that we at least know that we missed
         // and don't have holes.
-        Ok(self
-            .producer
-            .produce(&self.topic, KafkaPayload::new(None, None, Some(json)))?)
+        Ok(self.producer.produce(
+            &self.topic,
+            KafkaPayload::new(Some(result.subscription_id.into()), None, Some(json)),
+        )?)
     }
 }
 
@@ -52,14 +53,16 @@ mod tests {
     use super::KafkaResultsProducer;
     use crate::{
         producer::{ExtractCodeError, ResultsProducer},
-        types::result::{
-            CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
-            RequestType,
+        types::{
+            result::{
+                CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
+            },
+            shared::RequestMethod,
         },
     };
     use chrono::{TimeDelta, Utc};
     use rust_arroyo::backends::kafka::config::KafkaConfig;
-    use sentry::protocol::{SpanId, TraceId};
+    use sentry::protocol::SpanId;
     use uuid::{uuid, Uuid};
 
     pub fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
@@ -72,15 +75,16 @@ mod tests {
                 status_type: CheckStatusReasonType::DnsError,
                 description: "hi".to_string(),
             }),
-            trace_id: TraceId::default(),
+            trace_id: guid,
             span_id: SpanId::default(),
             scheduled_check_time: Utc::now(),
             actual_check_time: Utc::now(),
             duration: Some(TimeDelta::seconds(1)),
             request_info: Some(RequestInfo {
-                request_type: RequestType::Head,
+                request_type: RequestMethod::Get,
                 http_status_code: Some(200),
             }),
+            region: "us-west-1".to_string(),
         };
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since
         // it will fail async
