@@ -1,16 +1,16 @@
+use crate::config_store::Tick;
+use crate::types::{
+    check_config::CheckConfig,
+    result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
+};
 use chrono::{TimeDelta, Utc};
+use openssl::error::ErrorStack;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::SpanId;
 use std::error::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
-
-use crate::config_store::Tick;
-use crate::types::{
-    check_config::CheckConfig,
-    result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
-};
 
 use super::ip_filter::is_external_ip;
 use super::Checker;
@@ -84,6 +84,22 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
         if let Some(inner_err) = source.downcast_ref::<hickory_resolver::error::ResolveError>() {
             return Some(format!("{}", inner_err));
         }
+    }
+    None
+}
+fn ssl_error(err: &reqwest::Error) -> Option<String> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(e) = source.downcast_ref::<ErrorStack>() {
+            return Some(
+                e.errors()
+                    .iter()
+                    .map(|e| e.reason().unwrap_or("unknown error"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        inner = source;
     }
     None
 }
@@ -167,11 +183,16 @@ impl Checker for HttpChecker {
                 if e.is_timeout() {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Timeout,
-                        description: format!("{:?}", e),
+                        description: "Request timed out".to_string(),
                     }
                 } else if let Some(message) = dns_error(&e) {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::DnsError,
+                        description: message,
+                    }
+                } else if let Some(message) = ssl_error(&e) {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::Failure,
                         description: message,
                     }
                 } else {
@@ -212,8 +233,19 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
+
     use sentry::protocol::SpanId;
     use uuid::Uuid;
+    // #[cfg(target_os = "linux")]
+    use {
+        rcgen::{Certificate, CertificateParams},
+        rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+        rustls::ServerConfig,
+        std::sync::Arc,
+        tokio::io::AsyncWriteExt,
+        tokio::net::TcpListener,
+        tokio_rustls::TlsAcceptor,
+    };
 
     fn make_tick() -> Tick {
         Tick::from_time(Utc::now() - TimeDelta::seconds(60))
@@ -322,6 +354,10 @@ mod tests {
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.description.clone()),
+            Some("Request timed out".to_string())
+        );
         assert_eq!(
             result.status_reason.map(|r| r.status_type),
             Some(CheckStatusReasonType::Timeout)
@@ -489,6 +525,117 @@ mod tests {
         let trace_header_sampling = make_trace_header(&config_with_sampling, &trace_id, span_id);
         assert_eq!(trace_header_sampling, format!("{}-{}", trace_id, span_id));
     }
-    // TODO: Figure out how to simulate a DNS failure
-    // assert_eq!(check_domain(&client, "https://hjkhjkljkh.io/".to_string()).await, CheckResult::FAILURE(FailureReason::DnsError("failed to lookup address information: nodename nor servname provided, or not known".to_string())));
+
+    #[tokio::test]
+    // #[cfg(target_os = "linux")]
+    async fn test_ssl_errors_linux() {
+        #[derive(Debug, Copy, Clone)]
+        enum TestCertType {
+            Expired,
+            WrongHost,
+            SelfSigned,
+        }
+        // Helper function to create various bad certificates
+        fn create_bad_cert(cert_type: TestCertType) -> (Vec<u8>, Vec<u8>) {
+            let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+            match cert_type {
+                TestCertType::Expired => {
+                    params.not_before = time::OffsetDateTime::now_utc() - time::Duration::days(30);
+                    params.not_after = time::OffsetDateTime::now_utc() - time::Duration::days(1);
+                }
+                TestCertType::WrongHost => {
+                    params = CertificateParams::new(vec!["wronghost.com".to_string()]);
+                }
+                TestCertType::SelfSigned => {
+                    // Default params are self-signed
+                }
+            }
+
+            let cert = Certificate::from_params(params).unwrap();
+            (
+                cert.serialize_private_key_der(),
+                cert.serialize_der().unwrap(),
+            )
+        }
+
+        // Set up mock HTTPS server
+        async fn setup_test_server(cert_type: TestCertType) -> String {
+            let (key_der, cert_der) = create_bad_cert(cert_type);
+
+            let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
+            let cert = vec![CertificateDer::from(cert_der)];
+
+            let server_config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(cert, key)
+                .unwrap();
+
+            let acceptor = TlsAcceptor::from(Arc::new(server_config));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    let acceptor = acceptor.clone();
+                    tokio::spawn(async move {
+                        if let Ok(mut tls_stream) = acceptor.accept(stream).await {
+                            // Simple HTTP response
+                            let response = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+                            let _ = tls_stream.write_all(response).await;
+                        }
+                    });
+                }
+            });
+
+            format!("https://localhost:{}", addr.port())
+        }
+
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
+        let tick = make_tick();
+
+        // Test various SSL certificate errors
+        let test_cases = vec![
+            (TestCertType::Expired, "certificate verify failed"),
+            (TestCertType::WrongHost, "certificate verify failed"),
+            (TestCertType::SelfSigned, "certificate verify failed"),
+        ];
+
+        for (cert_type, expected_msg) in test_cases {
+            let server_url = setup_test_server(cert_type).await;
+
+            let config = CheckConfig {
+                url: server_url,
+                ..Default::default()
+            };
+
+            let result = checker.check_url(&config, &tick, "us-west").await;
+
+            assert_eq!(
+                result.status,
+                CheckStatus::Failure,
+                "Test case: {:?}",
+                &cert_type
+            );
+            assert_eq!(
+                result.request_info.and_then(|i| i.http_status_code),
+                None,
+                "Test case: {:?}",
+                cert_type
+            );
+            assert_eq!(
+                result.status_reason.as_ref().map(|r| r.status_type),
+                Some(CheckStatusReasonType::Failure),
+                "Test case: {:?}",
+                cert_type
+            );
+            assert_eq!(
+                result.status_reason.map(|r| r.description).unwrap(),
+                expected_msg,
+                "Test case: {:?}",
+                cert_type
+            );
+        }
+    }
 }
