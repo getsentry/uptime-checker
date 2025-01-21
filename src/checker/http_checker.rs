@@ -92,11 +92,13 @@ fn ssl_error(err: &reqwest::Error) -> Option<String> {
     let mut inner = &err as &dyn Error;
     while let Some(source) = inner.source() {
         if let Some(e) = source.downcast_ref::<ErrorStack>() {
-            return Some(e.errors()
-                .iter()
-                .map(|e| e.reason().unwrap_or("unknown error"))
-                .collect::<Vec<_>>()
-                .join(", "));
+            return Some(
+                e.errors()
+                    .iter()
+                    .map(|e| e.reason().unwrap_or("unknown error"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
         }
         inner = source;
     }
