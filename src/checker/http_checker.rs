@@ -251,13 +251,13 @@ mod tests {
     use uuid::Uuid;
     #[cfg(target_os = "linux")]
     use {
-        tokio_rustls::TlsAcceptor,
+        rcgen::{Certificate, CertificateParams},
+        rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
         rustls::ServerConfig,
         std::sync::Arc,
         tokio::io::AsyncWriteExt,
         tokio::net::TcpListener,
-        rcgen::{Certificate, CertificateParams},
-        rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+        tokio_rustls::TlsAcceptor,
     };
 
     fn make_tick() -> Tick {
