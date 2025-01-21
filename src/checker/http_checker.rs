@@ -235,9 +235,8 @@ mod tests {
     use httpmock::Method;
 
     use sentry::protocol::SpanId;
-
     use uuid::Uuid;
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     use {
         rcgen::{Certificate, CertificateParams},
         rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
@@ -528,23 +527,28 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     async fn test_ssl_errors_linux() {
+        #[derive(Debug, Copy, Clone)]
+        enum TestCertType {
+            Expired,
+            WrongHost,
+            SelfSigned,
+        }
         // Helper function to create various bad certificates
-        fn create_bad_cert(cert_type: &str) -> (Vec<u8>, Vec<u8>) {
+        fn create_bad_cert(cert_type: TestCertType) -> (Vec<u8>, Vec<u8>) {
             let mut params = CertificateParams::new(vec!["localhost".to_string()]);
             match cert_type {
-                "expired" => {
+                TestCertType::Expired => {
                     params.not_before = time::OffsetDateTime::now_utc() - time::Duration::days(30);
                     params.not_after = time::OffsetDateTime::now_utc() - time::Duration::days(1);
                 }
-                "wrong_host" => {
+                TestCertType::WrongHost => {
                     params = CertificateParams::new(vec!["wronghost.com".to_string()]);
                 }
-                "self_signed" => {
+                TestCertType::SelfSigned => {
                     // Default params are self-signed
                 }
-                _ => {}
             }
 
             let cert = Certificate::from_params(params).unwrap();
@@ -555,7 +559,7 @@ mod tests {
         }
 
         // Set up mock HTTPS server
-        async fn setup_test_server(cert_type: &str) -> String {
+        async fn setup_test_server(cert_type: TestCertType) -> String {
             let (key_der, cert_der) = create_bad_cert(cert_type);
 
             let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
@@ -593,9 +597,9 @@ mod tests {
 
         // Test various SSL certificate errors
         let test_cases = vec![
-            ("expired", "certificate verify failed"),
-            ("wrong_host", "certificate verify failed"),
-            ("self_signed", "certificate verify failed"),
+            (TestCertType::Expired, "certificate verify failed"),
+            (TestCertType::WrongHost, "certificate verify failed"),
+            (TestCertType::SelfSigned, "certificate verify failed"),
         ];
 
         for (cert_type, expected_msg) in test_cases {
@@ -612,25 +616,25 @@ mod tests {
                 result.status,
                 CheckStatus::Failure,
                 "Test case: {}",
-                cert_type
+                format!("{:?}", &cert_type)
             );
             assert_eq!(
                 result.request_info.and_then(|i| i.http_status_code),
                 None,
                 "Test case: {}",
-                cert_type
+                format!("{:?}", cert_type)
             );
             assert_eq!(
                 result.status_reason.as_ref().map(|r| r.status_type),
                 Some(CheckStatusReasonType::Failure),
                 "Test case: {}",
-                cert_type
+                format!("{:?}", cert_type)
             );
             assert_eq!(
                 result.status_reason.map(|r| r.description).unwrap(),
                 expected_msg,
                 "Test case: {}",
-                cert_type
+                format!("{:?}", cert_type)
             );
         }
     }
