@@ -195,10 +195,7 @@ mod tests {
                 "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
                 "10.0.0.1,10.0.0.2:7000",
             );
-            jail.set_env(
-                "UPTIME_CHECKER_CONFIG_PROVIDER_MODE",
-                "kafka",
-            );
+            jail.set_env("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "kafka");
             jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
             jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
             jail.set_env("UPTIME_CHECKER_REGION", "us-west");
