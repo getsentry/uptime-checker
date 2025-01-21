@@ -4,7 +4,6 @@ use crate::types::{
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 use chrono::{TimeDelta, Utc};
-use native_tls::Error as NativeTlsError;
 use openssl::error::ErrorStack;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
