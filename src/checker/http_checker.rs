@@ -615,26 +615,26 @@ mod tests {
             assert_eq!(
                 result.status,
                 CheckStatus::Failure,
-                "Test case: {}",
-                format!("{:?}", &cert_type)
+                "Test case: {:?}", 
+                &cert_type
             );
             assert_eq!(
                 result.request_info.and_then(|i| i.http_status_code),
                 None,
-                "Test case: {}",
-                format!("{:?}", cert_type)
+                "Test case: {:?}",
+                cert_type
             );
             assert_eq!(
                 result.status_reason.as_ref().map(|r| r.status_type),
                 Some(CheckStatusReasonType::Failure),
-                "Test case: {}",
-                format!("{:?}", cert_type)
+                "Test case: {:?}",
+                cert_type
             );
             assert_eq!(
                 result.status_reason.map(|r| r.description).unwrap(),
                 expected_msg,
-                "Test case: {}",
-                format!("{:?}", cert_type)
+                "Test case: {:?}",
+                cert_type
             );
         }
     }
