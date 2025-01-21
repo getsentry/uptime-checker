@@ -88,31 +88,18 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
     }
     None
 }
-
 fn ssl_error(err: &reqwest::Error) -> Option<String> {
     let mut inner = &err as &dyn Error;
     while let Some(source) = inner.source() {
-        inner = source;
-        if let Some(e) = source.downcast_ref::<NativeTlsError>() {
-            if let Some(source) = e.source() {
-                if let Some(e) = source.downcast_ref::<ErrorStack>() {
-                    let error_details = e
-                        .errors()
-                        .iter()
-                        .map(|e| e.reason().unwrap_or("unknown error"))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Some(error_details);
-                }
-            }
-            return Some(e.to_string());
+        if let Some(e) = source.downcast_ref::<ErrorStack>() {
+            return Some(e.errors()
+                .iter()
+                .map(|e| e.reason().unwrap_or("unknown error"))
+                .collect::<Vec<_>>()
+                .join(", "));
         }
+        inner = source;
     }
-    let err_str = format!("{:?}", err);
-    if err_str.contains("certificate") || err_str.contains("SSL") {
-        return Some(err_str);
-    }
-
     None
 }
 
