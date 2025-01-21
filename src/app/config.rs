@@ -11,6 +11,12 @@ use serde_with::serde_as;
 
 use crate::{app::cli, logging};
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigProviderMode {
+    Kafka,
+}
+
 #[serde_as]
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -56,6 +62,8 @@ pub struct Config {
     /// The topic to load [`CheckConfig`]s from.
     pub configs_kafka_topic: String,
 
+    pub config_provider_mode: ConfigProviderMode,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -76,6 +84,7 @@ impl Default for Config {
             results_kafka_topic: "uptime-results".to_owned(),
             configs_kafka_cluster: vec![],
             configs_kafka_topic: "uptime-configs".to_owned(),
+            config_provider_mode: ConfigProviderMode::Kafka,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
         }
@@ -116,7 +125,7 @@ mod tests {
 
     use crate::{app::cli, logging};
 
-    use super::Config;
+    use super::{Config, ConfigProviderMode};
 
     #[test]
     fn test_simple() {
@@ -156,6 +165,7 @@ mod tests {
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
+                    config_provider_mode: ConfigProviderMode::Kafka,
                     redis_host: "redis://127.0.0.1:6379".to_owned(),
                     region: "default".to_owned(),
                 }
@@ -185,6 +195,10 @@ mod tests {
                 "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
                 "10.0.0.1,10.0.0.2:7000",
             );
+            jail.set_env(
+                "UPTIME_CHECKER_CONFIG_PROVIDER_MODE",
+                "kafka",
+            );
             jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
             jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
             jail.set_env("UPTIME_CHECKER_REGION", "us-west");
@@ -210,6 +224,7 @@ mod tests {
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
+                    config_provider_mode: ConfigProviderMode::Kafka,
                     redis_host: "10.0.0.3:6379".to_owned(),
                     region: "us-west".to_owned(),
                 }

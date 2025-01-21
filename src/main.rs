@@ -2,8 +2,8 @@
 #![allow(dead_code)]
 mod app;
 mod check_executor;
+mod check_config_provider;
 mod checker;
-mod config_consumer;
 mod config_store;
 mod config_waiter;
 mod logging;
