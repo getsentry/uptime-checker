@@ -615,7 +615,7 @@ mod tests {
             assert_eq!(
                 result.status,
                 CheckStatus::Failure,
-                "Test case: {:?}", 
+                "Test case: {:?}",
                 &cert_type
             );
             assert_eq!(
