@@ -10,7 +10,7 @@ use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::SpanId;
 use std::error::Error;
 use tokio::time::Instant;
-use uuid::Uuid; // Add this to imports
+use uuid::Uuid;
 
 use super::ip_filter::is_external_ip;
 use super::Checker;
