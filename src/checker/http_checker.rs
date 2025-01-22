@@ -119,6 +119,17 @@ fn connection_error(err: &reqwest::Error) -> Option<String> {
     None
 }
 
+fn hyper_error(err: &reqwest::Error) -> Option<String> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(hyper_error) = source.downcast_ref::<hyper::Error>() {
+            return Some(hyper_error.to_string());
+        }
+        inner = source;
+    }
+    None
+}
+
 impl HttpChecker {
     fn new_internal(options: Options) -> Self {
         let mut default_headers = HeaderMap::new();
@@ -211,6 +222,11 @@ impl Checker for HttpChecker {
                         description: message,
                     }
                 } else if let Some(message) = connection_error(&e) {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::Failure,
+                        description: message,
+                    }
+                } else if let Some(message) = hyper_error(&e) {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
                         description: message,
@@ -683,6 +699,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
     async fn test_connection_reset() {
         // Set up a TCP listener that sends an incomplete response
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -714,9 +731,9 @@ mod tests {
             Some(CheckStatusReasonType::Failure)
         );
         let result_description = result.status_reason.map(|r| r.description).unwrap();
-        assert!(
-            result_description.contains("Connection reset"),
-            "Expected error message about incomplete message: {}",
+        assert_eq!(
+            result_description, "connection closed before message completed",
+            "Expected error message about closed connection: {}",
             result_description
         );
     }
