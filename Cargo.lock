@@ -4046,6 +4046,7 @@ dependencies = [
  "futures",
  "hickory-resolver",
  "httpmock",
+ "hyper 1.4.1",
  "ipnet",
  "metrics",
  "metrics-exporter-statsd",
