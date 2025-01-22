@@ -11,12 +11,13 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
+use crate::app::config::ConfigProviderMode;
+use crate::check_config_provider::kafka_config_provider::run_config_consumer;
 use crate::check_executor::{run_executor, CheckSender};
 use crate::config_waiter::wait_for_partition_boot;
 use crate::{
     app::config::Config,
     checker::http_checker::HttpChecker,
-    config_consumer::run_config_consumer,
     config_store::{ConfigStore, RwConfigStore},
     producer::kafka_producer::KafkaResultsProducer,
     scheduler::run_scheduler,
@@ -138,11 +139,13 @@ impl Manager {
             shutdown_signal: CancellationToken::new(),
         });
 
-        let consumer_join_handle = run_config_consumer(
-            &manager.config,
-            manager.clone(),
-            manager.shutdown_signal.clone(),
-        );
+        let consumer_join_handle = match &manager.config.config_provider_mode {
+            ConfigProviderMode::Kafka => run_config_consumer(
+                &manager.config,
+                manager.clone(),
+                manager.shutdown_signal.clone(),
+            ),
+        };
 
         let shutdown_signal = manager.shutdown_signal.clone();
 

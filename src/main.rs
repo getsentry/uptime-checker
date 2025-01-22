@@ -1,9 +1,9 @@
 // TODO: We might want to remove this once more stable, but it's just noisy for now.
 #![allow(dead_code)]
 mod app;
+mod check_config_provider;
 mod check_executor;
 mod checker;
-mod config_consumer;
 mod config_store;
 mod config_waiter;
 mod logging;
