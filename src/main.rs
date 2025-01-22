@@ -1,3 +1,4 @@
+#![deny(clippy::disallowed_types)]
 // TODO: We might want to remove this once more stable, but it's just noisy for now.
 #![allow(dead_code)]
 mod app;
@@ -12,6 +13,7 @@ mod metrics;
 mod producer;
 mod scheduler;
 mod types;
+mod test_utils;
 
 use std::process;
 
@@ -29,4 +31,19 @@ pub fn main() {
 
     Hub::current().client().map(|x| x.close(None));
     process::exit(exit_code);
+}
+
+
+#[cfg(test)]
+mod test {
+    use redis::{Client};
+    use crate::app::config::Config;
+
+    #[ctor::dtor]
+    fn cleanup() {
+        let config = Config::default();
+        let client = Client::open(config.redis_host).unwrap();
+        let mut conn = client.get_connection().unwrap();
+        let _: () = redis::cmd("FLUSHDB").query(&mut conn).unwrap();
+    }
 }
