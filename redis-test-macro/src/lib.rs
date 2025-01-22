@@ -34,7 +34,7 @@ pub fn redis_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     let expanded = quote! {
         #[tokio::test(start_paused = #start_paused)]
         async fn #fn_name() {
-            let _guard = crate::test_utils::test_utils::TEST_MUTEX.lock().await;
+            let _guard = crate::test_utils::sync::TEST_MUTEX.lock().await;
             #body
         }
     };

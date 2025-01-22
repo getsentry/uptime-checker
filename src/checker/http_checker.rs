@@ -274,8 +274,6 @@ mod tests {
     use httpmock::Method;
 
     use sentry::protocol::SpanId;
-    use tokio::io::AsyncWriteExt;
-    use tokio::net::TcpListener;
     use uuid::Uuid;
     #[cfg(target_os = "linux")]
     use {
@@ -284,6 +282,7 @@ mod tests {
         rustls::ServerConfig,
         std::sync::Arc,
         tokio_rustls::TlsAcceptor,
+        tokio::net::TcpListener,
     };
 
     fn make_tick() -> Tick {
