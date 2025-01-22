@@ -149,9 +149,7 @@ impl HttpChecker {
     }
 
     pub fn new(validate_url: bool) -> Self {
-        Self::new_internal(Options {
-            validate_url,
-        })
+        Self::new_internal(Options { validate_url })
     }
 }
 
