@@ -62,6 +62,7 @@ pub struct Config {
     /// The topic to load [`CheckConfig`]s from.
     pub configs_kafka_topic: String,
 
+    /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
 
     /// The general purpose redis node to use with this service
