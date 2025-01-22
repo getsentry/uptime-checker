@@ -119,7 +119,6 @@ fn connection_error(err: &reqwest::Error) -> Option<String> {
     None
 }
 
-
 impl HttpChecker {
     fn new_internal(options: Options) -> Self {
         let mut default_headers = HeaderMap::new();
@@ -256,9 +255,9 @@ mod tests {
     use httpmock::Method;
 
     use sentry::protocol::SpanId;
-    use uuid::Uuid;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
+    use uuid::Uuid;
     #[cfg(target_os = "linux")]
     use {
         rcgen::{Certificate, CertificateParams},
@@ -707,7 +706,7 @@ mod tests {
             ..Default::default()
         };
         let result = checker.check_url(&config, &tick, "us-west").await;
-        
+
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
@@ -721,5 +720,4 @@ mod tests {
             result_description
         );
     }
-
 }
