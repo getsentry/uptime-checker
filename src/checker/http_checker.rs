@@ -143,7 +143,10 @@ impl HttpChecker {
             builder = builder.ip_filter(is_external_ip);
         }
 
-        let client = builder.build().expect("Failed to build checker client");
+        let client = builder
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("Failed to build checker client");
 
         Self { client }
     }
