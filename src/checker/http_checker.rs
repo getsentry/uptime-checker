@@ -1,3 +1,5 @@
+use super::ip_filter::is_external_ip;
+use super::Checker;
 use crate::config_store::Tick;
 use crate::types::{
     check_config::CheckConfig,
@@ -11,8 +13,6 @@ use sentry::protocol::SpanId;
 use std::error::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
-use super::ip_filter::is_external_ip;
-use super::Checker;
 
 pub const CHECKER_RESULT_NAMESPACE: Uuid = Uuid::from_u128(0x67f0b2d5_e476_4f00_9b99_9e6b95c3b7e3);
 
