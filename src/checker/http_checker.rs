@@ -103,13 +103,27 @@ fn ssl_error(err: &reqwest::Error) -> Option<String> {
     None
 }
 
-fn connection_refused_error(err: &reqwest::Error) -> Option<String> {
+fn connection_error(err: &reqwest::Error) -> Option<String> {
     let mut inner = &err as &dyn Error;
     while let Some(source) = inner.source() {
         if let Some(io_err) = source.downcast_ref::<std::io::Error>() {
+            // TODO: should we return the OS code error as well?
             if io_err.kind() == std::io::ErrorKind::ConnectionRefused {
                 return Some("Connection refused".to_string());
+            } else if io_err.kind() == std::io::ErrorKind::ConnectionReset {
+                return Some("Connection reset".to_string());
             }
+        }
+        inner = source;
+    }
+    None
+}
+
+fn hyper_error(err: &reqwest::Error) -> Option<String> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(hyper_error) = source.downcast_ref::<hyper::Error>() {
+            return Some(hyper_error.to_string());
         }
         inner = source;
     }
@@ -210,7 +224,12 @@ impl Checker for HttpChecker {
                         status_type: CheckStatusReasonType::Failure,
                         description: message,
                     }
-                } else if let Some(message) = connection_refused_error(&e) {
+                } else if let Some(message) = connection_error(&e) {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::Failure,
+                        description: message,
+                    }
+                } else if let Some(message) = hyper_error(&e) {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
                         description: message,
@@ -255,15 +274,15 @@ mod tests {
     use httpmock::Method;
 
     use sentry::protocol::SpanId;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
     use uuid::Uuid;
-    // #[cfg(target_os = "linux")]
+    #[cfg(target_os = "linux")]
     use {
         rcgen::{Certificate, CertificateParams},
         rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
         rustls::ServerConfig,
         std::sync::Arc,
-        tokio::io::AsyncWriteExt,
-        tokio::net::TcpListener,
         tokio_rustls::TlsAcceptor,
     };
 
@@ -679,6 +698,46 @@ mod tests {
         assert_eq!(
             result.status_reason.map(|r| r.description),
             Some("Connection refused".to_string())
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_connection_reset() {
+        // Set up a TCP listener that sends an incomplete response
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                // Send an incomplete HTTP response - just the headers
+                let partial_response: &[u8; 38] = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n";
+                let _ = stream.write_all(partial_response).await;
+                // Close connection immediately without sending body or final \r\n
+            }
+        });
+
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
+        let tick = make_tick();
+        let config = CheckConfig {
+            url: format!("http://localhost:{}", addr.port()),
+            ..Default::default()
+        };
+        let result = checker.check_url(&config, &tick, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::Failure)
+        );
+        let result_description = result.status_reason.map(|r| r.description).unwrap();
+        assert_eq!(
+            result_description, "connection closed before message completed",
+            "Expected error message about closed connection: {}",
+            result_description
         );
     }
 }
