@@ -1,4 +1,3 @@
-#![deny(clippy::disallowed_types)]
 // TODO: We might want to remove this once more stable, but it's just noisy for now.
 #![allow(dead_code)]
 mod app;
