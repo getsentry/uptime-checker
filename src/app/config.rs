@@ -61,6 +61,9 @@ pub struct Config {
 
     /// The region that this checker is running in
     pub region: String,
+
+    /// Allow uptime checks against internal IP addresses
+    pub allow_internal_ips: bool,
 }
 
 impl Default for Config {
@@ -78,6 +81,7 @@ impl Default for Config {
             configs_kafka_topic: "uptime-configs".to_owned(),
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
+            allow_internal_ips: false,
         }
     }
 }
@@ -158,6 +162,7 @@ mod tests {
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     redis_host: "redis://127.0.0.1:6379".to_owned(),
                     region: "default".to_owned(),
+                    allow_internal_ips: false,
                 }
             );
             Ok(())
@@ -188,6 +193,7 @@ mod tests {
             jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
             jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
             jail.set_env("UPTIME_CHECKER_REGION", "us-west");
+            jail.set_env("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true");
             let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
                 log_level: Some(logging::Level::Trace),
@@ -212,6 +218,7 @@ mod tests {
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     redis_host: "10.0.0.3:6379".to_owned(),
                     region: "us-west".to_owned(),
+                    allow_internal_ips: true,
                 }
             );
             Ok(())
