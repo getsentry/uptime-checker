@@ -11,7 +11,6 @@ use sentry::protocol::SpanId;
 use std::error::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
-
 use super::ip_filter::is_external_ip;
 use super::Checker;
 
@@ -98,6 +97,19 @@ fn ssl_error(err: &reqwest::Error) -> Option<String> {
                     .collect::<Vec<_>>()
                     .join(", "),
             );
+        }
+        inner = source;
+    }
+    None
+}
+
+fn connection_refused_error(err: &reqwest::Error) -> Option<String> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(io_err) = source.downcast_ref::<std::io::Error>() {
+            if io_err.kind() == std::io::ErrorKind::ConnectionRefused {
+                return Some("Connection refused".to_string());
+            }
         }
         inner = source;
     }
@@ -191,6 +203,11 @@ impl Checker for HttpChecker {
                         description: message,
                     }
                 } else if let Some(message) = ssl_error(&e) {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::Failure,
+                        description: message,
+                    }
+                } else if let Some(message) = connection_refused_error(&e) {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
                         description: message,
@@ -527,7 +544,7 @@ mod tests {
     }
 
     #[tokio::test]
-    // #[cfg(target_os = "linux")]
+    #[cfg(target_os = "linux")]
     async fn test_ssl_errors_linux() {
         #[derive(Debug, Copy, Clone)]
         enum TestCertType {
@@ -637,5 +654,28 @@ mod tests {
                 cert_type
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_connection_refused() {
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+        });
+        let tick = make_tick();
+        let config = CheckConfig {
+            url: "http://localhost:12345/".to_string(),
+            ..Default::default()
+        };
+        let result = checker.check_url(&config, &tick, "us-west").await;
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::Failure)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("Connection refused".to_string())
+        );
     }
 }
