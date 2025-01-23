@@ -110,12 +110,12 @@ impl HttpChecker {
 }
 
 fn make_trace_header(config: &CheckConfig, trace_id: TraceId, span_id: SpanId) -> String {
-    /// Format the 'sentry-trace' header. if we append a 0 to the header,
-    /// we're indicating the trace spans will not be sampled.
-    /// if we don't append a 0, then the default behavior is to sample the trace spans
-    /// according to the service's sampling policy. see
-    /// https://develop.sentry.dev/sdk/telemetry/traces/#header-sentry-trace
-    /// for more information.
+    // Format the 'sentry-trace' header. if we append a 0 to the header,
+    // we're indicating the trace spans will not be sampled.
+    // if we don't append a 0, then the default behavior is to sample the trace spans
+    // according to the service's sampling policy. see
+    // https://develop.sentry.dev/sdk/telemetry/traces/#header-sentry-trace
+    // for more information.
     if config.trace_sampling {
         format!("{}-{}", trace_id, span_id)
     } else {
