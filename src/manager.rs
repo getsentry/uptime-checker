@@ -236,6 +236,7 @@ impl Manager {
 #[cfg(test)]
 mod tests {
     use crate::app::config::Config;
+    use crate::check_executor::CheckSender;
     use crate::manager::{Manager, PartitionedService};
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
@@ -245,7 +246,7 @@ mod tests {
 
     impl Manager {
         pub fn start_without_consumer(config: Arc<Config>) -> Arc<Self> {
-            let (executor_sender, _) = mpsc::unbounded_channel();
+            let (executor_sender, _) = CheckSender::new();
             let (shutdown_sender, mut shutdown_service_rx) = mpsc::unbounded_channel();
 
             let manager = Arc::new(Self {
@@ -267,7 +268,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partitioned_service_get_config_store() {
-        let (executor_sender, _) = mpsc::unbounded_channel();
+        let (executor_sender, _) = CheckSender::new();
         let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
         service.get_config_store();
         service.stop().await;
@@ -275,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_stop() {
-        let (executor_sender, _) = mpsc::unbounded_channel();
+        let (executor_sender, _) = CheckSender::new();
         let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
         service.stop().await;
     }

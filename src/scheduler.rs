@@ -168,12 +168,13 @@ async fn scheduler_loop(
 #[cfg(test)]
 mod tests {
     use crate::app::config::Config;
+    use crate::check_executor::CheckSender;
     use chrono::{Duration, Utc};
     use redis::{Client, Commands};
     use redis_test_macro::redis_test;
     use similar_asserts::assert_eq;
     use std::sync::Arc;
-    use tokio::sync::{mpsc, oneshot};
+    use tokio::sync::oneshot;
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
     use uuid::Uuid;
@@ -221,7 +222,7 @@ mod tests {
             rw_store.add_config(config2.clone());
         }
 
-        let (executor_tx, mut executor_rx) = mpsc::unbounded_channel();
+        let (executor_tx, mut executor_rx) = CheckSender::new();
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
 
@@ -329,7 +330,7 @@ mod tests {
             rw_store.add_config(config2.clone());
         }
 
-        let (executor_tx, mut executor_rx) = mpsc::unbounded_channel();
+        let (executor_tx, mut executor_rx) = CheckSender::new();
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
 
@@ -434,7 +435,7 @@ mod tests {
             rw_store.add_config(config2.clone());
         }
 
-        let (executor_tx, mut executor_rx) = mpsc::unbounded_channel();
+        let (executor_tx, mut executor_rx) = CheckSender::new();
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
 
