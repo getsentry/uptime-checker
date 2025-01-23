@@ -1,8 +1,8 @@
 use super::shared::{RegionScheduleMode, RequestMethod};
 use crate::config_store::Tick;
 use chrono::TimeDelta;
-use serde::Deserialize;
-use serde_repr::Deserialize_repr;
+use serde::{Serialize, Deserialize};
+use serde_repr::{Serialize_repr, Deserialize_repr};
 use serde_with::serde_as;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
@@ -11,7 +11,7 @@ const ONE_MINUTE: isize = 60;
 
 /// Valid intervals between the checks in seconds.
 #[repr(isize)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize_repr)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 pub enum CheckInterval {
     OneMinute = ONE_MINUTE,
     FiveMinutes = ONE_MINUTE * 5,
@@ -26,7 +26,7 @@ pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
 
 /// The CheckConfig represents a configuration for a single check.
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckConfig {
     /// The subscription this check configuration is associated to in sentry.
     #[serde(with = "uuid::serde::simple")]
