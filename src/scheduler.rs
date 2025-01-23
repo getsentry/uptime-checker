@@ -170,9 +170,9 @@ mod tests {
     use crate::app::config::Config;
     use chrono::{Duration, Utc};
     use redis::{Client, Commands};
+    use redis_test_macro::redis_test;
     use similar_asserts::assert_eq;
     use std::sync::Arc;
-    use redis_test_macro::redis_test;
     use tokio::sync::{mpsc, oneshot};
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
@@ -290,7 +290,6 @@ mod tests {
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
         assert_eq!(progress, 60000000000);
-
     }
 
     #[traced_test]

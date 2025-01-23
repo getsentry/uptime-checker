@@ -11,8 +11,8 @@ mod manager;
 mod metrics;
 mod producer;
 mod scheduler;
-mod types;
 mod test_utils;
+mod types;
 
 use std::process;
 
@@ -32,11 +32,10 @@ pub fn main() {
     process::exit(exit_code);
 }
 
-
 #[cfg(test)]
 mod test {
-    use redis::{Client};
     use crate::app::config::Config;
+    use redis::Client;
 
     #[ctor::dtor]
     fn cleanup() {
