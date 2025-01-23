@@ -16,9 +16,9 @@ WORKDIR /app
 # Just copy the Cargo.toml files and trigger a build so that we compile our
 # dependencies only. This way we avoid layer cache invalidation if our
 # dependencies haven't changed, resulting in faster builds.
+COPY Cargo.toml Cargo.lock ./
+COPY redis-test-macro redis-test-macro/
 
-COPY Cargo.toml .
-COPY Cargo.lock .
 ENV RUSTFLAGS="-Ctarget-feature=-crt-static"
 ENV PKG_CONFIG_ALLOW_CROSS=1
 RUN cargo build --release && rm -rf src/

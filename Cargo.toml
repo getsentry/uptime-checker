@@ -43,7 +43,7 @@ tokio-rustls = "0.26.1"
 rustls = "0.23.21"
 rcgen = "0.11"
 time = "0.3"
-
+ctor = "0.2"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
 reqwest = { git = "https://github.com/getsentry/reqwest", branch = "restricted-connector" }
@@ -53,3 +53,6 @@ lto = true
 codegen-units = 1
 panic = 'abort'
 strip = "debuginfo"
+
+[dev-dependencies]
+redis-test-macro = { path = "./redis-test-macro" }

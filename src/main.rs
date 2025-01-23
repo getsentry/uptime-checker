@@ -11,6 +11,7 @@ mod manager;
 mod metrics;
 mod producer;
 mod scheduler;
+mod test_utils;
 mod types;
 
 use std::process;
@@ -29,4 +30,19 @@ pub fn main() {
 
     Hub::current().client().map(|x| x.close(None));
     process::exit(exit_code);
+}
+
+#[cfg(test)]
+mod test {
+    use crate::app::config::Config;
+    use redis::Client;
+
+    #[ctor::dtor]
+    fn cleanup() {
+        // Flushes Redis back to the default state to avoid state crossover between runs.
+        let config = Config::default();
+        let client = Client::open(config.redis_host).unwrap();
+        let mut conn = client.get_connection().unwrap();
+        let _: () = redis::cmd("FLUSHDB").query(&mut conn).unwrap();
+    }
 }

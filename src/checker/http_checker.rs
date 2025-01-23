@@ -274,8 +274,6 @@ mod tests {
     use httpmock::Method;
 
     use sentry::protocol::SpanId;
-    use tokio::io::AsyncWriteExt;
-    use tokio::net::TcpListener;
     use uuid::Uuid;
     #[cfg(target_os = "linux")]
     use {
@@ -283,6 +281,8 @@ mod tests {
         rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
         rustls::ServerConfig,
         std::sync::Arc,
+        tokio::io::AsyncWriteExt,
+        tokio::net::TcpListener,
         tokio_rustls::TlsAcceptor,
     };
 
