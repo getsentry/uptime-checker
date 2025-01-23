@@ -4064,6 +4064,7 @@ dependencies = [
  "figment",
  "futures",
  "hickory-resolver",
+ "hostname 0.4.0",
  "httpmock",
  "hyper 1.4.1",
  "ipnet",

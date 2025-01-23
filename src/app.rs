@@ -9,7 +9,7 @@ use tokio::signal::ctrl_c;
 use crate::{
     logging::{self, LoggingConfig},
     manager::Manager,
-    metrics::{self, MetricsConfig},
+    metrics,
 };
 
 pub fn execute() -> io::Result<()> {
@@ -17,7 +17,7 @@ pub fn execute() -> io::Result<()> {
     let config = Arc::new(config::Config::extract(&app).expect("Configuration invalid"));
 
     logging::init(LoggingConfig::from_config(&config));
-    metrics::init(MetricsConfig::from_config(&config));
+    metrics::init(&config.metrics);
 
     tracing::info!(config = ?config);
 
