@@ -40,6 +40,7 @@ mod test {
 
     #[ctor::dtor]
     fn cleanup() {
+        // Flushes Redis back to the default state to avoid state crossover between runs.
         let config = Config::default();
         let client = Client::open(config.redis_host).unwrap();
         let mut conn = client.get_connection().unwrap();

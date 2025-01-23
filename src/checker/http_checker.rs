@@ -281,8 +281,9 @@ mod tests {
         rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
         rustls::ServerConfig,
         std::sync::Arc,
-        tokio_rustls::TlsAcceptor,
+        tokio::io::AsyncWriteExt,
         tokio::net::TcpListener,
+        tokio_rustls::TlsAcceptor,
     };
 
     fn make_tick() -> Tick {
