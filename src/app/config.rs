@@ -1,4 +1,4 @@
-use std::{borrow::Cow, net::SocketAddr};
+use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
 
 use figment::{
     providers::{Env, Format, Serialized, Yaml},
@@ -19,6 +19,19 @@ pub enum ConfigProviderMode {
 
 #[serde_as]
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    /// The statsd address to report metrics to.
+    pub statsd_addr: SocketAddr,
+
+    /// Default tags to apply to all metrics.
+    pub default_tags: BTreeMap<String, String>,
+
+    /// Tag name to report the hostname to for each metric. Defaults to not sending such a tag.
+    pub hostname_tag: Option<String>,
+}
+
+#[serde_as]
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct Config {
     /// The sentry DSN to use for error reporting.
     pub sentry_dsn: Option<String>,
@@ -35,8 +48,9 @@ pub struct Config {
     /// The number of HTTP checks that will be executed at once.
     pub checker_concurrency: usize,
 
-    /// The statsd address to report metrics to.
-    pub statsd_addr: SocketAddr,
+    /// Metric configurations
+    #[serde(flatten)]
+    pub metrics: MetricsConfig,
 
     /// The kafka cluster to report results to. Expected to be a string of comma separated
     /// addresses.
@@ -83,7 +97,11 @@ impl Default for Config {
             checker_concurrency: 200,
             log_level: logging::Level::Warn,
             log_format: logging::LogFormat::Auto,
-            statsd_addr: "127.0.0.1:8126".parse().unwrap(),
+            metrics: MetricsConfig {
+                statsd_addr: "127.0.0.1:8126".parse().unwrap(),
+                default_tags: BTreeMap::new(),
+                hostname_tag: None,
+            },
             results_kafka_cluster: vec![],
             results_kafka_topic: "uptime-results".to_owned(),
             configs_kafka_cluster: vec![],
@@ -123,14 +141,14 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, path::PathBuf};
+    use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
     use figment::Jail;
     use similar_asserts::assert_eq;
 
     use crate::{app::cli, logging};
 
-    use super::{Config, ConfigProviderMode};
+    use super::{Config, ConfigProviderMode, MetricsConfig};
 
     #[test]
     fn test_simple() {
@@ -144,6 +162,8 @@ mod tests {
                 results_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
                 configs_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
                 statsd_addr: 10.0.0.1:8126
+                default_tags: {"someTag": "value"}
+                hostname_tag: pod_name
                 redis_host: redis://127.0.0.1:6379
                 "#,
             )?;
@@ -165,7 +185,11 @@ mod tests {
                     checker_concurrency: 100,
                     log_level: logging::Level::Warn,
                     log_format: logging::LogFormat::Auto,
-                    statsd_addr: "10.0.0.1:8126".parse().unwrap(),
+                    metrics: MetricsConfig {
+                        statsd_addr: "10.0.0.1:8126".parse().unwrap(),
+                        default_tags: BTreeMap::from([("someTag".to_owned(), "value".to_owned()),]),
+                        hostname_tag: Some("pod_name".to_owned()),
+                    },
                     results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
@@ -223,7 +247,11 @@ mod tests {
                     checker_concurrency: 200,
                     log_level: logging::Level::Trace,
                     log_format: logging::LogFormat::Json,
-                    statsd_addr: "10.0.0.1:1234".parse().unwrap(),
+                    metrics: MetricsConfig {
+                        statsd_addr: "10.0.0.1:1234".parse().unwrap(),
+                        default_tags: BTreeMap::new(),
+                        hostname_tag: None,
+                    },
                     results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
                     configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
                     results_kafka_topic: "uptime-results".to_owned(),
