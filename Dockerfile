@@ -1,7 +1,6 @@
 FROM rust:1.80-alpine3.20 as builder
 
-ARG UPTIME_CHECKER_GIT_REVISION
-ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
+
 
 RUN mkdir -p ~/.cargo && \
     echo '[registries.crates-io]' > ~/.cargo/config && \
@@ -25,6 +24,9 @@ RUN cargo build --release && rm -rf src/
 
 # Copy the source code and run the build again. This should only compile the
 # app itself as the dependencies were already built above.
+ARG UPTIME_CHECKER_GIT_REVISION
+ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
+
 COPY . ./
 RUN rm target/release/deps/uptime_checker* && cargo build --release
 
