@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use chrono::{TimeDelta, Utc};
@@ -40,6 +41,22 @@ impl ScheduledCheck {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct CheckSender {
+    sender: UnboundedSender<ScheduledCheck>,
+    queue_size: Arc<AtomicU64>,
+}
+
+impl CheckSender {
+    pub fn new() -> (Self, UnboundedReceiver<ScheduledCheck>) {
+        let (sender, reciever) = mpsc::unbounded_channel();
+        let queue_size = Arc::new(AtomicU64::new(0));
+        let check_sender = Self { sender, queue_size };
+
+        (check_sender, reciever)
+    }
+}
+
 impl CheckResult {
     /// Produce a missed check result from a scheduled check.
     pub fn missed_from(config: &CheckConfig, tick: &Tick, region: &str) -> Self {
@@ -59,8 +76,6 @@ impl CheckResult {
     }
 }
 
-pub type CheckSender = UnboundedSender<ScheduledCheck>;
-
 pub fn run_executor(
     concurrency: usize,
     checker: Arc<impl Checker + 'static>,
@@ -69,18 +84,20 @@ pub fn run_executor(
 ) -> (CheckSender, JoinHandle<()>) {
     tracing::info!("executor.starting");
 
-    let (sender, reciever) = mpsc::unbounded_channel();
+    let (check_sender, receiver) = CheckSender::new();
+    let queue_size = check_sender.queue_size.clone();
+
     let executor = tokio::spawn(async move {
-        executor_loop(concurrency, checker, producer, reciever, region).await
+        executor_loop(concurrency, queue_size, checker, producer, receiver, region).await
     });
 
-    (sender, executor)
+    (check_sender, executor)
 }
 
 /// Queues a check for execution, returning a oneshot receiver that will be fired once the check
 /// has resolved to a CheckResult.
 pub fn queue_check(
-    sender: &CheckSender,
+    check_sender: &CheckSender,
     tick: Tick,
     config: Arc<CheckConfig>,
 ) -> Receiver<CheckResult> {
@@ -91,7 +108,10 @@ pub fn queue_check(
         config,
         resolve_tx,
     };
-    sender
+
+    check_sender.queue_size.fetch_add(1, Ordering::SeqCst);
+    check_sender
+        .sender
         .send(scheduled_check)
         .expect("Failed to queue ScheduledCheck");
 
@@ -100,6 +120,7 @@ pub fn queue_check(
 
 async fn executor_loop(
     concurrency: usize,
+    queue_size: Arc<AtomicU64>,
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
     reciever: UnboundedReceiver<ScheduledCheck>,
@@ -112,8 +133,10 @@ async fn executor_loop(
             let job_checker = checker.clone();
             let job_producer = producer.clone();
             let job_region = region.clone();
+            let job_queue_size = queue_size.clone();
 
-            // TODO(epurkhiser): Record metrics on the size of the size of the queue
+            metrics::gauge!("executor.check_concurrency")
+                .set(queue_size.load(Ordering::SeqCst) as f64);
 
             async move {
                 let _ = tokio::spawn(async move {
@@ -139,6 +162,7 @@ async fn executor_loop(
                     tracing::debug!(result = ?check_result, "executor.check_complete");
 
                     scheduled_check.record_result(check_result);
+                    job_queue_size.fetch_sub(1, Ordering::SeqCst);
                 })
                 .await;
             }
@@ -276,6 +300,8 @@ mod tests {
             })
             .collect();
 
+        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 4);
+
         let resolve_rx_4 = configs.pop().unwrap();
         tokio::pin!(resolve_rx_4);
 
@@ -301,10 +327,14 @@ mod tests {
         assert_eq!(poll!(resolve_rx_3.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_4.as_mut()), Poll::Pending);
 
+        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 2);
+
         // Move forward another second, the last two tasks should now be complete
         time::sleep(Duration::from_millis(1001)).await;
         assert!(matches!(poll!(resolve_rx_3.as_mut()), Poll::Ready(_)));
         assert!(matches!(poll!(resolve_rx_4.as_mut()), Poll::Ready(_)));
+
+        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test(start_paused = true)]
