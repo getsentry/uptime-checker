@@ -9,9 +9,8 @@ use crate::{app::config::Config, manager::Manager, types::check_config::CheckCon
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::time::Duration;
-use tokio::time::{interval};
+use tokio::time::interval;
 use uuid::Uuid;
-
 
 #[derive(Debug)]
 pub struct RedisPartition {
@@ -86,7 +85,7 @@ impl RedisConfigProvider {
     }
 
     async fn monitor_configs(&self, manager: Arc<Manager>, shutdown: CancellationToken) {
-        // Start monitoring configs using this provider. Loads the initial configs and
+        // Start monitoring configs using this provider. Loads the initial configs and (todo)
         // monitors redis for updates
         let partitions = self.get_partition_keys();
         self.load_initial_configs(manager.clone(), &partitions)
