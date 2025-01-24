@@ -1,5 +1,6 @@
 pub mod dummy_producer;
 pub mod kafka_producer;
+pub mod vector_producer;
 
 use sentry_kafka_schemas::SchemaError;
 
@@ -15,8 +16,13 @@ pub enum ExtractCodeError {
     Producer(#[from] ProducerError),
     #[error(transparent)]
     Schema(#[from] SchemaError),
+    #[error(transparent)]
+    VectorRequestError(#[from] reqwest::Error),
+    #[error("Vector request failed with status: {0}")]
+    VectorRequestStatusError(reqwest::StatusCode),
 }
 
 pub trait ResultsProducer: Send + Sync {
     fn produce_checker_result(&self, result: &CheckResult) -> Result<(), ExtractCodeError>;
+ 
 }

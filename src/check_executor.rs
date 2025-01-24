@@ -251,7 +251,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        checker::dummy_checker::DummyChecker, producer::dummy_producer::DummyResultsProducer,
+        checker::dummy_checker::DummyChecker,
+        producer::{dummy_producer::DummyResultsProducer, vector_producer::VectorResultsProducer},
         types::check_config::CheckInterval,
     };
 
