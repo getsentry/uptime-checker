@@ -85,7 +85,7 @@ impl RedisConfigProvider {
     }
 
     async fn monitor_configs(&self, manager: Arc<Manager>, shutdown: CancellationToken) {
-        // Start monitoring configs using this provider. Loads the initial configs and (todo)
+        // Start monitoring configs using this provider. Loads the initial configs and
         // monitors redis for updates
         let partitions = self.get_partition_keys();
         self.load_initial_configs(manager.clone(), &partitions)
