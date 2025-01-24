@@ -41,7 +41,7 @@ pub enum ConfigUpdateAction {
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigUpdate {
-    /// Whether we're adding/updating or deleting a config.
+    /// Whether we're upserting or deleting a config.
     pub action: ConfigUpdateAction,
 
     /// The subscription this check configuration is associated to in sentry.
@@ -159,7 +159,7 @@ impl RedisConfigProvider {
                 let mut pipe = redis::pipe();
                 // We fetch all updates from the list and then delete the key. We do this
                 // atomically so that there isn't any chance of a race
-                let (config_adds, config_deletes) = pipe
+                let (config_upserts, config_deletes) = pipe
                     .atomic()
                     .hvals(&partition.update_key)
                     .del(&partition.update_key)
@@ -178,12 +178,12 @@ impl RedisConfigProvider {
                         })
                     })
                     .filter_map(Result::ok)
-                    .fold((vec![], vec![]), |(mut adds, mut deletes), update| {
+                    .fold((vec![], vec![]), |(mut upserts, mut deletes), update| {
                         match update.action {
-                            ConfigUpdateAction::Upsert => adds.push(update),
+                            ConfigUpdateAction::Upsert => upserts.push(update),
                             ConfigUpdateAction::Delete => deletes.push(update),
                         }
-                        (adds, deletes)
+                        (upserts, deletes)
                     });
 
                 config_deletes.into_iter().for_each(|config_delete| {
@@ -199,14 +199,14 @@ impl RedisConfigProvider {
                     );
                 });
 
-                if config_adds.is_empty() {
+                if config_upserts.is_empty() {
                     continue;
                 }
 
                 let config_payloads: Vec<Vec<u8>> = conn
                     .hget(
                         partition.config_key.clone(),
-                        config_adds
+                        config_upserts
                             .iter()
                             .map(|config| config.redis_key())
                             .collect::<Vec<_>>(),
@@ -223,7 +223,7 @@ impl RedisConfigProvider {
                     tracing::debug!(
                         partition = partition.partition,
                         subscription_id = %config.subscription_id,
-                        "redis_config_provider.adding_config"
+                        "redis_config_provider.upserting_config"
                     );
                     manager
                         .get_service(partition.partition)
