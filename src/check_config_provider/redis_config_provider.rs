@@ -6,6 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{app::config::Config, manager::Manager, types::check_config::CheckConfig};
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::time::Duration;
@@ -84,13 +85,20 @@ impl RedisConfigProvider {
         })
     }
 
-    async fn monitor_configs(&self, manager: Arc<Manager>, shutdown: CancellationToken) {
+    async fn monitor_configs(
+        &self,
+        manager: Arc<Manager>,
+        shutdown: CancellationToken,
+        region: String,
+    ) {
         // Start monitoring configs using this provider. Loads the initial configs and
         // monitors redis for updates
         let partitions = self.get_partition_keys();
-        self.load_initial_configs(manager.clone(), &partitions)
+        metrics::gauge!("config_provider.redis.boot.partitions", "uptime_region" => region.clone())
+            .set(partitions.len() as f64);
+        self.load_initial_configs(manager.clone(), &partitions, region.clone())
             .await;
-        self.monitor_updates(manager.clone(), &partitions, shutdown)
+        self.monitor_updates(manager.clone(), &partitions, shutdown, region)
             .await;
     }
 
@@ -102,7 +110,12 @@ impl RedisConfigProvider {
             .collect()
     }
 
-    async fn load_initial_configs(&self, manager: Arc<Manager>, partitions: &[RedisPartition]) {
+    async fn load_initial_configs(
+        &self,
+        manager: Arc<Manager>,
+        partitions: &[RedisPartition],
+        region: String,
+    ) {
         // Fetch configs for all partitions from Redis and register them with the manager
         // TODO: Should we also register all the partitions here, or elsewhere?
         let mut conn = self
@@ -110,9 +123,14 @@ impl RedisConfigProvider {
             .get_multiplexed_tokio_connection()
             .await
             .expect("Unable to connect to Redis");
+        metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region.clone())
+            .set(partitions.len() as f64);
+
+        let start_loading = Utc::now();
 
         // Initial load of all configs for all partitions
         for partition in partitions {
+            let partition_start_loading = Utc::now();
             let config_payloads: Vec<Vec<u8>> = conn
                 .hvals(&partition.config_key)
                 .await
@@ -122,6 +140,8 @@ impl RedisConfigProvider {
                 config_count = config_payloads.len(),
                 "redis_config_provider.loading_initial_configs"
             );
+            metrics::gauge!("config_provider.initial_load.partition_size", "uptime_region" => region.clone())
+                .set(config_payloads.len() as f64);
 
             for config_payload in config_payloads {
                 let config: CheckConfig = rmp_serde::from_slice(&config_payload)
@@ -136,7 +156,26 @@ impl RedisConfigProvider {
                     .unwrap()
                     .add_config(Arc::new(config));
             }
+            let partition_loading_time = (Utc::now() - partition_start_loading)
+                .to_std()
+                .unwrap()
+                .as_secs_f64();
+            metrics::histogram!(
+                "config_provider.initial_load.partition.duration",
+                "histogram" => "timer",
+                "uptime_region" => region.clone(),
+            )
+            .record(partition_loading_time);
         }
+
+        let loading_time = (Utc::now() - start_loading).to_std().unwrap().as_secs_f64();
+
+        metrics::histogram!(
+            "config_provider.initial_load.duration",
+            "histogram" => "timer",
+            "uptime_region" => region.clone(),
+        )
+        .record(loading_time);
     }
 
     async fn monitor_updates(
@@ -144,6 +183,7 @@ impl RedisConfigProvider {
         manager: Arc<Manager>,
         partitions: &[RedisPartition],
         shutdown: CancellationToken,
+        region: String,
     ) {
         let mut conn = self
             .redis
@@ -155,7 +195,13 @@ impl RedisConfigProvider {
         while !shutdown.is_cancelled() {
             let _ = interval.tick().await;
 
+            let update_start = Utc::now();
+
+            metrics::gauge!("config_provider.updater.partitions", "uptime_region" => region.clone())
+                .set(partitions.len() as f64);
+
             for partition in partitions.iter() {
+                let partition_update_start = Utc::now();
                 let mut pipe = redis::pipe();
                 // We fetch all updates from the list and then delete the key. We do this
                 // atomically so that there isn't any chance of a race
@@ -185,6 +231,11 @@ impl RedisConfigProvider {
                         }
                         (upserts, deletes)
                     });
+
+                metrics::counter!("config_provider.updater.upserts", "uptime_region" => region.clone())
+                    .increment(config_upserts.len() as u64);
+                metrics::counter!("config_provider.updater.deletes", "uptime_region" => region.clone())
+                    .increment(config_deletes.len() as u64);
 
                 config_deletes.into_iter().for_each(|config_delete| {
                     manager
@@ -232,7 +283,24 @@ impl RedisConfigProvider {
                         .unwrap()
                         .add_config(Arc::new(config));
                 }
+                let partition_update_duration = (Utc::now() - partition_update_start)
+                    .to_std()
+                    .unwrap()
+                    .as_secs_f64();
+                metrics::histogram!(
+                    "config_provider.updater.partition.duration",
+                    "histogram" => "timer",
+                    "uptime_region" => region.clone(),
+                )
+                .record(partition_update_duration);
             }
+            let update_duration = (Utc::now() - update_start).to_std().unwrap().as_secs_f64();
+            metrics::histogram!(
+                "config_provider.updater.duration",
+                "histogram" => "timer",
+                "uptime_region" => region.clone(),
+            )
+            .record(update_duration);
         }
     }
 }
@@ -251,10 +319,14 @@ pub fn run_config_provider(
     )
     .expect("Failed to create Redis config provider");
 
+    let region = config.region.clone();
     tokio::spawn(async move {
         let monitor_shutdown = shutdown.clone();
-        let monitor_task =
-            tokio::spawn(async move { provider.monitor_configs(manager, monitor_shutdown).await });
+        let monitor_task = tokio::spawn(async move {
+            provider
+                .monitor_configs(manager, monitor_shutdown, region)
+                .await
+        });
 
         tokio::select! {
             _ = shutdown.cancelled() => {
