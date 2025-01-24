@@ -2,56 +2,69 @@ use crate::producer::{ExtractCodeError, ResultsProducer};
 use crate::types::result::CheckResult;
 use reqwest::Client;
 use sentry_kafka_schemas::Schema;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::task::JoinHandle;
 
 pub struct VectorResultsProducer {
     schema: Schema,
-    client: Client,
-    endpoint: String,
+    sender: UnboundedSender<Vec<u8>>,
+    _worker: JoinHandle<()>,
 }
 
 impl VectorResultsProducer {
     pub fn new(topic_name: &str) -> Self {
+        Self::new_with_endpoint(topic_name, "http://localhost:8020".to_string())
+    }
+
+    pub fn new_with_endpoint(topic_name: &str, endpoint: String) -> Self {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
+        
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let worker = Self::spawn_worker(client, endpoint, receiver);
+
         Self { 
-            schema, 
-            client,
-            endpoint: "http://localhost:8020".to_string()
+            schema,
+            sender,
+            _worker: worker,
         }
     }
+
+    fn spawn_worker(client: Client, endpoint: String, mut receiver: UnboundedReceiver<Vec<u8>>) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            while let Some(json) = receiver.recv().await {
+                // Make POST request to Vector
+                if let Err(e) = client
+                    .post(&endpoint)
+                    .body(json)
+                    .send()
+                    .await
+                {
+                    tracing::error!(error = ?e, "Failed to send request to Vector");
+                    continue;
+                }
+            }
+            tracing::info!("Vector producer worker shutting down");
+        })
+    }
 }
-
-
 
 impl ResultsProducer for VectorResultsProducer {
     fn produce_checker_result(&self, result: &CheckResult) -> Result<(), ExtractCodeError> {
         let json = serde_json::to_vec(result)?;
         self.schema.validate_json(&json)?;
         
-        // Spawn a tokio task to make the async request
-        let client = self.client.clone();
-        let endpoint = self.endpoint.clone();
-
-        tokio::spawn(async move {
-            // Make POST request to Vector
-            let response = client
-                .post(&endpoint)
-                .body(json)
-                .send()
-                .await
-                .map_err(ExtractCodeError::VectorRequestError)?;
-
-            if !response.status().is_success() {
-                return Err(ExtractCodeError::VectorRequestStatusError(response.status()));
-            }
-
-            Ok(())
-        });
+        // Send the serialized result to the worker task
+        if self.sender.send(json).is_err() {
+            tracing::error!("Failed to send result to Vector worker - channel closed");
+            return Err(ExtractCodeError::VectorRequestStatusError(
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR
+            ));
+        }
 
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -70,8 +83,9 @@ mod tests {
     use uuid::{uuid, Uuid};
     use httpmock::prelude::*;
     use httpmock::Method;
+    use tokio::time::sleep;
+    use std::time::Duration;
 
- 
     #[tokio::test]
     async fn test() {
         // Start a mock server
@@ -105,14 +119,12 @@ mod tests {
             then.status(200);
         });
 
-        let mut producer = VectorResultsProducer::new("uptime-results");
-        producer.endpoint = mock_server.url("/");
-
+        let producer = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         let result = producer.produce_checker_result(&expected_result);
         assert!(result.is_ok());
 
-        // Give the async task time to complete
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Give the worker task time to process the message
+        sleep(Duration::from_millis(100)).await;
         
         get_mock.assert();
     }
@@ -151,16 +163,12 @@ mod tests {
                 .body("Internal Server Error");
         });
 
-        let mut producer = VectorResultsProducer::new("uptime-results");
-        producer.endpoint = mock_server.url("/");
-
+        let producer = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         let result = producer.produce_checker_result(&test_result);
-        
-        // The initial result should be Ok since the error happens in the spawned task
         assert!(result.is_ok());
 
-        // Give the async task time to complete
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Give the worker task time to process the message
+        sleep(Duration::from_millis(100)).await;
         
         error_mock.assert();
     }

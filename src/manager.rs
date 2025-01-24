@@ -1,5 +1,4 @@
 use futures::{Future, StreamExt};
-use rust_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::Vacant;
 use std::pin::Pin;
 use std::{
@@ -19,7 +18,7 @@ use crate::{
     app::config::Config,
     checker::http_checker::HttpChecker,
     config_store::{ConfigStore, RwConfigStore},
-    producer::kafka_producer::KafkaResultsProducer,
+    producer::vector_producer::VectorResultsProducer,
     scheduler::run_scheduler,
 };
 
@@ -108,16 +107,8 @@ impl Manager {
     pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
         let checker = Arc::new(HttpChecker::new(!config.allow_internal_ips));
 
-        let kafka_overrides = HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
-
-        let kafka_config = KafkaConfig::new_config(
-            config.results_kafka_cluster.to_owned(),
-            Some(kafka_overrides),
-        );
-
-        let producer = Arc::new(KafkaResultsProducer::new(
+        let producer = Arc::new(VectorResultsProducer::new(
             &config.results_kafka_topic,
-            kafka_config,
         ));
 
         // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
