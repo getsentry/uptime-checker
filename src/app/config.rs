@@ -79,7 +79,7 @@ pub struct Config {
     /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
 
-    // How frequently to poll redis for config updates when using the redis config provider
+    /// How frequently to poll redis for config updates when using the redis config provider
     pub config_provider_redis_update_ms: u64,
 
     /// The general purpose redis node to use with this service

@@ -33,11 +33,11 @@ impl RedisPartition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigUpdateAction {
-    Add,
+    Upsert,
     Delete,
 }
 
-/// The CheckConfig represents a configuration for a single check.
+/// The ConfigUpdate is a notification that a ConfigMessage was upserted or deleted.
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigUpdate {
@@ -159,13 +159,16 @@ impl RedisConfigProvider {
                 let mut pipe = redis::pipe();
                 // We fetch all updates from the list and then delete the key. We do this
                 // atomically so that there isn't any chance of a race
-                let (config_adds, config_deletes): (Vec<_>, Vec<_>) = pipe
+                let (config_adds, config_deletes) = pipe
                     .atomic()
                     .hvals(&partition.update_key)
                     .del(&partition.update_key)
                     .query_async::<(Vec<Vec<u8>>, ())>(&mut conn)
                     .await
-                    .unwrap()
+                    .unwrap_or_else(|err| {
+                        tracing::error!(?err, "redis_config_provider.redis_query_failed");
+                        (vec![], ())
+                    })
                     .0 // Get just the LRANGE results
                     .iter()
                     .map(|payload| {
@@ -175,7 +178,13 @@ impl RedisConfigProvider {
                         })
                     })
                     .filter_map(Result::ok)
-                    .partition(|cu| cu.action == ConfigUpdateAction::Add);
+                    .fold((vec![], vec![]), |(mut adds, mut deletes), update| {
+                        match update.action {
+                            ConfigUpdateAction::Upsert => adds.push(update),
+                            ConfigUpdateAction::Delete => deletes.push(update),
+                        }
+                        (adds, deletes)
+                    });
 
                 config_deletes.into_iter().for_each(|config_delete| {
                     manager
@@ -379,7 +388,7 @@ mod tests {
         config: &CheckConfig,
     ) {
         let update = ConfigUpdate {
-            action: ConfigUpdateAction::Add,
+            action: ConfigUpdateAction::Upsert,
             subscription_id: config.subscription_id,
         };
         let config_msg = rmp_serde::to_vec(&config).unwrap();
