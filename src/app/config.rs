@@ -84,7 +84,7 @@ pub struct Config {
 
     /// How many config partitions do we want to keep in redis? We shouldn't change this once
     /// assigned unless we plan a migration process.
-    pub config_provider_redis_total_partitions: u64,
+    pub config_provider_redis_total_partitions: u16,
 
     /// The general purpose redis node to use with this service
     pub redis_host: String,
@@ -99,7 +99,7 @@ pub struct Config {
     pub checker_id: String,
 
     /// Total number of uptime checkers running
-    pub total_checkers: usize,
+    pub total_checkers: u16,
 }
 
 impl Default for Config {
