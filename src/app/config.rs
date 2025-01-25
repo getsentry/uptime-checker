@@ -96,10 +96,10 @@ pub struct Config {
     pub allow_internal_ips: bool,
 
     /// Name of the pod that is running
-    pub pod_name: String,
+    pub checker_id: String,
 
-    /// Total number of uptime checker pods running
-    pub total_pods: usize,
+    /// Total number of uptime checkers running
+    pub total_checkers: usize,
 }
 
 impl Default for Config {
@@ -125,8 +125,8 @@ impl Default for Config {
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
             allow_internal_ips: false,
-            pod_name: "default".to_owned(),
-            total_pods: 1,
+            checker_id: "default".to_owned(),
+            total_checkers: 1,
         }
     }
 }
@@ -217,8 +217,8 @@ mod tests {
                     redis_host: "redis://127.0.0.1:6379".to_owned(),
                     region: "default".to_owned(),
                     allow_internal_ips: false,
-                    pod_name: "default".to_owned(),
-                    total_pods: 1,
+                    checker_id: "default".to_owned(),
+                    total_checkers: 1,
                 }
             );
             Ok(())
@@ -253,8 +253,8 @@ mod tests {
             jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
             jail.set_env("UPTIME_CHECKER_REGION", "us-west");
             jail.set_env("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true");
-            jail.set_env("UPTIME_CHECKER_POD_NAME", "somePodName");
-            jail.set_env("UPTIME_CHECKER_TOTAL_PODS", "5");
+            jail.set_env("UPTIME_CHECKER_CHECKER_ID", "somePodName");
+            jail.set_env("UPTIME_CHECKER_TOTAL_CHECKERS", "5");
             let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
                 log_level: Some(logging::Level::Trace),
@@ -287,8 +287,8 @@ mod tests {
                     redis_host: "10.0.0.3:6379".to_owned(),
                     region: "us-west".to_owned(),
                     allow_internal_ips: true,
-                    pod_name: "somePodName".to_owned(),
-                    total_pods: 5,
+                    checker_id: "somePodName".to_owned(),
+                    total_checkers: 5,
                 }
             );
             Ok(())
