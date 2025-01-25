@@ -433,6 +433,7 @@ mod tests {
     #[redis_test(start_paused = false)]
     async fn test_redis_config_provider_load() {
         let (config, mut conn, partitions, manager, shutdown) = setup_test().await;
+        assert_eq!(partitions.len(), 2);
         let partition_configs = partitions
             .iter()
             .map(|p| {
@@ -519,7 +520,7 @@ mod tests {
     #[redis_test(start_paused = false)]
     async fn test_redis_config_provider_updates() {
         let (config, conn, partitions, manager, shutdown) = setup_test().await;
-
+        assert_eq!(partitions.len(), 2);
         let _handle = run_config_provider(&config, manager.clone(), shutdown.clone());
 
         tokio::time::sleep(Duration::from_millis(30)).await;
