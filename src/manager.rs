@@ -22,6 +22,7 @@ use crate::{
     producer::kafka_producer::KafkaResultsProducer,
     scheduler::run_scheduler,
 };
+use crate::check_config_provider::redis_config_provider::run_config_provider;
 
 /// Represents the set of services that run per partition.
 #[derive(Debug)]
@@ -145,6 +146,11 @@ impl Manager {
                 manager.clone(),
                 manager.shutdown_signal.clone(),
             ),
+            ConfigProviderMode::Redis => run_config_provider(
+                &manager.config,
+                manager.clone(),
+                manager.shutdown_signal.clone(),
+            ),
         };
 
         let shutdown_signal = manager.shutdown_signal.clone();
@@ -235,7 +241,7 @@ impl Manager {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::config::Config;
+    use crate::app::config::{Config, ConfigProviderMode};
     use crate::check_executor::CheckSender;
     use crate::manager::{Manager, PartitionedService};
     use std::collections::{HashMap, HashSet};
@@ -278,6 +284,17 @@ mod tests {
     async fn test_start_stop() {
         let (executor_sender, _) = CheckSender::new();
         let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
+        service.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_start_stop_redis() {
+        let (executor_sender, _) = CheckSender::new();
+        let config = Config {
+            config_provider_mode: ConfigProviderMode::Redis,
+            ..Default::default()
+        };
+        let service = PartitionedService::start(Arc::new(config), executor_sender, 0);
         service.stop().await;
     }
 
