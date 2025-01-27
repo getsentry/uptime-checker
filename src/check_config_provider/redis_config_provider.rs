@@ -347,7 +347,7 @@ pub fn determine_owned_partitions(config: &Config) -> HashSet<u16> {
         .last()
         .expect("checker_id should be in format <name>-<checker_number>")
         .parse()
-        .expect("checker_id does not contain a valid checker_number");
+        .expect("checker_id should contain a valid checker_number");
     if checker_number >= config.total_checkers {
         panic!(
             "checker_number {} must be less than total_checkers {}",
