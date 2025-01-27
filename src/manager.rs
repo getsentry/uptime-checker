@@ -1,4 +1,5 @@
 use futures::{Future, StreamExt};
+use rust_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::Vacant;
 use std::pin::Pin;
 use std::{
@@ -10,10 +11,11 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
-use crate::app::config::ConfigProviderMode;
+use crate::app::config::{ConfigProviderMode, ProducerMode};
 use crate::check_config_provider::kafka_config_provider::run_config_consumer;
 use crate::check_executor::{run_executor, CheckSender};
 use crate::config_waiter::wait_for_partition_boot;
+use crate::producer::kafka_producer::KafkaResultsProducer;
 use crate::{
     app::config::Config,
     checker::http_checker::HttpChecker,
@@ -107,18 +109,36 @@ impl Manager {
     pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
         let checker = Arc::new(HttpChecker::new(!config.allow_internal_ips));
 
-        let producer = Arc::new(VectorResultsProducer::new(
-            &config.results_kafka_topic,
-        ));
-
-        // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
-        // referneces of the Sender (executor_sender) are dropped.
-        let (executor_sender, executor_join_handle) = run_executor(
-            config.checker_concurrency,
-            checker,
-            producer,
-            config.region.clone(),
-        );
+        let (executor_sender, executor_join_handle) = match &config.producer_mode {
+            ProducerMode::Vector => {
+                let producer = Arc::new(VectorResultsProducer::new(
+                    &config.results_kafka_topic,
+                ));
+                run_executor(
+                    config.checker_concurrency,
+                    checker.clone(),
+                    producer,
+                    config.region.clone(),
+                )
+            }
+            ProducerMode::Kafka => {
+                let kafka_overrides = HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
+                let kafka_config = KafkaConfig::new_config(
+                    config.results_kafka_cluster.to_owned(),
+                    Some(kafka_overrides),
+                );
+                let producer = Arc::new(KafkaResultsProducer::new(
+                    &config.results_kafka_topic,
+                    kafka_config,
+                ));
+                run_executor(
+                    config.checker_concurrency,
+                    checker.clone(),
+                    producer,
+                    config.region.clone(),
+                )
+            }
+        };
 
         let (shutdown_sender, shutdown_service_rx) = mpsc::unbounded_channel();
 

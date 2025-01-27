@@ -6,7 +6,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::sync::oneshot;
 
-const VECTOR_BATCH_SIZE: usize = 10;
+const VECTOR_BATCH_SIZE: usize = 2;
 
 pub struct VectorResultsProducer {
     schema: Schema,
@@ -74,7 +74,7 @@ impl VectorResultsProducer {
                                     tracing::debug!("Sending request to Vector with body size {}", body.len());
                                     if let Err(e) = client
                                         .post(&endpoint)
-                                        .header("Content-Type", "application/x-ndjson")
+                                        .header("Content-Type", "application/json")
                                         .body(body)
                                         .send()
                                         .await
@@ -109,7 +109,7 @@ impl VectorResultsProducer {
                 tracing::debug!("Sending final request to Vector with body size {}", body.len());
                 if let Err(e) = client
                     .post(&endpoint)
-                    .header("Content-Type", "application/x-ndjson")
+                    .header("Content-Type", "application/json")
                     .body(body)
                     .send()
                     .await
@@ -210,7 +210,7 @@ mod tests {
         let mock = mock_server.mock(|when, then| {
             when.method(Method::POST)
                 .path("/")
-                .header("Content-Type", "application/x-ndjson")
+                .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
                         tracing::debug!("Received request body: {:?}", String::from_utf8_lossy(body));
@@ -301,7 +301,7 @@ mod tests {
         let error_mock = mock_server.mock(|when, then| {
             when.method(Method::POST)
                 .path("/")
-                .header("Content-Type", "application/x-ndjson")
+                .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
                         tracing::debug!("Received request body: {:?}", String::from_utf8_lossy(body));
@@ -310,7 +310,7 @@ mod tests {
                             tracing::debug!("Expected 1 line, got {}", lines.len());
                             return false;
                         }
-                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&lines[0]) {
+                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
                             return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
                                 && value["status"] == "success"
                                 && value["region"] == "us-west-1";

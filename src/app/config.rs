@@ -17,6 +17,13 @@ pub enum ConfigProviderMode {
     Kafka,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProducerMode {
+    Kafka,
+    Vector,
+}
+
 #[serde_as]
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct MetricsConfig {
@@ -79,6 +86,9 @@ pub struct Config {
     /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
 
+    /// which producer to use to send results
+    pub producer_mode: ProducerMode,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -107,6 +117,7 @@ impl Default for Config {
             configs_kafka_cluster: vec![],
             configs_kafka_topic: "uptime-configs".to_owned(),
             config_provider_mode: ConfigProviderMode::Kafka,
+            producer_mode: ProducerMode::Vector,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
             allow_internal_ips: false,
@@ -146,7 +157,7 @@ mod tests {
     use figment::Jail;
     use similar_asserts::assert_eq;
 
-    use crate::{app::cli, logging};
+    use crate::{app::{cli, config::ProducerMode}, logging};
 
     use super::{Config, ConfigProviderMode, MetricsConfig};
 
@@ -195,6 +206,7 @@ mod tests {
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     config_provider_mode: ConfigProviderMode::Kafka,
+                    producer_mode: ProducerMode::Kafka,
                     redis_host: "redis://127.0.0.1:6379".to_owned(),
                     region: "default".to_owned(),
                     allow_internal_ips: false,
@@ -257,6 +269,7 @@ mod tests {
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     config_provider_mode: ConfigProviderMode::Kafka,
+                    producer_mode: ProducerMode::Kafka,
                     redis_host: "10.0.0.3:6379".to_owned(),
                     region: "us-west".to_owned(),
                     allow_internal_ips: true,
