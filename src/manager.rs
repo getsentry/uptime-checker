@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::app::config::ConfigProviderMode;
 use crate::check_config_provider::kafka_config_provider::run_config_consumer;
+use crate::check_config_provider::redis_config_provider::run_config_provider;
 use crate::check_executor::{run_executor, CheckSender};
 use crate::config_waiter::wait_for_partition_boot;
 use crate::{
@@ -22,7 +23,6 @@ use crate::{
     producer::kafka_producer::KafkaResultsProducer,
     scheduler::run_scheduler,
 };
-use crate::check_config_provider::redis_config_provider::run_config_provider;
 
 /// Represents the set of services that run per partition.
 #[derive(Debug)]
