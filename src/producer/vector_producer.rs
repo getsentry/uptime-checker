@@ -323,4 +323,51 @@ mod tests {
         let _ = worker.await;
         error_mock.assert();
     }
+
+    #[tokio::test]
+    async fn test_flush_on_shutdown() {
+        let mock_server = MockServer::start();
+        tracing::debug!("Mock server started at {}", mock_server.url("/"));
+        // Create a mock that expects a single request with less than BATCH_SIZE events
+        let mock = mock_server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/")
+                .header("Content-Type", "application/json")
+                .matches(|req| {
+                    if let Some(body) = &req.body {
+                        tracing::debug!("Received request body: {:?}", String::from_utf8_lossy(body));
+                        let lines: Vec<_> = body.split(|&b| b == b'\n').filter(|l| !l.is_empty()).collect();
+                        // We expect only 1 event, which is less than BATCH_SIZE
+                        if lines.len() != 1 {
+                            tracing::debug!("Expected 1 line, got {}", lines.len());
+                            return false;
+                        }
+                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
+                            return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
+                                && value["status"] == "success"
+                                && value["region"] == "us-west-1";
+                        }
+                    }
+                    false
+                });
+            then.status(200);
+        });
+
+        let (producer, worker, shutdown) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        
+        // Send a single event (less than BATCH_SIZE)
+        let test_result = create_test_result();
+        let result = producer.produce_checker_result(&test_result);
+        assert!(result.is_ok());
+
+        // Give the worker a moment to process the event
+        sleep(Duration::from_millis(50)).await;
+
+        // Trigger shutdown
+        let _ = shutdown.send(());
+        let _ = worker.await;
+
+        // Verify that the event was sent despite not reaching BATCH_SIZE
+        mock.assert();
+    }
 }
