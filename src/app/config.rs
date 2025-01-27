@@ -82,6 +82,10 @@ pub struct Config {
     /// How frequently to poll redis for config updates when using the redis config provider
     pub config_provider_redis_update_ms: u64,
 
+    /// How many config partitions do we want to keep in redis? We shouldn't change this once
+    /// assigned unless we plan a migration process.
+    pub config_provider_redis_total_partitions: u64,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -90,6 +94,12 @@ pub struct Config {
 
     /// Allow uptime checks against internal IP addresses
     pub allow_internal_ips: bool,
+
+    /// Name of the pod that is running
+    pub checker_id: String,
+
+    /// Total number of uptime checkers running
+    pub total_checkers: usize,
 }
 
 impl Default for Config {
@@ -111,9 +121,12 @@ impl Default for Config {
             configs_kafka_topic: "uptime-configs".to_owned(),
             config_provider_mode: ConfigProviderMode::Kafka,
             config_provider_redis_update_ms: 1000,
+            config_provider_redis_total_partitions: 128,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
             allow_internal_ips: false,
+            checker_id: "default".to_owned(),
+            total_checkers: 1,
         }
     }
 }
@@ -200,9 +213,12 @@ mod tests {
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     config_provider_mode: ConfigProviderMode::Kafka,
                     config_provider_redis_update_ms: 1000,
+                    config_provider_redis_total_partitions: 128,
                     redis_host: "redis://127.0.0.1:6379".to_owned(),
                     region: "default".to_owned(),
                     allow_internal_ips: false,
+                    checker_id: "default".to_owned(),
+                    total_checkers: 1,
                 }
             );
             Ok(())
@@ -232,10 +248,13 @@ mod tests {
             );
             jail.set_env("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "kafka");
             jail.set_env("UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_UPDATE_MS", "2000");
+            jail.set_env("UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_TOTAL_PARTITIONS", "32");
             jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
             jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
             jail.set_env("UPTIME_CHECKER_REGION", "us-west");
             jail.set_env("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true");
+            jail.set_env("UPTIME_CHECKER_CHECKER_ID", "somePodName");
+            jail.set_env("UPTIME_CHECKER_TOTAL_CHECKERS", "5");
             let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
                 log_level: Some(logging::Level::Trace),
@@ -264,9 +283,12 @@ mod tests {
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     config_provider_mode: ConfigProviderMode::Kafka,
                     config_provider_redis_update_ms: 2000,
+                    config_provider_redis_total_partitions: 32,
                     redis_host: "10.0.0.3:6379".to_owned(),
                     region: "us-west".to_owned(),
                     allow_internal_ips: true,
+                    checker_id: "somePodName".to_owned(),
+                    total_checkers: 5,
                 }
             );
             Ok(())
