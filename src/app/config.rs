@@ -157,7 +157,10 @@ mod tests {
     use figment::Jail;
     use similar_asserts::assert_eq;
 
-    use crate::{app::{cli, config::ProducerMode}, logging};
+    use crate::{
+        app::{cli, config::ProducerMode},
+        logging,
+    };
 
     use super::{Config, ConfigProviderMode, MetricsConfig};
 

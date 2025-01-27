@@ -3,8 +3,8 @@ use crate::types::result::CheckResult;
 use reqwest::Client;
 use sentry_kafka_schemas::Schema;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::task::JoinHandle;
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 const VECTOR_BATCH_SIZE: usize = 2;
 
@@ -18,34 +18,30 @@ impl VectorResultsProducer {
         Self::new_with_endpoint(topic_name, "http://localhost:8020".to_string())
     }
 
-    pub fn new_with_endpoint(topic_name: &str, endpoint: String) -> (Self, JoinHandle<()>, oneshot::Sender<()>) {
+    pub fn new_with_endpoint(
+        topic_name: &str,
+        endpoint: String,
+    ) -> (Self, JoinHandle<()>, oneshot::Sender<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
-        
+
         let (sender, receiver) = mpsc::unbounded_channel();
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let worker = Self::spawn_worker(client, endpoint, receiver, shutdown_receiver);
 
-        (
-            Self { 
-                schema,
-                sender,
-            },
-            worker,
-            shutdown_sender,
-        )
+        (Self { schema, sender }, worker, shutdown_sender)
     }
 
     fn spawn_worker(
-        client: Client, 
-        endpoint: String, 
+        client: Client,
+        endpoint: String,
         mut receiver: UnboundedReceiver<Vec<u8>>,
         mut shutdown_receiver: oneshot::Receiver<()>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             tracing::debug!("Vector producer worker started with endpoint {}", endpoint);
             let mut batch = Vec::with_capacity(VECTOR_BATCH_SIZE);
-            
+
             loop {
                 tokio::select! {
                     _ = &mut shutdown_receiver => {
@@ -58,7 +54,7 @@ impl VectorResultsProducer {
                                 tracing::debug!("Received event of size {}", json.len());
                                 batch.push(json);
                                 tracing::debug!("Current batch size: {}", batch.len());
-                                
+
                                 // Send batch when it reaches BATCH_SIZE
                                 if batch.len() >= VECTOR_BATCH_SIZE {
                                     tracing::debug!("Sending batch of {} events", batch.len());
@@ -67,10 +63,10 @@ impl VectorResultsProducer {
                                         .filter_map(|json| String::from_utf8(json.clone()).ok())
                                         .map(|s| s + "\n")
                                         .collect::<String>();
-                                    
+
                                     // Log the exact payload for debugging
                                     tracing::debug!("Payload being sent:\n{}", body);
-                                    
+
                                     tracing::debug!("Sending request to Vector with body size {}", body.len());
                                     if let Err(e) = client
                                         .post(&endpoint)
@@ -94,19 +90,23 @@ impl VectorResultsProducer {
                     }
                 }
             }
-            
+
             // Send any remaining events in the batch
             if !batch.is_empty() {
                 tracing::debug!("Sending final batch of {} events", batch.len());
-                let body = batch.iter()
+                let body = batch
+                    .iter()
                     .filter_map(|json| String::from_utf8(json.clone()).ok())
                     .collect::<Vec<String>>()
                     .join("\n");
-                
+
                 // Log the exact payload for debugging
                 tracing::debug!("Final payload being sent:\n{}", body);
-                
-                tracing::debug!("Sending final request to Vector with body size {}", body.len());
+
+                tracing::debug!(
+                    "Sending final request to Vector with body size {}",
+                    body.len()
+                );
                 if let Err(e) = client
                     .post(&endpoint)
                     .header("Content-Type", "application/json")
@@ -119,7 +119,7 @@ impl VectorResultsProducer {
                     tracing::debug!("Successfully sent final batch request");
                 }
             }
-            
+
             tracing::info!("Vector producer worker shutting down");
         })
     }
@@ -135,12 +135,12 @@ impl ResultsProducer for VectorResultsProducer {
     fn produce_checker_result(&self, result: &CheckResult) -> Result<(), ExtractCodeError> {
         let json = serde_json::to_vec(result)?;
         self.schema.validate_json(&json)?;
-        
+
         // Send the serialized result to the worker task
         if self.sender.send(json).is_err() {
             tracing::error!("Failed to send result to Vector worker - channel closed");
             return Err(ExtractCodeError::VectorRequestStatusError(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             ));
         }
 
@@ -161,12 +161,12 @@ mod tests {
         },
     };
     use chrono::{TimeDelta, Utc};
-    use sentry::protocol::SpanId;
-    use uuid::{uuid, Uuid};
     use httpmock::prelude::*;
     use httpmock::Method;
-    use tokio::time::sleep;
+    use sentry::protocol::SpanId;
     use std::time::Duration;
+    use tokio::time::sleep;
+    use uuid::{uuid, Uuid};
 
     fn create_test_result() -> CheckResult {
         CheckResult {
@@ -195,15 +195,21 @@ mod tests {
         let mock_server = MockServer::start();
         tracing::debug!("Mock server started at {}", mock_server.url("/"));
         let test_result = create_test_result();
-        
+
         let mock = mock_server.mock(|when, then| {
             when.method(Method::POST)
                 .path("/")
                 .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
-                        tracing::debug!("Received request body: {:?}", String::from_utf8_lossy(body));
-                        let lines: Vec<_> = body.split(|&b| b == b'\n').filter(|l| !l.is_empty()).collect();
+                        tracing::debug!(
+                            "Received request body: {:?}",
+                            String::from_utf8_lossy(body)
+                        );
+                        let lines: Vec<_> = body
+                            .split(|&b| b == b'\n')
+                            .filter(|l| !l.is_empty())
+                            .collect();
                         if lines.len() != 1 {
                             tracing::debug!("Expected 1 line, got {}", lines.len());
                             return false;
@@ -219,7 +225,8 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker, shutdown) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker, shutdown) =
+            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
@@ -234,8 +241,9 @@ mod tests {
     async fn test_batch_events() {
         let mock_server = MockServer::start();
         tracing::debug!("Mock server started at {}", mock_server.url("/"));
-        let (producer, worker, shutdown) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
-        
+        let (producer, worker, shutdown) =
+            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+
         // Create and send BATCH_SIZE + 2 events
         for i in 0..(VECTOR_BATCH_SIZE + 2) {
             tracing::debug!("Sending event {}", i + 1);
@@ -251,17 +259,28 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
-                        tracing::debug!("Received request body: {:?}", String::from_utf8_lossy(body));
-                        let lines: Vec<_> = body.split(|&b| b == b'\n').filter(|l| !l.is_empty()).collect();
+                        tracing::debug!(
+                            "Received request body: {:?}",
+                            String::from_utf8_lossy(body)
+                        );
+                        let lines: Vec<_> = body
+                            .split(|&b| b == b'\n')
+                            .filter(|l| !l.is_empty())
+                            .collect();
                         let len = lines.len();
                         if len != VECTOR_BATCH_SIZE && len != 2 {
-                            tracing::debug!("Expected {} or 2 lines, got {}", VECTOR_BATCH_SIZE, len);
+                            tracing::debug!(
+                                "Expected {} or 2 lines, got {}",
+                                VECTOR_BATCH_SIZE,
+                                len
+                            );
                             return false;
                         }
                         // Verify each line is valid JSON with expected fields
                         lines.iter().all(|line| {
                             if let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) {
-                                return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
+                                return value["subscription_id"]
+                                    == "23d6048d67c948d9a19c0b47979e9a03"
                                     && value["status"] == "success"
                                     && value["region"] == "us-west-1";
                             }
@@ -278,7 +297,7 @@ mod tests {
         sleep(Duration::from_millis(100)).await;
         let _ = shutdown.send(());
         let _ = worker.await;
-        
+
         // We expect 2 requests: one with BATCH_SIZE events and one with 2 events
         mock.assert_hits(2);
     }
@@ -295,8 +314,14 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
-                        tracing::debug!("Received request body: {:?}", String::from_utf8_lossy(body));
-                        let lines: Vec<_> = body.split(|&b| b == b'\n').filter(|l| !l.is_empty()).collect();
+                        tracing::debug!(
+                            "Received request body: {:?}",
+                            String::from_utf8_lossy(body)
+                        );
+                        let lines: Vec<_> = body
+                            .split(|&b| b == b'\n')
+                            .filter(|l| !l.is_empty())
+                            .collect();
                         if lines.len() != 1 {
                             tracing::debug!("Expected 1 line, got {}", lines.len());
                             return false;
@@ -309,11 +334,11 @@ mod tests {
                     }
                     false
                 });
-            then.status(500)
-                .body("Internal Server Error");
+            then.status(500).body("Internal Server Error");
         });
 
-        let (producer, worker, shutdown) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker, shutdown) =
+            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
@@ -335,8 +360,14 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
-                        tracing::debug!("Received request body: {:?}", String::from_utf8_lossy(body));
-                        let lines: Vec<_> = body.split(|&b| b == b'\n').filter(|l| !l.is_empty()).collect();
+                        tracing::debug!(
+                            "Received request body: {:?}",
+                            String::from_utf8_lossy(body)
+                        );
+                        let lines: Vec<_> = body
+                            .split(|&b| b == b'\n')
+                            .filter(|l| !l.is_empty())
+                            .collect();
                         // We expect only 1 event, which is less than BATCH_SIZE
                         if lines.len() != 1 {
                             tracing::debug!("Expected 1 line, got {}", lines.len());
@@ -353,8 +384,9 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker, shutdown) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
-        
+        let (producer, worker, shutdown) =
+            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+
         // Send a single event (less than BATCH_SIZE)
         let test_result = create_test_result();
         let result = producer.produce_checker_result(&test_result);

@@ -24,5 +24,4 @@ pub enum ExtractCodeError {
 
 pub trait ResultsProducer: Send + Sync {
     fn produce_checker_result(&self, result: &CheckResult) -> Result<(), ExtractCodeError>;
- 
 }
