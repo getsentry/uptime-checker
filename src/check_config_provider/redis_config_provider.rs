@@ -639,5 +639,4 @@ mod tests {
     async fn test_determine_owned_partitions_invalid() {
         run_determine_owned_partition_test(2, "test-a", 1, vec![0, 1]);
     }
-
 }
