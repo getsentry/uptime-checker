@@ -117,7 +117,7 @@ impl Default for Config {
             configs_kafka_cluster: vec![],
             configs_kafka_topic: "uptime-configs".to_owned(),
             config_provider_mode: ConfigProviderMode::Kafka,
-            producer_mode: ProducerMode::Vector,
+            producer_mode: ProducerMode::Kafka,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
             allow_internal_ips: false,
