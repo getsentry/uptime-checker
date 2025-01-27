@@ -8,7 +8,6 @@ use std::{
 };
 use tokio::sync::{
     mpsc::{self, UnboundedSender},
-    oneshot,
 };
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -112,10 +111,10 @@ impl Manager {
     pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
         let checker = Arc::new(HttpChecker::new(!config.allow_internal_ips));
 
-        let (executor_sender, (executor_join_handle, results_worker, results_shutdown_sender)) =
+        let (executor_sender, (executor_join_handle, results_worker)) =
             match &config.producer_mode {
                 ProducerMode::Vector => {
-                    let (results_producer, results_worker, results_shutdown_sender) =
+                    let (results_producer, results_worker) =
                         VectorResultsProducer::new(&config.results_kafka_topic);
                     let (executor_sender, executor_handle) = run_executor(
                         config.checker_concurrency,
@@ -125,7 +124,7 @@ impl Manager {
                     );
                     (
                         executor_sender,
-                        (executor_handle, results_worker, results_shutdown_sender),
+                        (executor_handle, results_worker),
                     )
                 }
                 ProducerMode::Kafka => {
@@ -146,8 +145,7 @@ impl Manager {
                         config.region.clone(),
                     );
                     let dummy_worker = tokio::spawn(async {});
-                    let (shutdown_sender, _) = oneshot::channel();
-                    (sender, (handle, dummy_worker, shutdown_sender))
+                    (sender, (handle, dummy_worker))
                 }
             };
 
@@ -189,9 +187,6 @@ impl Manager {
                 consumer_join_handle.await.expect("Failed to stop consumer");
 
                 results_worker.await.expect("Failed to stop vector worker");
-                results_shutdown_sender
-                    .send(())
-                    .expect("Failed to send shutdown signal");
 
                 executor_join_handle.await.expect("Failed to stop executor");
                 services_join_handle

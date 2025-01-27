@@ -3,7 +3,6 @@ use crate::types::result::CheckResult;
 use reqwest::Client;
 use sentry_kafka_schemas::Schema;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 const VECTOR_BATCH_SIZE: usize = 2;
@@ -14,80 +13,62 @@ pub struct VectorResultsProducer {
 }
 
 impl VectorResultsProducer {
-    pub fn new(topic_name: &str) -> (Self, JoinHandle<()>, oneshot::Sender<()>) {
+    pub fn new(topic_name: &str) -> (Self, JoinHandle<()>) {
         Self::new_with_endpoint(topic_name, "http://localhost:8020".to_string())
     }
 
     pub fn new_with_endpoint(
         topic_name: &str,
         endpoint: String,
-    ) -> (Self, JoinHandle<()>, oneshot::Sender<()>) {
+    ) -> (Self, JoinHandle<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
 
         let (sender, receiver) = mpsc::unbounded_channel();
-        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let worker = Self::spawn_worker(client, endpoint, receiver, shutdown_receiver);
+        let worker = Self::spawn_worker(client, endpoint, receiver);
 
-        (Self { schema, sender }, worker, shutdown_sender)
+        (Self { schema, sender }, worker)
     }
 
     fn spawn_worker(
         client: Client,
         endpoint: String,
         mut receiver: UnboundedReceiver<Vec<u8>>,
-        mut shutdown_receiver: oneshot::Receiver<()>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             tracing::debug!("Vector producer worker started with endpoint {}", endpoint);
             let mut batch = Vec::with_capacity(VECTOR_BATCH_SIZE);
 
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_receiver => {
-                        tracing::debug!("Received shutdown signal");
-                        break;
+            while let Some(json) = receiver.recv().await {
+                tracing::debug!("Received event of size {}", json.len());
+                batch.push(json);
+                tracing::debug!("Current batch size: {}", batch.len());
+
+                // Send batch when it reaches BATCH_SIZE
+                if batch.len() >= VECTOR_BATCH_SIZE {
+                    tracing::debug!("Sending batch of {} events", batch.len());
+                    // Convert each JSON bytes to string and ensure each line ends with a newline
+                    let body = batch.iter()
+                        .filter_map(|json| String::from_utf8(json.clone()).ok())
+                        .map(|s| s + "\n")
+                        .collect::<String>();
+
+                    // Log the exact payload for debugging
+                    tracing::debug!("Payload being sent:\n{}", body);
+
+                    tracing::debug!("Sending request to Vector with body size {}", body.len());
+                    if let Err(e) = client
+                        .post(&endpoint)
+                        .header("Content-Type", "application/json")
+                        .body(body)
+                        .send()
+                        .await
+                    {
+                        tracing::error!(error = ?e, "Failed to send batch request to Vector");
+                    } else {
+                        tracing::debug!("Successfully sent batch request");
                     }
-                    msg = receiver.recv() => {
-                        match msg {
-                            Some(json) => {
-                                tracing::debug!("Received event of size {}", json.len());
-                                batch.push(json);
-                                tracing::debug!("Current batch size: {}", batch.len());
-
-                                // Send batch when it reaches BATCH_SIZE
-                                if batch.len() >= VECTOR_BATCH_SIZE {
-                                    tracing::debug!("Sending batch of {} events", batch.len());
-                                    // Convert each JSON bytes to string and ensure each line ends with a newline
-                                    let body = batch.iter()
-                                        .filter_map(|json| String::from_utf8(json.clone()).ok())
-                                        .map(|s| s + "\n")
-                                        .collect::<String>();
-
-                                    // Log the exact payload for debugging
-                                    tracing::debug!("Payload being sent:\n{}", body);
-
-                                    tracing::debug!("Sending request to Vector with body size {}", body.len());
-                                    if let Err(e) = client
-                                        .post(&endpoint)
-                                        .header("Content-Type", "application/json")
-                                        .body(body)
-                                        .send()
-                                        .await
-                                    {
-                                        tracing::error!(error = ?e, "Failed to send batch request to Vector");
-                                    } else {
-                                        tracing::debug!("Successfully sent batch request");
-                                    }
-                                    batch.clear();
-                                }
-                            }
-                            None => {
-                                tracing::debug!("Channel closed");
-                                break;
-                            }
-                        }
-                    }
+                    batch.clear();
                 }
             }
 
@@ -225,14 +206,17 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker, shutdown) =
-            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
-        // Wait a bit and then shut down
+        // Wait a bit for the request to be processed
         sleep(Duration::from_millis(100)).await;
-        let _ = shutdown.send(());
+        
+        // Drop the producer which will close the channel
+        drop(producer);
+        
+        // Now we can await the worker
         let _ = worker.await;
         mock.assert();
     }
@@ -241,8 +225,7 @@ mod tests {
     async fn test_batch_events() {
         let mock_server = MockServer::start();
         tracing::debug!("Mock server started at {}", mock_server.url("/"));
-        let (producer, worker, shutdown) =
-            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
 
         // Create and send BATCH_SIZE + 2 events
         for i in 0..(VECTOR_BATCH_SIZE + 2) {
@@ -293,9 +276,13 @@ mod tests {
             then.status(200);
         });
 
-        // Wait a bit and then shut down
+        // Wait a bit for the requests to be processed
         sleep(Duration::from_millis(100)).await;
-        let _ = shutdown.send(());
+        
+        // Drop the producer which will close the channel
+        drop(producer);
+        
+        // Now we can await the worker
         let _ = worker.await;
 
         // We expect 2 requests: one with BATCH_SIZE events and one with 2 events
@@ -337,14 +324,17 @@ mod tests {
             then.status(500).body("Internal Server Error");
         });
 
-        let (producer, worker, shutdown) =
-            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
-        // Wait a bit and then shut down
+        // Wait a bit for the request to be processed
         sleep(Duration::from_millis(100)).await;
-        let _ = shutdown.send(());
+        
+        // Drop the producer which will close the channel
+        drop(producer);
+        
+        // Now we can await the worker
         let _ = worker.await;
         error_mock.assert();
     }
@@ -384,8 +374,7 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker, shutdown) =
-            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
 
         // Send a single event (less than BATCH_SIZE)
         let test_result = create_test_result();
@@ -395,8 +384,10 @@ mod tests {
         // Give the worker a moment to process the event
         sleep(Duration::from_millis(50)).await;
 
-        // Trigger shutdown
-        let _ = shutdown.send(());
+        // Drop the producer which will close the channel
+        drop(producer);
+        
+        // Now we can await the worker
         let _ = worker.await;
 
         // Verify that the event was sent despite not reaching BATCH_SIZE
