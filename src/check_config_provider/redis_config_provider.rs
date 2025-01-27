@@ -601,18 +601,8 @@ mod tests {
         run_determine_owned_partition_test(2, 0, 1, vec![0, 1]);
         run_determine_owned_partition_test(2, 0, 2, vec![0]);
         run_determine_owned_partition_test(2, 1, 2, vec![1]);
-        run_determine_owned_partition_test(
-            100,
-            1,
-            10,
-            vec![1, 11, 21, 31, 41, 51, 61, 71, 81, 91],
-        );
-        run_determine_owned_partition_test(
-            100,
-            9,
-            10,
-            vec![9, 19, 29, 39, 49, 59, 69, 79, 89, 99],
-        );
+        run_determine_owned_partition_test(100, 1, 10, vec![1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
+        run_determine_owned_partition_test(100, 9, 10, vec![9, 19, 29, 39, 49, 59, 69, 79, 89, 99]);
     }
 
     #[tokio::test]
@@ -620,5 +610,4 @@ mod tests {
     async fn test_determine_owned_partitions_checker_number_too_high() {
         run_determine_owned_partition_test(2, 1, 1, vec![0, 1]);
     }
-
 }
