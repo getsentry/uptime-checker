@@ -6,7 +6,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::sync::oneshot;
 
-const BATCH_SIZE: usize = 2;
+const VECTOR_BATCH_SIZE: usize = 10;
 
 pub struct VectorResultsProducer {
     schema: Schema,
@@ -44,7 +44,7 @@ impl VectorResultsProducer {
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             tracing::debug!("Vector producer worker started with endpoint {}", endpoint);
-            let mut batch = Vec::with_capacity(BATCH_SIZE);
+            let mut batch = Vec::with_capacity(VECTOR_BATCH_SIZE);
             
             loop {
                 tokio::select! {
@@ -60,7 +60,7 @@ impl VectorResultsProducer {
                                 tracing::debug!("Current batch size: {}", batch.len());
                                 
                                 // Send batch when it reaches BATCH_SIZE
-                                if batch.len() >= BATCH_SIZE {
+                                if batch.len() >= VECTOR_BATCH_SIZE {
                                     tracing::debug!("Sending batch of {} events", batch.len());
                                     // Convert each JSON bytes to string and ensure each line ends with a newline
                                     let body = batch.iter()
@@ -161,7 +161,7 @@ impl ResultsProducer for VectorResultsProducer {
 
 #[cfg(test)]
 mod tests {
-    use super::{VectorResultsProducer, BATCH_SIZE};
+    use super::{VectorResultsProducer, VECTOR_BATCH_SIZE};
     use crate::{
         producer::ResultsProducer,
         types::{
@@ -219,7 +219,7 @@ mod tests {
                             tracing::debug!("Expected 1 line, got {}", lines.len());
                             return false;
                         }
-                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&lines[0]) {
+                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
                             return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
                                 && value["status"] == "success"
                                 && value["region"] == "us-west-1";
@@ -247,7 +247,7 @@ mod tests {
         let mut producer = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         
         // Create and send BATCH_SIZE + 2 events
-        for i in 0..(BATCH_SIZE + 2) {
+        for i in 0..(VECTOR_BATCH_SIZE + 2) {
             tracing::debug!("Sending event {}", i + 1);
             let test_result = create_test_result();
             let result = producer.produce_checker_result(&test_result);
@@ -264,8 +264,8 @@ mod tests {
                         tracing::debug!("Received request body: {:?}", String::from_utf8_lossy(body));
                         let lines: Vec<_> = body.split(|&b| b == b'\n').filter(|l| !l.is_empty()).collect();
                         let len = lines.len();
-                        if len != BATCH_SIZE && len != 2 {
-                            tracing::debug!("Expected {} or 2 lines, got {}", BATCH_SIZE, len);
+                        if len != VECTOR_BATCH_SIZE && len != 2 {
+                            tracing::debug!("Expected {} or 2 lines, got {}", VECTOR_BATCH_SIZE, len);
                             return false;
                         }
                         // Verify each line is valid JSON with expected fields
