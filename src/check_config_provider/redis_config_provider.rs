@@ -308,13 +308,12 @@ impl RedisConfigProvider {
 pub fn run_config_provider(
     config: &Config,
     manager: Arc<Manager>,
-    partitions: HashSet<u16>,
     shutdown: CancellationToken,
 ) -> JoinHandle<()> {
     // Initializes the redis config provider and starts monitoring for config updates
     let provider = RedisConfigProvider::new(
         &config.redis_host,
-        partitions,
+        determine_owned_partitions(config),
         Duration::from_millis(config.config_provider_redis_update_ms),
     )
     .expect("Failed to create Redis config provider");
@@ -339,6 +338,21 @@ pub fn run_config_provider(
     })
 }
 
+pub fn determine_owned_partitions(config: &Config) -> HashSet<u16> {
+    // Determines which partitions this checker owns based on number of partitions,
+    // number of checkers and checker number
+    if config.checker_number >= config.total_checkers {
+        panic!(
+            "checker_number {} must be less than total_checkers {}",
+            config.checker_number, config.total_checkers
+        );
+    }
+
+    (config.checker_number..config.config_provider_redis_total_partitions)
+        .step_by(config.total_checkers.into())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,7 +362,6 @@ mod tests {
 
     async fn setup_test() -> (
         Config,
-        HashSet<u16>,
         redis::aio::MultiplexedConnection,
         Vec<RedisPartition>,
         Arc<Manager>,
@@ -356,6 +369,9 @@ mod tests {
     ) {
         let config = Config {
             config_provider_redis_update_ms: 10,
+            config_provider_redis_total_partitions: 2,
+            checker_number: 0,
+            total_checkers: 1,
             ..Default::default()
         };
         let test_partitions: HashSet<u16> = vec![0, 1].into_iter().collect();
@@ -384,14 +400,13 @@ mod tests {
         manager.update_partitions(&test_partitions);
         let shutdown = CancellationToken::new();
 
-        (config, test_partitions, conn, partitions, manager, shutdown)
+        (config, conn, partitions, manager, shutdown)
     }
 
     #[redis_test(start_paused = false)]
     async fn test_redis_config_provider_load_no_configs() {
-        let (config, test_partitions, _, _, manager, shutdown) = setup_test().await;
-        let _handle =
-            run_config_provider(&config, manager.clone(), test_partitions, shutdown.clone());
+        let (config, _, _, manager, shutdown) = setup_test().await;
+        let _handle = run_config_provider(&config, manager.clone(), shutdown.clone());
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Verify partitions were created but are empty
@@ -410,7 +425,8 @@ mod tests {
 
     #[redis_test(start_paused = false)]
     async fn test_redis_config_provider_load() {
-        let (config, test_partitions, mut conn, partitions, manager, shutdown) = setup_test().await;
+        let (config, mut conn, partitions, manager, shutdown) = setup_test().await;
+        assert_eq!(partitions.len(), 2);
         let partition_configs = partitions
             .iter()
             .map(|p| {
@@ -436,8 +452,7 @@ mod tests {
                 .unwrap();
         }
 
-        let _handle =
-            run_config_provider(&config, manager.clone(), test_partitions, shutdown.clone());
+        let _handle = run_config_provider(&config, manager.clone(), shutdown.clone());
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -497,10 +512,9 @@ mod tests {
 
     #[redis_test(start_paused = false)]
     async fn test_redis_config_provider_updates() {
-        let (config, test_partitions, conn, partitions, manager, shutdown) = setup_test().await;
-
-        let _handle =
-            run_config_provider(&config, manager.clone(), test_partitions, shutdown.clone());
+        let (config, conn, partitions, manager, shutdown) = setup_test().await;
+        assert_eq!(partitions.len(), 2);
+        let _handle = run_config_provider(&config, manager.clone(), shutdown.clone());
 
         tokio::time::sleep(Duration::from_millis(30)).await;
 
@@ -562,5 +576,38 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(15)).await;
 
         shutdown.cancel();
+    }
+
+    fn run_determine_owned_partition_test(
+        total_partitions: u16,
+        checker_number: u16,
+        total_pods: u16,
+        expected_partitions: Vec<u16>,
+    ) {
+        let config = Config {
+            config_provider_redis_total_partitions: total_partitions,
+            checker_number,
+            total_checkers: total_pods,
+            ..Default::default()
+        };
+        assert_eq!(
+            determine_owned_partitions(&config),
+            expected_partitions.into_iter().collect()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_determine_owned_partitions() {
+        run_determine_owned_partition_test(2, 0, 1, vec![0, 1]);
+        run_determine_owned_partition_test(2, 0, 2, vec![0]);
+        run_determine_owned_partition_test(2, 1, 2, vec![1]);
+        run_determine_owned_partition_test(100, 1, 10, vec![1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
+        run_determine_owned_partition_test(100, 9, 10, vec![9, 19, 29, 39, 49, 59, 69, 79, 89, 99]);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "checker_number 1 must be less than total_checkers 1")]
+    async fn test_determine_owned_partitions_checker_number_too_high() {
+        run_determine_owned_partition_test(2, 1, 1, vec![0, 1]);
     }
 }
