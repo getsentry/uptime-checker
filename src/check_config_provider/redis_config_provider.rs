@@ -341,21 +341,14 @@ pub fn run_config_provider(
 pub fn determine_owned_partitions(config: &Config) -> HashSet<u16> {
     // Determines which partitions this checker owns based on number of partitions,
     // number of checkers and checker number
-    let checker_number: u16 = config
-        .checker_id
-        .split('-')
-        .last()
-        .expect("checker_id should be in format <name>-<checker_number>")
-        .parse()
-        .expect("checker_id should contain a valid checker_number");
-    if checker_number >= config.total_checkers {
+    if config.checker_number >= config.total_checkers {
         panic!(
             "checker_number {} must be less than total_checkers {}",
-            checker_number, config.total_checkers
+            config.checker_number, config.total_checkers
         );
     }
 
-    (checker_number..config.config_provider_redis_total_partitions)
+    (config.checker_number..config.config_provider_redis_total_partitions)
         .step_by(config.total_checkers.into())
         .collect()
 }
@@ -377,7 +370,7 @@ mod tests {
         let config = Config {
             config_provider_redis_update_ms: 10,
             config_provider_redis_total_partitions: 2,
-            checker_id: "test-0".to_string(),
+            checker_number: 0,
             total_checkers: 1,
             ..Default::default()
         };
@@ -587,13 +580,13 @@ mod tests {
 
     fn run_determine_owned_partition_test(
         total_partitions: u16,
-        checker_id: &str,
+        checker_number: u16,
         total_pods: u16,
         expected_partitions: Vec<u16>,
     ) {
         let config = Config {
             config_provider_redis_total_partitions: total_partitions,
-            checker_id: checker_id.to_string(),
+            checker_number,
             total_checkers: total_pods,
             ..Default::default()
         };
@@ -605,18 +598,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_determine_owned_partitions() {
-        run_determine_owned_partition_test(2, "test-0", 1, vec![0, 1]);
-        run_determine_owned_partition_test(2, "test-0", 2, vec![0]);
-        run_determine_owned_partition_test(2, "test-1", 2, vec![1]);
+        run_determine_owned_partition_test(2, 0, 1, vec![0, 1]);
+        run_determine_owned_partition_test(2, 0, 2, vec![0]);
+        run_determine_owned_partition_test(2, 1, 2, vec![1]);
         run_determine_owned_partition_test(
             100,
-            "test-1",
+            1,
             10,
             vec![1, 11, 21, 31, 41, 51, 61, 71, 81, 91],
         );
         run_determine_owned_partition_test(
             100,
-            "test-9",
+            9,
             10,
             vec![9, 19, 29, 39, 49, 59, 69, 79, 89, 99],
         );
@@ -625,18 +618,7 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "checker_number 1 must be less than total_checkers 1")]
     async fn test_determine_owned_partitions_checker_number_too_high() {
-        run_determine_owned_partition_test(2, "test-1", 1, vec![0, 1]);
+        run_determine_owned_partition_test(2, 1, 1, vec![0, 1]);
     }
 
-    #[tokio::test]
-    #[should_panic(expected = "checker_id does not contain a valid checker_number")]
-    async fn test_determine_owned_partitions_no_number() {
-        run_determine_owned_partition_test(2, "test", 1, vec![0, 1]);
-    }
-
-    #[tokio::test]
-    #[should_panic(expected = "checker_id does not contain a valid checker_number")]
-    async fn test_determine_owned_partitions_invalid() {
-        run_determine_owned_partition_test(2, "test-a", 1, vec![0, 1]);
-    }
 }
