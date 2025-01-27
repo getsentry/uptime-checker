@@ -79,6 +79,9 @@ pub struct Config {
     /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
 
+    /// How frequently to poll redis for config updates when using the redis config provider
+    pub config_provider_redis_update_ms: u64,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -107,6 +110,7 @@ impl Default for Config {
             configs_kafka_cluster: vec![],
             configs_kafka_topic: "uptime-configs".to_owned(),
             config_provider_mode: ConfigProviderMode::Kafka,
+            config_provider_redis_update_ms: 1000,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
             allow_internal_ips: false,
@@ -195,6 +199,7 @@ mod tests {
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     config_provider_mode: ConfigProviderMode::Kafka,
+                    config_provider_redis_update_ms: 1000,
                     redis_host: "redis://127.0.0.1:6379".to_owned(),
                     region: "default".to_owned(),
                     allow_internal_ips: false,
@@ -226,6 +231,7 @@ mod tests {
                 "10.0.0.1,10.0.0.2:7000",
             );
             jail.set_env("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "kafka");
+            jail.set_env("UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_UPDATE_MS", "2000");
             jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
             jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
             jail.set_env("UPTIME_CHECKER_REGION", "us-west");
@@ -257,6 +263,7 @@ mod tests {
                     results_kafka_topic: "uptime-results".to_owned(),
                     configs_kafka_topic: "uptime-configs".to_owned(),
                     config_provider_mode: ConfigProviderMode::Kafka,
+                    config_provider_redis_update_ms: 2000,
                     redis_host: "10.0.0.3:6379".to_owned(),
                     region: "us-west".to_owned(),
                     allow_internal_ips: true,
