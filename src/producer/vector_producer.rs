@@ -11,16 +11,14 @@ const VECTOR_BATCH_SIZE: usize = 2;
 pub struct VectorResultsProducer {
     schema: Schema,
     sender: UnboundedSender<Vec<u8>>,
-    shutdown_sender: Option<oneshot::Sender<()>>,
-    worker: Option<JoinHandle<()>>,
 }
 
 impl VectorResultsProducer {
-    pub fn new(topic_name: &str) -> Self {
+    pub fn new(topic_name: &str) -> (Self, JoinHandle<()>, oneshot::Sender<()>) {
         Self::new_with_endpoint(topic_name, "http://localhost:8020".to_string())
     }
 
-    pub fn new_with_endpoint(topic_name: &str, endpoint: String) -> Self {
+    pub fn new_with_endpoint(topic_name: &str, endpoint: String) -> (Self, JoinHandle<()>, oneshot::Sender<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
         
@@ -28,12 +26,14 @@ impl VectorResultsProducer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let worker = Self::spawn_worker(client, endpoint, receiver, shutdown_receiver);
 
-        Self { 
-            schema,
-            sender,
-            shutdown_sender: Some(shutdown_sender),
-            worker: Some(worker),
-        }
+        (
+            Self { 
+                schema,
+                sender,
+            },
+            worker,
+            shutdown_sender,
+        )
     }
 
     fn spawn_worker(
@@ -123,22 +123,11 @@ impl VectorResultsProducer {
             tracing::info!("Vector producer worker shutting down");
         })
     }
-
-    pub async fn shutdown(&mut self) {
-        if let Some(sender) = self.shutdown_sender.take() {
-            let _ = sender.send(());
-            if let Some(worker) = self.worker.take() {
-                let _ = worker.await;
-            }
-        }
-    }
 }
 
 impl Drop for VectorResultsProducer {
     fn drop(&mut self) {
-        if let Some(sender) = self.shutdown_sender.take() {
-            let _ = sender.send(());
-        }
+        // No longer need to handle shutdown in Drop since the worker is managed externally
     }
 }
 
@@ -230,13 +219,14 @@ mod tests {
             then.status(200);
         });
 
-        let mut producer = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker, shutdown) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
         // Wait a bit and then shut down
         sleep(Duration::from_millis(100)).await;
-        producer.shutdown().await;
+        let _ = shutdown.send(());
+        let _ = worker.await;
         mock.assert();
     }
 
@@ -244,7 +234,7 @@ mod tests {
     async fn test_batch_events() {
         let mock_server = MockServer::start();
         tracing::debug!("Mock server started at {}", mock_server.url("/"));
-        let mut producer = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker, shutdown) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         
         // Create and send BATCH_SIZE + 2 events
         for i in 0..(VECTOR_BATCH_SIZE + 2) {
@@ -286,7 +276,8 @@ mod tests {
 
         // Wait a bit and then shut down
         sleep(Duration::from_millis(100)).await;
-        producer.shutdown().await;
+        let _ = shutdown.send(());
+        let _ = worker.await;
         
         // We expect 2 requests: one with BATCH_SIZE events and one with 2 events
         mock.assert_hits(2);
@@ -322,13 +313,14 @@ mod tests {
                 .body("Internal Server Error");
         });
 
-        let mut producer = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker, shutdown) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
         // Wait a bit and then shut down
         sleep(Duration::from_millis(100)).await;
-        producer.shutdown().await;
+        let _ = shutdown.send(());
+        let _ = worker.await;
         error_mock.assert();
     }
 }
