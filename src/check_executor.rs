@@ -45,13 +45,19 @@ impl ScheduledCheck {
 pub struct CheckSender {
     sender: UnboundedSender<ScheduledCheck>,
     queue_size: Arc<AtomicU64>,
+    num_running: Arc<AtomicU64>,
 }
 
 impl CheckSender {
     pub fn new() -> (Self, UnboundedReceiver<ScheduledCheck>) {
         let (sender, reciever) = mpsc::unbounded_channel();
         let queue_size = Arc::new(AtomicU64::new(0));
-        let check_sender = Self { sender, queue_size };
+        let num_running = Arc::new(AtomicU64::new(0));
+        let check_sender = Self {
+            sender,
+            queue_size,
+            num_running,
+        };
 
         (check_sender, reciever)
     }
@@ -86,9 +92,19 @@ pub fn run_executor(
 
     let (check_sender, receiver) = CheckSender::new();
     let queue_size = check_sender.queue_size.clone();
+    let num_running = check_sender.num_running.clone();
 
     let executor = tokio::spawn(async move {
-        executor_loop(concurrency, queue_size, checker, producer, receiver, region).await
+        executor_loop(
+            concurrency,
+            queue_size,
+            num_running,
+            checker,
+            producer,
+            receiver,
+            region,
+        )
+        .await
     });
 
     (check_sender, executor)
@@ -121,6 +137,7 @@ pub fn queue_check(
 async fn executor_loop(
     concurrency: usize,
     queue_size: Arc<AtomicU64>,
+    num_running: Arc<AtomicU64>,
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
     reciever: UnboundedReceiver<ScheduledCheck>,
@@ -134,9 +151,12 @@ async fn executor_loop(
             let job_producer = producer.clone();
             let job_region = region.clone();
             let job_queue_size = queue_size.clone();
+            let job_num_running = num_running.clone();
 
-            metrics::gauge!("executor.check_concurrency")
-                .set(queue_size.load(Ordering::SeqCst) as f64);
+            num_running.fetch_add(1, Ordering::SeqCst);
+
+            metrics::gauge!("executor.queue_size").set(queue_size.load(Ordering::SeqCst) as f64);
+            metrics::gauge!("executor.num_running").set(num_running.load(Ordering::SeqCst) as f64);
 
             async move {
                 let _ = tokio::spawn(async move {
@@ -163,6 +183,7 @@ async fn executor_loop(
 
                     scheduled_check.record_result(check_result);
                     job_queue_size.fetch_sub(1, Ordering::SeqCst);
+                    job_num_running.fetch_sub(1, Ordering::SeqCst);
                 })
                 .await;
             }
@@ -301,6 +322,7 @@ mod tests {
             .collect();
 
         assert_eq!(sender.queue_size.load(Ordering::SeqCst), 4);
+        assert_eq!(sender.num_running.load(Ordering::SeqCst), 0);
 
         let resolve_rx_4 = configs.pop().unwrap();
         tokio::pin!(resolve_rx_4);
@@ -328,6 +350,7 @@ mod tests {
         assert_eq!(poll!(resolve_rx_4.as_mut()), Poll::Pending);
 
         assert_eq!(sender.queue_size.load(Ordering::SeqCst), 2);
+        assert_eq!(sender.num_running.load(Ordering::SeqCst), 2);
 
         // Move forward another second, the last two tasks should now be complete
         time::sleep(Duration::from_millis(1001)).await;
@@ -335,6 +358,7 @@ mod tests {
         assert!(matches!(poll!(resolve_rx_4.as_mut()), Poll::Ready(_)));
 
         assert_eq!(sender.queue_size.load(Ordering::SeqCst), 0);
+        assert_eq!(sender.num_running.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test(start_paused = true)]

@@ -15,6 +15,7 @@ use crate::{app::cli, logging};
 #[serde(rename_all = "snake_case")]
 pub enum ConfigProviderMode {
     Kafka,
+    Redis,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -89,6 +90,13 @@ pub struct Config {
     /// which producer to use to send results
     pub producer_mode: ProducerMode,
 
+    /// How frequently to poll redis for config updates when using the redis config provider
+    pub config_provider_redis_update_ms: u64,
+
+    /// How many config partitions do we want to keep in redis? We shouldn't change this once
+    /// assigned unless we plan a migration process.
+    pub config_provider_redis_total_partitions: u16,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -97,6 +105,13 @@ pub struct Config {
 
     /// Allow uptime checks against internal IP addresses
     pub allow_internal_ips: bool,
+
+    /// The unioque index of this checker out of the total nuimber of checkers. Should be
+    /// zero-indexed.
+    pub checker_number: u16,
+
+    /// Total number of uptime checkers running
+    pub total_checkers: u16,
 }
 
 impl Default for Config {
@@ -118,9 +133,13 @@ impl Default for Config {
             configs_kafka_topic: "uptime-configs".to_owned(),
             config_provider_mode: ConfigProviderMode::Kafka,
             producer_mode: ProducerMode::Kafka,
+            config_provider_redis_update_ms: 1000,
+            config_provider_redis_total_partitions: 128,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
             allow_internal_ips: false,
+            checker_number: 0,
+            total_checkers: 1,
         }
     }
 }
@@ -164,23 +183,16 @@ mod tests {
 
     use super::{Config, ConfigProviderMode, MetricsConfig};
 
-    #[test]
-    fn test_simple() {
+    fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
+    where
+        F: FnOnce(Config),
+    {
         Jail::expect_with(|jail| {
-            jail.create_file(
-                "config.yaml",
-                r#"
-                sentry_dsn: my_dsn
-                sentry_env: my_env
-                checker_concurrency: 100
-                results_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
-                configs_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
-                statsd_addr: 10.0.0.1:8126
-                default_tags: {"someTag": "value"}
-                hostname_tag: pod_name
-                redis_host: redis://127.0.0.1:6379
-                "#,
-            )?;
+            jail.create_file("config.yaml", yaml)?;
+
+            for (key, value) in env_vars {
+                jail.set_env(key, value);
+            }
 
             let app = cli::CliApp {
                 config: Some(PathBuf::from("config.yaml")),
@@ -189,96 +201,148 @@ mod tests {
                 command: cli::Commands::Run,
             };
 
-            let config = Config::extract(&app).expect("Invalid configuration");
-
-            assert_eq!(
-                config,
-                Config {
-                    sentry_dsn: Some("my_dsn".to_owned()),
-                    sentry_env: Some(Cow::from("my_env")),
-                    checker_concurrency: 100,
-                    log_level: logging::Level::Warn,
-                    log_format: logging::LogFormat::Auto,
-                    metrics: MetricsConfig {
-                        statsd_addr: "10.0.0.1:8126".parse().unwrap(),
-                        default_tags: BTreeMap::from([("someTag".to_owned(), "value".to_owned()),]),
-                        hostname_tag: Some("pod_name".to_owned()),
-                    },
-                    results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
-                    configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:9000".to_owned()],
-                    results_kafka_topic: "uptime-results".to_owned(),
-                    configs_kafka_topic: "uptime-configs".to_owned(),
-                    config_provider_mode: ConfigProviderMode::Kafka,
-                    producer_mode: ProducerMode::Kafka,
-                    redis_host: "redis://127.0.0.1:6379".to_owned(),
-                    region: "default".to_owned(),
-                    allow_internal_ips: false,
-                }
-            );
+            let config = Config::extract(&app).unwrap();
+            test_fn(config);
             Ok(())
-        });
+        })
+    }
+
+    #[test]
+    fn test_simple() {
+        test_with_config(
+            r#"
+            sentry_dsn: my_dsn
+            sentry_env: my_env
+            checker_concurrency: 100
+            results_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
+            configs_kafka_cluster: '10.0.0.1,10.0.0.2:9000'
+            statsd_addr: 10.0.0.1:8126
+            default_tags: {"someTag": "value"}
+            hostname_tag: pod_name
+            redis_host: redis://127.0.0.1:6379
+            "#,
+            &[],
+            |config| {
+                assert_eq!(
+                    config,
+                    Config {
+                        sentry_dsn: Some("my_dsn".to_owned()),
+                        sentry_env: Some(Cow::from("my_env")),
+                        checker_concurrency: 100,
+                        log_level: logging::Level::Warn,
+                        log_format: logging::LogFormat::Auto,
+                        metrics: MetricsConfig {
+                            statsd_addr: "10.0.0.1:8126".parse().unwrap(),
+                            default_tags: BTreeMap::from([(
+                                "someTag".to_owned(),
+                                "value".to_owned()
+                            ),]),
+                            hostname_tag: Some("pod_name".to_owned()),
+                        },
+                        results_kafka_cluster: vec![
+                            "10.0.0.1".to_owned(),
+                            "10.0.0.2:9000".to_owned()
+                        ],
+                        configs_kafka_cluster: vec![
+                            "10.0.0.1".to_owned(),
+                            "10.0.0.2:9000".to_owned()
+                        ],
+                        results_kafka_topic: "uptime-results".to_owned(),
+                        configs_kafka_topic: "uptime-configs".to_owned(),
+                        config_provider_mode: ConfigProviderMode::Kafka,
+                        config_provider_redis_update_ms: 1000,
+                        config_provider_redis_total_partitions: 128,
+                        redis_host: "redis://127.0.0.1:6379".to_owned(),
+                        region: "default".to_owned(),
+                        allow_internal_ips: false,
+                        checker_number: 0,
+                        total_checkers: 1,
+                    }
+                );
+            },
+        )
     }
 
     #[test]
     fn test_overrides() {
-        Jail::expect_with(|jail| {
-            jail.create_file(
-                "config.yaml",
-                r#"
-                sentry_dsn: my_dsn
-                sentry_env: my_env
-                log_format: json
-                "#,
-            )?;
+        test_with_config(
+            r#"
+            sentry_dsn: my_dsn
+            sentry_env: my_env
+            log_format: json
+            "#,
+            &[
+                ("UPTIME_CHECKER_SENTRY_ENV", "my_env_override"),
+                (
+                    "UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER",
+                    "10.0.0.1,10.0.0.2:7000",
+                ),
+                (
+                    "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
+                    "10.0.0.1,10.0.0.2:7000",
+                ),
+                ("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "kafka"),
+                ("UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_UPDATE_MS", "2000"),
+                (
+                    "UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_TOTAL_PARTITIONS",
+                    "32",
+                ),
+                ("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234"),
+                ("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379"),
+                ("UPTIME_CHECKER_REGION", "us-west"),
+                ("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true"),
+                ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
+                ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
+            ],
+            |config| {
+                assert_eq!(
+                    config,
+                    Config {
+                        sentry_dsn: Some("my_dsn".to_owned()),
+                        sentry_env: Some(Cow::from("my_env_override")),
+                        checker_concurrency: 200,
+                        log_level: logging::Level::Warn,
+                        log_format: logging::LogFormat::Json,
+                        metrics: MetricsConfig {
+                            statsd_addr: "10.0.0.1:1234".parse().unwrap(),
+                            default_tags: BTreeMap::new(),
+                            hostname_tag: None,
+                        },
+                        results_kafka_cluster: vec![
+                            "10.0.0.1".to_owned(),
+                            "10.0.0.2:7000".to_owned()
+                        ],
+                        configs_kafka_cluster: vec![
+                            "10.0.0.1".to_owned(),
+                            "10.0.0.2:7000".to_owned()
+                        ],
+                        results_kafka_topic: "uptime-results".to_owned(),
+                        configs_kafka_topic: "uptime-configs".to_owned(),
+                        config_provider_mode: ConfigProviderMode::Kafka,
+                        config_provider_redis_update_ms: 2000,
+                        config_provider_redis_total_partitions: 32,
+                        redis_host: "10.0.0.3:6379".to_owned(),
+                        region: "us-west".to_owned(),
+                        allow_internal_ips: true,
+                        checker_number: 2,
+                        total_checkers: 5,
+                    }
+                );
+            },
+        )
+    }
 
-            jail.set_env("UPTIME_CHECKER_SENTRY_ENV", "my_env_override");
-            jail.set_env(
-                "UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER",
-                "10.0.0.1,10.0.0.2:7000",
-            );
-            jail.set_env(
-                "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
-                "10.0.0.1,10.0.0.2:7000",
-            );
-            jail.set_env("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "kafka");
-            jail.set_env("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234");
-            jail.set_env("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379");
-            jail.set_env("UPTIME_CHECKER_REGION", "us-west");
-            jail.set_env("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true");
-            let app = cli::CliApp {
-                config: Some(PathBuf::from("config.yaml")),
-                log_level: Some(logging::Level::Trace),
-                log_format: None,
-                command: cli::Commands::Run,
-            };
-
-            let config = Config::extract(&app).expect("Invalid configuration");
-
-            assert_eq!(
-                config,
-                Config {
-                    sentry_dsn: Some("my_dsn".to_owned()),
-                    sentry_env: Some(Cow::from("my_env_override")),
-                    checker_concurrency: 200,
-                    log_level: logging::Level::Trace,
-                    log_format: logging::LogFormat::Json,
-                    metrics: MetricsConfig {
-                        statsd_addr: "10.0.0.1:1234".parse().unwrap(),
-                        default_tags: BTreeMap::new(),
-                        hostname_tag: None,
-                    },
-                    results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
-                    configs_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
-                    results_kafka_topic: "uptime-results".to_owned(),
-                    configs_kafka_topic: "uptime-configs".to_owned(),
-                    config_provider_mode: ConfigProviderMode::Kafka,
-                    producer_mode: ProducerMode::Kafka,
-                    redis_host: "10.0.0.3:6379".to_owned(),
-                    region: "us-west".to_owned(),
-                    allow_internal_ips: true,
-                }
-            );
-            Ok(())
-        });
+    #[test]
+    fn test_config_default_checker_ordinal() {
+        test_with_config(
+            r#"
+            sentry_dsn: my_dsn
+            sentry_env: my_env
+            "#,
+            &[],
+            |config| {
+                assert_eq!(config.checker_number, 0);
+            },
+        )
     }
 }
