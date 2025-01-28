@@ -5,7 +5,6 @@ use figment::{
     Figment,
 };
 
-use serde::{de, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_with::formats::CommaSeparator;
 use serde_with::serde_as;
@@ -97,10 +96,8 @@ pub struct Config {
     /// Allow uptime checks against internal IP addresses
     pub allow_internal_ips: bool,
 
-    #[serde(rename = "checker_id")]
-    #[serde(skip_serializing)]
-    #[serde(deserialize_with = "deserialize_checker_number")]
-    #[serde(default)]
+    /// The unioque index of this checker out of the total nuimber of checkers. Should be
+    /// zero-indexed.
     pub checker_number: u16,
 
     /// Total number of uptime checkers running
@@ -161,20 +158,6 @@ impl Config {
     }
 }
 
-fn deserialize_checker_number<'de, D>(deserializer: D) -> Result<u16, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let checker_id: String = String::deserialize(deserializer)?;
-    let ordinal = checker_id
-        .split('-')
-        .last()
-        .ok_or_else(|| de::Error::custom("checker_id should be in format <name>-<checker_number>"))?
-        .parse::<u16>()
-        .map_err(|_| de::Error::custom("checker_id should contain a valid checker_number"))?;
-    Ok(ordinal)
-}
-
 #[cfg(test)]
 mod tests {
     use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
@@ -184,7 +167,7 @@ mod tests {
 
     use crate::{app::cli, logging};
 
-    use super::{deserialize_checker_number, Config, ConfigProviderMode, MetricsConfig};
+    use super::{Config, ConfigProviderMode, MetricsConfig};
 
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where
@@ -294,7 +277,7 @@ mod tests {
                 ("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379"),
                 ("UPTIME_CHECKER_REGION", "us-west"),
                 ("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true"),
-                ("UPTIME_CHECKER_CHECKER_ID", "somePodName-2"),
+                ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
                 ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
             ],
             |config| {
@@ -347,61 +330,5 @@ mod tests {
                 assert_eq!(config.checker_number, 0);
             },
         )
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "checker_id should contain a valid checker_number for key \"default.checker_id\" in config.yaml YAML file"
-    )]
-    fn test_config_bad_checker_id() {
-        test_with_config(
-            r#"
-            sentry_dsn: my_dsn
-            sentry_env: my_env
-            checker_id: bad-name
-            "#,
-            &[],
-            |config| {
-                assert_eq!(config.checker_number, 0);
-            },
-        )
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "checker_id should contain a valid checker_number for key \"CHECKER_ID\" in `UPTIME_CHECKER_` environment variable(s)"
-    )]
-    fn test_env_bad_checker_id() {
-        test_with_config(
-            r#"
-            sentry_dsn: my_dsn
-            sentry_env: my_env
-            "#,
-            &[("UPTIME_CHECKER_CHECKER_ID", "somePodName")],
-            |config| {
-                assert_eq!(config.checker_number, 0);
-            },
-        )
-    }
-
-    fn parse_checker_ordinal(checker_id: &str) -> u16 {
-        deserialize_checker_number(serde_json::Value::String(checker_id.to_string()))
-            .expect("Failed to parse checker_id")
-    }
-    #[test]
-    #[should_panic(expected = "checker_id should contain a valid checker_number")]
-    fn test_checker_number_no_hyphen() {
-        parse_checker_ordinal("invalid");
-    }
-
-    #[test]
-    #[should_panic(expected = "checker_id should contain a valid checker_number")]
-    fn test_checker_number_invalid_number() {
-        parse_checker_ordinal("pod-abc");
-    }
-
-    #[test]
-    fn test_checker_number_valid() {
-        assert_eq!(parse_checker_ordinal("pod-1"), 1);
     }
 }
