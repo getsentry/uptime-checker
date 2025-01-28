@@ -110,47 +110,46 @@ impl Manager {
     pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
         let checker = Arc::new(HttpChecker::new(!config.allow_internal_ips));
 
-        let (executor_sender, (executor_join_handle, results_worker)) =
-            match &config.producer_mode {
-                ProducerMode::Vector => {
-                    let (results_producer, results_worker) =
-                        VectorResultsProducer::new(&config.results_kafka_topic, config.vector_batch_size);
-                    // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
-                    // referneces of the Sender (executor_sender) are dropped.
-                    let (executor_sender, executor_handle) = run_executor(
-                        config.checker_concurrency,
-                        checker.clone(),
-                        Arc::new(results_producer),
-                        config.region.clone(),
-                    );
-                    (
-                        executor_sender,
-                        (executor_handle, results_worker),
-                    )
-                }
-                ProducerMode::Kafka => {
-                    let kafka_overrides =
-                        HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
-                    let kafka_config = KafkaConfig::new_config(
-                        config.results_kafka_cluster.to_owned(),
-                        Some(kafka_overrides),
-                    );
-                    let producer = Arc::new(KafkaResultsProducer::new(
-                        &config.results_kafka_topic,
-                        kafka_config,
-                    ));
-                    // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
-                    // referneces of the Sender (executor_sender) are dropped.
-                    let (sender, handle) = run_executor(
-                        config.checker_concurrency,
-                        checker.clone(),
-                        producer,
-                        config.region.clone(),
-                    );
-                    let dummy_worker = tokio::spawn(async {});
-                    (sender, (handle, dummy_worker))
-                }
-            };
+        let (executor_sender, (executor_join_handle, results_worker)) = match &config.producer_mode
+        {
+            ProducerMode::Vector => {
+                let (results_producer, results_worker) = VectorResultsProducer::new(
+                    &config.results_kafka_topic,
+                    config.vector_batch_size,
+                );
+                // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
+                // referneces of the Sender (executor_sender) are dropped.
+                let (executor_sender, executor_handle) = run_executor(
+                    config.checker_concurrency,
+                    checker.clone(),
+                    Arc::new(results_producer),
+                    config.region.clone(),
+                );
+                (executor_sender, (executor_handle, results_worker))
+            }
+            ProducerMode::Kafka => {
+                let kafka_overrides =
+                    HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
+                let kafka_config = KafkaConfig::new_config(
+                    config.results_kafka_cluster.to_owned(),
+                    Some(kafka_overrides),
+                );
+                let producer = Arc::new(KafkaResultsProducer::new(
+                    &config.results_kafka_topic,
+                    kafka_config,
+                ));
+                // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
+                // referneces of the Sender (executor_sender) are dropped.
+                let (sender, handle) = run_executor(
+                    config.checker_concurrency,
+                    checker.clone(),
+                    producer,
+                    config.region.clone(),
+                );
+                let dummy_worker = tokio::spawn(async {});
+                (sender, (handle, dummy_worker))
+            }
+        };
 
         let (shutdown_sender, shutdown_service_rx) = mpsc::unbounded_channel();
 

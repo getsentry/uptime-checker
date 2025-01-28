@@ -5,7 +5,6 @@ use sentry_kafka_schemas::Schema;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
-
 pub struct VectorResultsProducer {
     schema: Schema,
     sender: UnboundedSender<Vec<u8>>,
@@ -13,7 +12,11 @@ pub struct VectorResultsProducer {
 
 impl VectorResultsProducer {
     pub fn new(topic_name: &str, vector_batch_size: usize) -> (Self, JoinHandle<()>) {
-        Self::new_with_endpoint(topic_name, "http://localhost:8020".to_string(), vector_batch_size)
+        Self::new_with_endpoint(
+            topic_name,
+            "http://localhost:8020".to_string(),
+            vector_batch_size,
+        )
     }
 
     pub fn new_with_endpoint(
@@ -49,7 +52,8 @@ impl VectorResultsProducer {
                 if batch.len() >= vector_batch_size {
                     tracing::debug!("Sending batch of {} events", batch.len());
                     // Convert each JSON bytes to string and ensure each line ends with a newline
-                    let body = batch.iter()
+                    let body = batch
+                        .iter()
                         .filter_map(|json| String::from_utf8(json.clone()).ok())
                         .map(|s| s + "\n")
                         .collect::<String>();
@@ -209,16 +213,17 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"),10);
+        let (producer, worker) =
+            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"), 10);
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
         // Wait a bit for the request to be processed
         sleep(Duration::from_millis(100)).await;
-        
+
         // Drop the producer which will close the channel
         drop(producer);
-        
+
         // Now we can await the worker
         let _ = worker.await;
         mock.assert();
@@ -228,7 +233,11 @@ mod tests {
     async fn test_batch_events() {
         let mock_server = MockServer::start();
         tracing::debug!("Mock server started at {}", mock_server.url("/"));
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"),TEST_BATCH_SIZE);
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint(
+            "uptime-results",
+            mock_server.url("/"),
+            TEST_BATCH_SIZE,
+        );
 
         // Create and send BATCH_SIZE + 2 events
         for i in 0..(10 + 2) {
@@ -255,11 +264,7 @@ mod tests {
                             .collect();
                         let len = lines.len();
                         if len != 10 && len != 2 {
-                            tracing::debug!(
-                                "Expected {} or 2 lines, got {}",
-                                10,
-                                len
-                            );
+                            tracing::debug!("Expected {} or 2 lines, got {}", 10, len);
                             return false;
                         }
                         // Verify each line is valid JSON with expected fields
@@ -281,10 +286,10 @@ mod tests {
 
         // Wait a bit for the requests to be processed
         sleep(Duration::from_millis(100)).await;
-        
+
         // Drop the producer which will close the channel
         drop(producer);
-        
+
         // Now we can await the worker
         let _ = worker.await;
 
@@ -327,16 +332,20 @@ mod tests {
             then.status(500).body("Internal Server Error");
         });
 
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"),TEST_BATCH_SIZE);
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint(
+            "uptime-results",
+            mock_server.url("/"),
+            TEST_BATCH_SIZE,
+        );
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
         // Wait a bit for the request to be processed
         sleep(Duration::from_millis(100)).await;
-        
+
         // Drop the producer which will close the channel
         drop(producer);
-        
+
         // Now we can await the worker
         let _ = worker.await;
         error_mock.assert();
@@ -377,7 +386,11 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"),TEST_BATCH_SIZE);
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint(
+            "uptime-results",
+            mock_server.url("/"),
+            TEST_BATCH_SIZE,
+        );
 
         // Send a single event (less than BATCH_SIZE)
         let test_result = create_test_result();
@@ -389,7 +402,7 @@ mod tests {
 
         // Drop the producer which will close the channel
         drop(producer);
-        
+
         // Now we can await the worker
         let _ = worker.await;
 
