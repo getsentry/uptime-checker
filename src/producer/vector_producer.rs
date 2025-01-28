@@ -5,7 +5,6 @@ use sentry_kafka_schemas::Schema;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
-const VECTOR_BATCH_SIZE: usize = 2;
 
 pub struct VectorResultsProducer {
     schema: Schema,
@@ -13,31 +12,33 @@ pub struct VectorResultsProducer {
 }
 
 impl VectorResultsProducer {
-    pub fn new(topic_name: &str) -> (Self, JoinHandle<()>) {
-        Self::new_with_endpoint(topic_name, "http://localhost:8020".to_string())
+    pub fn new(topic_name: &str, vector_batch_size: usize) -> (Self, JoinHandle<()>) {
+        Self::new_with_endpoint(topic_name, "http://localhost:8020".to_string(), vector_batch_size)
     }
 
     pub fn new_with_endpoint(
         topic_name: &str,
         endpoint: String,
+        vector_batch_size: usize,
     ) -> (Self, JoinHandle<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
 
         let (sender, receiver) = mpsc::unbounded_channel();
-        let worker = Self::spawn_worker(client, endpoint, receiver);
+        let worker = Self::spawn_worker(vector_batch_size, client, endpoint, receiver);
 
         (Self { schema, sender }, worker)
     }
 
     fn spawn_worker(
+        vector_batch_size: usize,
         client: Client,
         endpoint: String,
         mut receiver: UnboundedReceiver<Vec<u8>>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             tracing::debug!("Vector producer worker started with endpoint {}", endpoint);
-            let mut batch = Vec::with_capacity(VECTOR_BATCH_SIZE);
+            let mut batch = Vec::with_capacity(vector_batch_size);
 
             while let Some(json) = receiver.recv().await {
                 tracing::debug!("Received event of size {}", json.len());
@@ -45,7 +46,7 @@ impl VectorResultsProducer {
                 tracing::debug!("Current batch size: {}", batch.len());
 
                 // Send batch when it reaches BATCH_SIZE
-                if batch.len() >= VECTOR_BATCH_SIZE {
+                if batch.len() >= vector_batch_size {
                     tracing::debug!("Sending batch of {} events", batch.len());
                     // Convert each JSON bytes to string and ensure each line ends with a newline
                     let body = batch.iter()
@@ -131,7 +132,7 @@ impl ResultsProducer for VectorResultsProducer {
 
 #[cfg(test)]
 mod tests {
-    use super::{VectorResultsProducer, VECTOR_BATCH_SIZE};
+    use super::VectorResultsProducer;
     use crate::{
         producer::ResultsProducer,
         types::{
@@ -148,6 +149,8 @@ mod tests {
     use std::time::Duration;
     use tokio::time::sleep;
     use uuid::{uuid, Uuid};
+
+    const TEST_BATCH_SIZE: usize = 10;
 
     fn create_test_result() -> CheckResult {
         CheckResult {
@@ -206,7 +209,7 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"),10);
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
@@ -225,10 +228,10 @@ mod tests {
     async fn test_batch_events() {
         let mock_server = MockServer::start();
         tracing::debug!("Mock server started at {}", mock_server.url("/"));
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"),TEST_BATCH_SIZE);
 
         // Create and send BATCH_SIZE + 2 events
-        for i in 0..(VECTOR_BATCH_SIZE + 2) {
+        for i in 0..(10 + 2) {
             tracing::debug!("Sending event {}", i + 1);
             let test_result = create_test_result();
             let result = producer.produce_checker_result(&test_result);
@@ -251,10 +254,10 @@ mod tests {
                             .filter(|l| !l.is_empty())
                             .collect();
                         let len = lines.len();
-                        if len != VECTOR_BATCH_SIZE && len != 2 {
+                        if len != 10 && len != 2 {
                             tracing::debug!(
                                 "Expected {} or 2 lines, got {}",
-                                VECTOR_BATCH_SIZE,
+                                10,
                                 len
                             );
                             return false;
@@ -324,7 +327,7 @@ mod tests {
             then.status(500).body("Internal Server Error");
         });
 
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"),TEST_BATCH_SIZE);
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
@@ -374,7 +377,7 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"));
+        let (producer, worker) = VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"),TEST_BATCH_SIZE);
 
         // Send a single event (less than BATCH_SIZE)
         let test_result = create_test_result();

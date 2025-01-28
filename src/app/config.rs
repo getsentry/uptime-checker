@@ -97,6 +97,9 @@ pub struct Config {
     /// assigned unless we plan a migration process.
     pub config_provider_redis_total_partitions: u16,
 
+    /// The batch size to use for vector producer
+    pub vector_batch_size: usize,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -132,6 +135,7 @@ impl Default for Config {
             configs_kafka_cluster: vec![],
             configs_kafka_topic: "uptime-configs".to_owned(),
             config_provider_mode: ConfigProviderMode::Kafka,
+            vector_batch_size: 10,
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
             config_provider_redis_total_partitions: 128,
@@ -257,6 +261,8 @@ mod tests {
                         allow_internal_ips: false,
                         checker_number: 0,
                         total_checkers: 1,
+                        producer_mode: ProducerMode::Kafka,
+                        vector_batch_size: 10,
                     }
                 );
             },
@@ -326,6 +332,8 @@ mod tests {
                         allow_internal_ips: true,
                         checker_number: 2,
                         total_checkers: 5,
+                        producer_mode: ProducerMode::Kafka,
+                        vector_batch_size: 10,
                     }
                 );
             },

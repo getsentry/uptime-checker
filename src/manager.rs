@@ -6,9 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
-use tokio::sync::{
-    mpsc::{self, UnboundedSender},
-};
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -116,7 +114,7 @@ impl Manager {
             match &config.producer_mode {
                 ProducerMode::Vector => {
                     let (results_producer, results_worker) =
-                        VectorResultsProducer::new(&config.results_kafka_topic);
+                        VectorResultsProducer::new(&config.results_kafka_topic, config.vector_batch_size);
                     // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
                     // referneces of the Sender (executor_sender) are dropped.
                     let (executor_sender, executor_handle) = run_executor(
