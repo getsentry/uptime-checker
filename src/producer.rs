@@ -16,10 +16,8 @@ pub enum ExtractCodeError {
     Producer(#[from] ProducerError),
     #[error(transparent)]
     Schema(#[from] SchemaError),
-    #[error(transparent)]
-    VectorRequestError(#[from] reqwest::Error),
-    #[error("Vector request failed with status: {0}")]
-    VectorRequestStatusError(reqwest::StatusCode),
+    #[error("Vector request failed")]
+    VectorError,
 }
 
 pub trait ResultsProducer: Send + Sync {

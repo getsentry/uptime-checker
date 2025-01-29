@@ -67,9 +67,7 @@ impl ResultsProducer for VectorResultsProducer {
         // Send the serialized result to the worker task
         if self.sender.send(json).is_err() {
             tracing::error!("event.send_failed_channel_closed");
-            return Err(ExtractCodeError::VectorRequestStatusError(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            ));
+            return Err(ExtractCodeError::VectorError);
         }
 
         Ok(())
@@ -104,9 +102,7 @@ async fn send_batch(
         }
         Err(e) => {
             tracing::error!(error = ?e, "request.failed_to_vector");
-            Err(ExtractCodeError::VectorRequestStatusError(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            ))
+            Err(ExtractCodeError::VectorError)
         }
     }
 }
