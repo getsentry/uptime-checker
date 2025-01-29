@@ -49,7 +49,6 @@ impl VectorResultsProducer {
             }
 
             if !batch.is_empty() {
-                tracing::debug!(size = batch.len(), "final_batch.sending");
                 if let Err(e) = send_batch(batch, client, endpoint).await {
                     tracing::error!(error = ?e, "final_batch.send_failed");
                 }
@@ -92,10 +91,6 @@ async fn send_batch(
         .map(|s| s + "\n")
         .collect();
 
-    // Log the exact payload for debugging
-    tracing::debug!(%body, "payload.sending");
-    tracing::debug!(size = body.len(), "request.sending_to_vector");
-
     let response = client
         .post(&endpoint)
         .header("Content-Type", "application/json")
@@ -105,7 +100,6 @@ async fn send_batch(
 
     match response {
         Ok(_) => {
-            tracing::debug!("request.sent_successfully");
             Ok(())
         }
         Err(e) => {
@@ -165,7 +159,6 @@ mod tests {
     #[tokio::test]
     async fn test_single_event() {
         let mock_server = MockServer::start();
-        tracing::debug!("Mock server started at {}", mock_server.url("/"));
         let test_result = create_test_result();
 
         let mock = mock_server.mock(|when, then| {
@@ -174,16 +167,11 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
-                        tracing::debug!(
-                            "Received request body: {:?}",
-                            String::from_utf8_lossy(body)
-                        );
                         let lines: Vec<_> = body
                             .split(|&b| b == b'\n')
                             .filter(|l| !l.is_empty())
                             .collect();
                         if lines.len() != 1 {
-                            tracing::debug!("Expected 1 line, got {}", lines.len());
                             return false;
                         }
                         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
@@ -216,7 +204,6 @@ mod tests {
     #[tokio::test]
     async fn test_batch_events() {
         let mock_server = MockServer::start();
-        tracing::debug!("Mock server started at {}", mock_server.url("/"));
         let (producer, worker) = VectorResultsProducer::new(
             "uptime-results",
             mock_server.url("/").to_string(),
@@ -224,8 +211,7 @@ mod tests {
         );
 
         // Create and send BATCH_SIZE + 2 events
-        for i in 0..(10 + 2) {
-            tracing::debug!("Sending event {}", i + 1);
+        for _ in 0..(TEST_BATCH_SIZE + 2) {
             let test_result = create_test_result();
             let result = producer.produce_checker_result(&test_result);
             assert!(result.is_ok());
@@ -238,17 +224,12 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
-                        tracing::debug!(
-                            "Received request body: {:?}",
-                            String::from_utf8_lossy(body)
-                        );
                         let lines: Vec<_> = body
                             .split(|&b| b == b'\n')
                             .filter(|l| !l.is_empty())
                             .collect();
                         let len = lines.len();
                         if len != 10 && len != 2 {
-                            tracing::debug!("Expected {} or 2 lines, got {}", 10, len);
                             return false;
                         }
                         // Verify each line is valid JSON with expected fields
@@ -284,7 +265,6 @@ mod tests {
     #[tokio::test]
     async fn test_server_error() {
         let mock_server = MockServer::start();
-        tracing::debug!("Mock server started at {}", mock_server.url("/"));
         let test_result = create_test_result();
 
         let error_mock = mock_server.mock(|when, then| {
@@ -293,16 +273,11 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
-                        tracing::debug!(
-                            "Received request body: {:?}",
-                            String::from_utf8_lossy(body)
-                        );
                         let lines: Vec<_> = body
                             .split(|&b| b == b'\n')
                             .filter(|l| !l.is_empty())
                             .collect();
                         if lines.len() != 1 {
-                            tracing::debug!("Expected 1 line, got {}", lines.len());
                             return false;
                         }
                         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
@@ -338,7 +313,6 @@ mod tests {
     #[tokio::test]
     async fn test_flush_on_shutdown() {
         let mock_server = MockServer::start();
-        tracing::debug!("Mock server started at {}", mock_server.url("/"));
         // Create a mock that expects a single request with less than BATCH_SIZE events
         let mock = mock_server.mock(|when, then| {
             when.method(Method::POST)
@@ -346,17 +320,12 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .matches(|req| {
                     if let Some(body) = &req.body {
-                        tracing::debug!(
-                            "Received request body: {:?}",
-                            String::from_utf8_lossy(body)
-                        );
                         let lines: Vec<_> = body
                             .split(|&b| b == b'\n')
                             .filter(|l| !l.is_empty())
                             .collect();
                         // We expect only 1 event, which is less than BATCH_SIZE
                         if lines.len() != 1 {
-                            tracing::debug!("Expected 1 line, got {}", lines.len());
                             return false;
                         }
                         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
