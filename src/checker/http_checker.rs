@@ -237,10 +237,11 @@ impl Checker for HttpChecker {
                 } else {
                     // if any error falls through we should log it,
                     // none should be.
-                    tracing::info!("check_url.error: {:?}", e.without_url());
+                    let error_msg = e.without_url();
+                    tracing::info!("check_url.error: {:?}", error_msg);
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
-                        description: format!("{:?}", e.without_url()),
+                        description: format!("{:?}", error_msg),
                     }
                 }
             }),
