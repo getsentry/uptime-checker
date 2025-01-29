@@ -117,7 +117,8 @@ impl RedisConfigProvider {
         region: String,
     ) {
         // Fetch configs for all partitions from Redis and register them with the manager
-        // TODO: Should we also register all the partitions here, or elsewhere?
+        manager.update_partitions(&self.partitions);
+
         let mut conn = self
             .redis
             .get_multiplexed_tokio_connection()
@@ -397,7 +398,6 @@ mod tests {
 
         // Create manager and start provider
         let manager = Manager::start_without_consumer(Arc::new(Config::default()));
-        manager.update_partitions(&test_partitions);
         let shutdown = CancellationToken::new();
 
         (config, conn, partitions, manager, shutdown)
