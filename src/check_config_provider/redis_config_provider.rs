@@ -141,7 +141,7 @@ impl RedisConfigProvider {
                 config_count = config_payloads.len(),
                 "redis_config_provider.loading_initial_configs"
             );
-            metrics::gauge!("config_provider.initial_load.partition_size", "uptime_region" => region.clone())
+            metrics::gauge!("config_provider.initial_load.partition_size", "uptime_region" => region.clone(), "partition" => partition.partition.to_string())
                 .set(config_payloads.len() as f64);
 
             for config_payload in config_payloads {
@@ -165,6 +165,7 @@ impl RedisConfigProvider {
                 "config_provider.initial_load.partition.duration",
                 "histogram" => "timer",
                 "uptime_region" => region.clone(),
+                "partition" => partition.partition.to_string(),
             )
             .record(partition_loading_time);
         }
@@ -233,9 +234,9 @@ impl RedisConfigProvider {
                         (upserts, deletes)
                     });
 
-                metrics::counter!("config_provider.updater.upserts", "uptime_region" => region.clone())
+                metrics::counter!("config_provider.updater.upserts", "uptime_region" => region.clone(), "partition" => partition.partition.to_string())
                     .increment(config_upserts.len() as u64);
-                metrics::counter!("config_provider.updater.deletes", "uptime_region" => region.clone())
+                metrics::counter!("config_provider.updater.deletes", "uptime_region" => region.clone(), "partition" => partition.partition.to_string())
                     .increment(config_deletes.len() as u64);
 
                 config_deletes.into_iter().for_each(|config_delete| {
@@ -292,6 +293,7 @@ impl RedisConfigProvider {
                     "config_provider.updater.partition.duration",
                     "histogram" => "timer",
                     "uptime_region" => region.clone(),
+                    "partition" => partition.partition.to_string(),
                 )
                 .record(partition_update_duration);
             }
