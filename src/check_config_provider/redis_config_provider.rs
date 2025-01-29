@@ -15,17 +15,17 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct RedisPartition {
-    partition: u16,
+    number: u16,
     config_key: String,
     update_key: String,
 }
 
 impl RedisPartition {
-    pub fn new(partition: u16) -> RedisPartition {
+    pub fn new(number: u16) -> RedisPartition {
         RedisPartition {
-            partition,
-            config_key: format!("uptime:configs:{}", partition),
-            update_key: format!("uptime:updates:{}", partition),
+            number,
+            config_key: format!("uptime:configs:{}", number),
+            update_key: format!("uptime:updates:{}", number),
         }
     }
 }
@@ -137,11 +137,11 @@ impl RedisConfigProvider {
                 .await
                 .expect("Unable to get configs");
             tracing::info!(
-                partition = partition.partition,
+                partition = partition.number,
                 config_count = config_payloads.len(),
                 "redis_config_provider.loading_initial_configs"
             );
-            metrics::gauge!("config_provider.initial_load.partition_size", "uptime_region" => region.clone(), "partition" => partition.partition.to_string())
+            metrics::gauge!("config_provider.initial_load.partition_size", "uptime_region" => region.clone(), "partition" => partition.number.to_string())
                 .set(config_payloads.len() as f64);
 
             for config_payload in config_payloads {
@@ -151,7 +151,7 @@ impl RedisConfigProvider {
                     })
                     .unwrap();
                 manager
-                    .get_service(partition.partition)
+                    .get_service(partition.number)
                     .get_config_store()
                     .write()
                     .unwrap()
@@ -165,7 +165,7 @@ impl RedisConfigProvider {
                 "config_provider.initial_load.partition.duration",
                 "histogram" => "timer",
                 "uptime_region" => region.clone(),
-                "partition" => partition.partition.to_string(),
+                "partition" => partition.number.to_string(),
             )
             .record(partition_loading_time);
         }
@@ -234,14 +234,14 @@ impl RedisConfigProvider {
                         (upserts, deletes)
                     });
 
-                metrics::counter!("config_provider.updater.upserts", "uptime_region" => region.clone(), "partition" => partition.partition.to_string())
+                metrics::counter!("config_provider.updater.upserts", "uptime_region" => region.clone(), "partition" => partition.number.to_string())
                     .increment(config_upserts.len() as u64);
-                metrics::counter!("config_provider.updater.deletes", "uptime_region" => region.clone(), "partition" => partition.partition.to_string())
+                metrics::counter!("config_provider.updater.deletes", "uptime_region" => region.clone(), "partition" => partition.number.to_string())
                     .increment(config_deletes.len() as u64);
 
                 config_deletes.into_iter().for_each(|config_delete| {
                     manager
-                        .get_service(partition.partition)
+                        .get_service(partition.number)
                         .get_config_store()
                         .write()
                         .unwrap()
@@ -274,12 +274,12 @@ impl RedisConfigProvider {
                         })
                         .unwrap();
                     tracing::debug!(
-                        partition = partition.partition,
+                        partition = partition.number,
                         subscription_id = %config.subscription_id,
                         "redis_config_provider.upserting_config"
                     );
                     manager
-                        .get_service(partition.partition)
+                        .get_service(partition.number)
                         .get_config_store()
                         .write()
                         .unwrap()
@@ -293,7 +293,7 @@ impl RedisConfigProvider {
                     "config_provider.updater.partition.duration",
                     "histogram" => "timer",
                     "uptime_region" => region.clone(),
-                    "partition" => partition.partition.to_string(),
+                    "partition" => partition.number.to_string(),
                 )
                 .record(partition_update_duration);
             }
@@ -461,7 +461,7 @@ mod tests {
         // Verify configs were added to both partitions
         for (partition, config) in partition_configs {
             let configs = manager
-                .get_service(partition.partition)
+                .get_service(partition.number)
                 .get_config_store()
                 .read()
                 .unwrap()
@@ -522,7 +522,7 @@ mod tests {
 
         for partition in &partitions {
             let configs = manager
-                .get_service(partition.partition)
+                .get_service(partition.number)
                 .get_config_store()
                 .read()
                 .unwrap()
@@ -553,7 +553,7 @@ mod tests {
         // Verify configs were added to both partitions
         for (partition, config) in partition_configs.clone() {
             let configs = manager
-                .get_service(partition.partition)
+                .get_service(partition.number)
                 .get_config_store()
                 .read()
                 .unwrap()
@@ -566,7 +566,7 @@ mod tests {
         send_delete(conn.clone(), removed_config.0, &removed_config.1).await;
         tokio::time::sleep(Duration::from_millis(15)).await;
         let configs = manager
-            .get_service(removed_config.0.partition)
+            .get_service(removed_config.0.number)
             .get_config_store()
             .read()
             .unwrap()
