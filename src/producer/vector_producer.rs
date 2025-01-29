@@ -47,34 +47,34 @@ impl VectorResultsProducer {
                 tracing::debug!("event.received_with_size_{}", json.len());
                 batch.push(json);
                 tracing::debug!("batch.size.updated_to_{}", batch.len());
-
-                // Send batch when it reaches BATCH_SIZE
-                if batch.len() >= vector_batch_size {
-                    tracing::debug!("batch.sending_with_{}_events", batch.len());
-                    // Convert each JSON bytes to string and ensure each line ends with a newline
-                    let body = batch
-                        .iter()
-                        .filter_map(|json| String::from_utf8(json.clone()).ok())
-                        .map(|s| s + "\n")
-                        .collect::<String>();
-
-                    // Log the exact payload for debugging
-                    tracing::debug!("payload.sending\n{}", body);
-
-                    tracing::debug!("request.sending_to_vector_with_size_{}", body.len());
-                    if let Err(e) = client
-                        .post(&endpoint)
-                        .header("Content-Type", "application/json")
-                        .body(body)
-                        .send()
-                        .await
-                    {
-                        tracing::error!(error = ?e, "request.failed_to_vector");
-                    } else {
-                        tracing::debug!("request.sent_successfully");
-                    }
-                    batch.clear();
+                
+                if batch.len() < vector_batch_size {
+                    continue;
                 }
+                tracing::debug!("batch.sending_with_{}_events", batch.len());
+                // Convert each JSON bytes to string and ensure each line ends with a newline
+                let body: String = batch
+                    .iter()
+                    .filter_map(|json| String::from_utf8(json.clone()).ok())
+                    .map(|s| s + "\n")
+                    .collect();
+
+                // Log the exact payload for debugging
+                tracing::debug!("payload.sending\n{}", body);
+
+                tracing::debug!("request.sending_to_vector_with_size_{}", body.len());
+                if let Err(e) = client
+                    .post(&endpoint)
+                    .header("Content-Type", "application/json")
+                    .body(body)
+                    .send()
+                    .await
+                {
+                    tracing::error!(error = ?e, "request.failed_to_vector");
+                } else {
+                    tracing::debug!("request.sent_successfully");
+                }
+                batch.clear();
             }
 
             // Send any remaining events in the batch
