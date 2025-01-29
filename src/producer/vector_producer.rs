@@ -97,16 +97,13 @@ async fn send_batch(
         .await;
 
     match response {
-        Ok(_) => {
-            Ok(())
-        }
+        Ok(_) => Ok(()),
         Err(e) => {
             tracing::error!(error = ?e, "request.failed_to_vector");
             Err(ExtractCodeError::VectorError)
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
