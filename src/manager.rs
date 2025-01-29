@@ -11,16 +11,17 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
-use crate::app::config::ConfigProviderMode;
+use crate::app::config::{ConfigProviderMode, ProducerMode};
 use crate::check_config_provider::kafka_config_provider::run_config_consumer;
 use crate::check_config_provider::redis_config_provider::run_config_provider;
 use crate::check_executor::{run_executor, CheckSender};
 use crate::config_waiter::wait_for_partition_boot;
+use crate::producer::kafka_producer::KafkaResultsProducer;
 use crate::{
     app::config::Config,
     checker::http_checker::HttpChecker,
     config_store::{ConfigStore, RwConfigStore},
-    producer::kafka_producer::KafkaResultsProducer,
+    producer::vector_producer::VectorResultsProducer,
     scheduler::run_scheduler,
 };
 
@@ -109,26 +110,47 @@ impl Manager {
     pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
         let checker = Arc::new(HttpChecker::new(!config.allow_internal_ips));
 
-        let kafka_overrides = HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
-
-        let kafka_config = KafkaConfig::new_config(
-            config.results_kafka_cluster.to_owned(),
-            Some(kafka_overrides),
-        );
-
-        let producer = Arc::new(KafkaResultsProducer::new(
-            &config.results_kafka_topic,
-            kafka_config,
-        ));
-
-        // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
-        // referneces of the Sender (executor_sender) are dropped.
-        let (executor_sender, executor_join_handle) = run_executor(
-            config.checker_concurrency,
-            checker,
-            producer,
-            config.region.clone(),
-        );
+        let (executor_sender, (executor_join_handle, results_worker)) = match &config.producer_mode
+        {
+            ProducerMode::Vector => {
+                let (results_producer, results_worker) = VectorResultsProducer::new(
+                    &config.results_kafka_topic,
+                    config.vector_endpoint.clone(),
+                    config.vector_batch_size,
+                );
+                // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
+                // referneces of the Sender (executor_sender) are dropped.
+                let (executor_sender, executor_handle) = run_executor(
+                    config.checker_concurrency,
+                    checker.clone(),
+                    Arc::new(results_producer),
+                    config.region.clone(),
+                );
+                (executor_sender, (executor_handle, results_worker))
+            }
+            ProducerMode::Kafka => {
+                let kafka_overrides =
+                    HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
+                let kafka_config = KafkaConfig::new_config(
+                    config.results_kafka_cluster.to_owned(),
+                    Some(kafka_overrides),
+                );
+                let producer = Arc::new(KafkaResultsProducer::new(
+                    &config.results_kafka_topic,
+                    kafka_config,
+                ));
+                // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
+                // referneces of the Sender (executor_sender) are dropped.
+                let (sender, handle) = run_executor(
+                    config.checker_concurrency,
+                    checker.clone(),
+                    producer,
+                    config.region.clone(),
+                );
+                let dummy_worker = tokio::spawn(async {});
+                (sender, (handle, dummy_worker))
+            }
+        };
 
         let (shutdown_sender, shutdown_service_rx) = mpsc::unbounded_channel();
 
@@ -155,7 +177,7 @@ impl Manager {
 
         let shutdown_signal = manager.shutdown_signal.clone();
 
-        // process shutdown serrvices as they are shutdown. All services must be shutdown before
+        // process shutdown services as they are shutdown. All services must be shutdown before
         // the manager is completely stopped
         //
         // Shutdowns are processed concurrently so each shutdown will be started immedieatly.
@@ -171,6 +193,9 @@ impl Manager {
             Box::pin(async move {
                 shutdown_signal.cancel();
                 consumer_join_handle.await.expect("Failed to stop consumer");
+
+                results_worker.await.expect("Failed to stop vector worker");
+
                 executor_join_handle.await.expect("Failed to stop executor");
                 services_join_handle
                     .await

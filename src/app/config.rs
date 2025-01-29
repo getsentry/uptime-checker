@@ -18,6 +18,13 @@ pub enum ConfigProviderMode {
     Redis,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProducerMode {
+    Kafka,
+    Vector,
+}
+
 #[serde_as]
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct MetricsConfig {
@@ -80,12 +87,21 @@ pub struct Config {
     /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
 
+    /// which producer to use to send results
+    pub producer_mode: ProducerMode,
+
     /// How frequently to poll redis for config updates when using the redis config provider
     pub config_provider_redis_update_ms: u64,
 
     /// How many config partitions do we want to keep in redis? We shouldn't change this once
     /// assigned unless we plan a migration process.
     pub config_provider_redis_total_partitions: u16,
+
+    /// The batch size to use for vector producer
+    pub vector_batch_size: usize,
+
+    /// The vector endpoint to send results to
+    pub vector_endpoint: String,
 
     /// The general purpose redis node to use with this service
     pub redis_host: String,
@@ -122,6 +138,9 @@ impl Default for Config {
             configs_kafka_cluster: vec![],
             configs_kafka_topic: "uptime-configs".to_owned(),
             config_provider_mode: ConfigProviderMode::Kafka,
+            vector_batch_size: 10,
+            vector_endpoint: "http://localhost:8020".to_owned(),
+            producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
             config_provider_redis_total_partitions: 128,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
@@ -165,7 +184,10 @@ mod tests {
     use figment::Jail;
     use similar_asserts::assert_eq;
 
-    use crate::{app::cli, logging};
+    use crate::{
+        app::{cli, config::ProducerMode},
+        logging,
+    };
 
     use super::{Config, ConfigProviderMode, MetricsConfig};
 
@@ -243,6 +265,9 @@ mod tests {
                         allow_internal_ips: false,
                         checker_number: 0,
                         total_checkers: 1,
+                        producer_mode: ProducerMode::Kafka,
+                        vector_batch_size: 10,
+                        vector_endpoint: "http://localhost:8020".to_owned(),
                     }
                 );
             },
@@ -312,6 +337,9 @@ mod tests {
                         allow_internal_ips: true,
                         checker_number: 2,
                         total_checkers: 5,
+                        producer_mode: ProducerMode::Kafka,
+                        vector_batch_size: 10,
+                        vector_endpoint: "http://localhost:8020".to_owned(),
                     }
                 );
             },
