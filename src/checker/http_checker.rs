@@ -669,7 +669,7 @@ mod tests {
             );
             assert_eq!(
                 result.status_reason.as_ref().map(|r| r.status_type),
-                Some(CheckStatusReasonType::Failure),
+                Some(CheckStatusReasonType::TlsError),
                 "Test case: {:?}",
                 cert_type
             );
@@ -697,7 +697,7 @@ mod tests {
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
             result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::Failure)
+            Some(CheckStatusReasonType::ConnectionError)
         );
         assert_eq!(
             result.status_reason.map(|r| r.description),
@@ -735,7 +735,7 @@ mod tests {
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
             result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::Failure)
+            Some(CheckStatusReasonType::ConnectionError)
         );
         let result_description = result.status_reason.map(|r| r.description).unwrap();
         assert_eq!(
