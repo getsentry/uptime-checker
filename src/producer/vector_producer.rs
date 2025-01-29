@@ -47,7 +47,7 @@ impl VectorResultsProducer {
                 tracing::debug!("event.received_with_size_{}", json.len());
                 batch.push(json);
                 tracing::debug!("batch.size.updated_to_{}", batch.len());
-                
+
                 if batch.len() < vector_batch_size {
                     continue;
                 }
