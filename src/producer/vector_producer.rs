@@ -31,6 +31,8 @@ impl VectorResultsProducer {
         endpoint: String,
         mut receiver: UnboundedReceiver<Vec<u8>>,
     ) -> JoinHandle<()> {
+        tracing::info!("vector_worker.starting");
+
         tokio::spawn(async move {
             let mut batch = Vec::with_capacity(vector_batch_size);
 
@@ -54,7 +56,7 @@ impl VectorResultsProducer {
                 }
             }
 
-            tracing::info!("worker.shutdown");
+            tracing::info!("vector_worker.shutdown");
         })
     }
 }
