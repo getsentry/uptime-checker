@@ -89,10 +89,7 @@ impl VectorResultsProducer {
                 // Log the exact payload for debugging
                 tracing::debug!("final_payload.sending\n{}", body);
 
-                tracing::debug!(
-                    "final_request.sending_to_vector_with_size_{}",
-                    body.len()
-                );
+                tracing::debug!("final_request.sending_to_vector_with_size_{}", body.len());
                 if let Err(e) = client
                     .post(&endpoint)
                     .header("Content-Type", "application/json")
@@ -110,7 +107,6 @@ impl VectorResultsProducer {
         })
     }
 }
-
 
 impl ResultsProducer for VectorResultsProducer {
     fn produce_checker_result(&self, result: &CheckResult) -> Result<(), ExtractCodeError> {
