@@ -86,7 +86,7 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
     }
     None
 }
-fn ssl_error(err: &reqwest::Error) -> Option<String> {
+fn tls_error(err: &reqwest::Error) -> Option<String> {
     let mut inner = &err as &dyn Error;
     while let Some(source) = inner.source() {
         if let Some(e) = source.downcast_ref::<ErrorStack>() {
@@ -219,14 +219,14 @@ impl Checker for HttpChecker {
                         status_type: CheckStatusReasonType::DnsError,
                         description: message,
                     }
-                } else if let Some(message) = ssl_error(&e) {
+                } else if let Some(message) = tls_error(&e) {
                     CheckStatusReason {
-                        status_type: CheckStatusReasonType::Failure,
+                        status_type: CheckStatusReasonType::TlsError,
                         description: message,
                     }
                 } else if let Some(message) = connection_error(&e) {
                     CheckStatusReason {
-                        status_type: CheckStatusReasonType::Failure,
+                        status_type: CheckStatusReasonType::ConnectionError,
                         description: message,
                     }
                 } else if let Some(message) = hyper_error(&e) {
@@ -235,6 +235,9 @@ impl Checker for HttpChecker {
                         description: message,
                     }
                 } else {
+                    // if any error falls through we should log it,
+                    // none should be.
+                    tracing::info!("check_url.error: {:?}", e.without_url());
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
                         description: format!("{:?}", e.without_url()),
