@@ -115,6 +115,7 @@ impl Manager {
             ProducerMode::Vector => {
                 let (results_producer, results_worker) = VectorResultsProducer::new(
                     &config.results_kafka_topic,
+                    config.vector_endpoint.clone(),
                     config.vector_batch_size,
                 );
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all

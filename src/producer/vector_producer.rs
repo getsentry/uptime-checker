@@ -11,15 +11,7 @@ pub struct VectorResultsProducer {
 }
 
 impl VectorResultsProducer {
-    pub fn new(topic_name: &str, vector_batch_size: usize) -> (Self, JoinHandle<()>) {
-        Self::new_with_endpoint(
-            topic_name,
-            "http://localhost:8020".to_string(),
-            vector_batch_size,
-        )
-    }
-
-    pub fn new_with_endpoint(
+    pub fn new(
         topic_name: &str,
         endpoint: String,
         vector_batch_size: usize,
@@ -211,7 +203,7 @@ mod tests {
         });
 
         let (producer, worker) =
-            VectorResultsProducer::new_with_endpoint("uptime-results", mock_server.url("/"), 10);
+            VectorResultsProducer::new("uptime-results", mock_server.url("/").to_string(), 10);
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
 
@@ -230,9 +222,9 @@ mod tests {
     async fn test_batch_events() {
         let mock_server = MockServer::start();
         tracing::debug!("Mock server started at {}", mock_server.url("/"));
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint(
+        let (producer, worker) = VectorResultsProducer::new(
             "uptime-results",
-            mock_server.url("/"),
+            mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
         );
 
@@ -329,9 +321,9 @@ mod tests {
             then.status(500).body("Internal Server Error");
         });
 
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint(
+        let (producer, worker) = VectorResultsProducer::new(
             "uptime-results",
-            mock_server.url("/"),
+            mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
         );
         let result = producer.produce_checker_result(&test_result);
@@ -383,9 +375,9 @@ mod tests {
             then.status(200);
         });
 
-        let (producer, worker) = VectorResultsProducer::new_with_endpoint(
+        let (producer, worker) = VectorResultsProducer::new(
             "uptime-results",
-            mock_server.url("/"),
+            mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
         );
 

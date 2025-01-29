@@ -100,6 +100,9 @@ pub struct Config {
     /// The batch size to use for vector producer
     pub vector_batch_size: usize,
 
+    /// The vector endpoint to send results to
+    pub vector_endpoint: String,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -136,6 +139,7 @@ impl Default for Config {
             configs_kafka_topic: "uptime-configs".to_owned(),
             config_provider_mode: ConfigProviderMode::Kafka,
             vector_batch_size: 10,
+            vector_endpoint: "http://localhost:8020".to_owned(),
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
             config_provider_redis_total_partitions: 128,
@@ -263,6 +267,7 @@ mod tests {
                         total_checkers: 1,
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
+                        vector_endpoint: "http://localhost:8020".to_owned(),
                     }
                 );
             },
@@ -334,6 +339,7 @@ mod tests {
                         total_checkers: 5,
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
+                        vector_endpoint: "http://localhost:8020".to_owned(),
                     }
                 );
             },
