@@ -9,13 +9,10 @@ steps:
         'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA',
         '--build-arg',
         'UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA',
-        '--build-arg',
-        'BUILDKIT_INLINE_CACHE=1',
         '--cache-from',
         'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest',
         '.',
       ]
-    env: [DOCKER_BUILDKIT=1]
 
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
@@ -29,3 +26,6 @@ steps:
 images: [
   'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA',
 ]
+
+options:
+  machineType: 'E2_HIGHCPU_8'
