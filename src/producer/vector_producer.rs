@@ -33,6 +33,46 @@ impl VectorResultsProducer {
         (Self { schema, sender }, worker)
     }
 
+    async fn send_batch(
+        batch: Vec<Vec<u8>>,
+        client: Client,
+        endpoint: String,
+    ) -> Result<(), ExtractCodeError> {
+        if batch.is_empty() {
+            return Ok(());
+        }
+
+        let body: String = batch
+            .iter()
+            .filter_map(|json| String::from_utf8(json.clone()).ok())
+            .map(|s| s + "\n")
+            .collect();
+
+        // Log the exact payload for debugging
+        tracing::debug!(%body, "payload.sending");
+        tracing::debug!(size = body.len(), "request.sending_to_vector");
+
+        let response = client
+            .post(&endpoint)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await;
+
+        match response {
+            Ok(_) => {
+                tracing::debug!("request.sent_successfully");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(error = ?e, "request.failed_to_vector");
+                Err(ExtractCodeError::VectorRequestStatusError(
+                    reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                ))
+            }
+        }
+    }
+
     fn spawn_worker(
         vector_batch_size: usize,
         client: Client,
@@ -40,66 +80,32 @@ impl VectorResultsProducer {
         mut receiver: UnboundedReceiver<Vec<u8>>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
-            tracing::debug!("worker.started_with_endpoint_{}", endpoint);
+            tracing::debug!(%endpoint, "worker.started");
             let mut batch = Vec::with_capacity(vector_batch_size);
 
             while let Some(json) = receiver.recv().await {
-                tracing::debug!("event.received_with_size_{}", json.len());
+                tracing::debug!(size = json.len(), "event.received");
                 batch.push(json);
-                tracing::debug!("batch.size.updated_to_{}", batch.len());
+                tracing::debug!(size = batch.len(), "batch.size.updated");
 
                 if batch.len() < vector_batch_size {
                     continue;
                 }
-                tracing::debug!("batch.sending_with_{}_events", batch.len());
-                // Convert each JSON bytes to string and ensure each line ends with a newline
-                let body: String = batch
-                    .iter()
-                    .filter_map(|json| String::from_utf8(json.clone()).ok())
-                    .map(|s| s + "\n")
-                    .collect();
 
-                // Log the exact payload for debugging
-                tracing::debug!("payload.sending\n{}", body);
-
-                tracing::debug!("request.sending_to_vector_with_size_{}", body.len());
-                if let Err(e) = client
-                    .post(&endpoint)
-                    .header("Content-Type", "application/json")
-                    .body(body)
-                    .send()
-                    .await
+                tracing::debug!(size = batch.len(), "batch.sending");
+                let batch_to_send =
+                    std::mem::replace(&mut batch, Vec::with_capacity(vector_batch_size));
+                if let Err(e) =
+                    Self::send_batch(batch_to_send, client.clone(), endpoint.clone()).await
                 {
-                    tracing::error!(error = ?e, "request.failed_to_vector");
-                } else {
-                    tracing::debug!("request.sent_successfully");
+                    tracing::error!(error = ?e, "batch.send_failed");
                 }
-                batch.clear();
             }
 
-            // Send any remaining events in the batch
             if !batch.is_empty() {
-                tracing::debug!("final_batch.sending_with_{}_events", batch.len());
-                let body = batch
-                    .iter()
-                    .filter_map(|json| String::from_utf8(json.clone()).ok())
-                    .collect::<Vec<String>>()
-                    .join("\n");
-
-                // Log the exact payload for debugging
-                tracing::debug!("final_payload.sending\n{}", body);
-
-                tracing::debug!("final_request.sending_to_vector_with_size_{}", body.len());
-                if let Err(e) = client
-                    .post(&endpoint)
-                    .header("Content-Type", "application/json")
-                    .body(body)
-                    .send()
-                    .await
-                {
-                    tracing::error!(error = ?e, "final_request.failed_to_vector");
-                } else {
-                    tracing::debug!("final_request.sent_successfully");
+                tracing::debug!(size = batch.len(), "final_batch.sending");
+                if let Err(e) = Self::send_batch(batch, client, endpoint).await {
+                    tracing::error!(error = ?e, "final_batch.send_failed");
                 }
             }
 
