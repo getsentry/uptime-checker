@@ -40,17 +40,17 @@ impl VectorResultsProducer {
         mut receiver: UnboundedReceiver<Vec<u8>>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
-            tracing::debug!("Vector producer worker started with endpoint {}", endpoint);
+            tracing::debug!("worker.started_with_endpoint_{}", endpoint);
             let mut batch = Vec::with_capacity(vector_batch_size);
 
             while let Some(json) = receiver.recv().await {
-                tracing::debug!("Received event of size {}", json.len());
+                tracing::debug!("event.received_with_size_{}", json.len());
                 batch.push(json);
-                tracing::debug!("Current batch size: {}", batch.len());
+                tracing::debug!("batch.size.updated_to_{}", batch.len());
 
                 // Send batch when it reaches BATCH_SIZE
                 if batch.len() >= vector_batch_size {
-                    tracing::debug!("Sending batch of {} events", batch.len());
+                    tracing::debug!("batch.sending_with_{}_events", batch.len());
                     // Convert each JSON bytes to string and ensure each line ends with a newline
                     let body = batch
                         .iter()
@@ -59,9 +59,9 @@ impl VectorResultsProducer {
                         .collect::<String>();
 
                     // Log the exact payload for debugging
-                    tracing::debug!("Payload being sent:\n{}", body);
+                    tracing::debug!("payload.sending\n{}", body);
 
-                    tracing::debug!("Sending request to Vector with body size {}", body.len());
+                    tracing::debug!("request.sending_to_vector_with_size_{}", body.len());
                     if let Err(e) = client
                         .post(&endpoint)
                         .header("Content-Type", "application/json")
@@ -69,9 +69,9 @@ impl VectorResultsProducer {
                         .send()
                         .await
                     {
-                        tracing::error!(error = ?e, "Failed to send batch request to Vector");
+                        tracing::error!(error = ?e, "request.failed_to_vector");
                     } else {
-                        tracing::debug!("Successfully sent batch request");
+                        tracing::debug!("request.sent_successfully");
                     }
                     batch.clear();
                 }
@@ -79,7 +79,7 @@ impl VectorResultsProducer {
 
             // Send any remaining events in the batch
             if !batch.is_empty() {
-                tracing::debug!("Sending final batch of {} events", batch.len());
+                tracing::debug!("final_batch.sending_with_{}_events", batch.len());
                 let body = batch
                     .iter()
                     .filter_map(|json| String::from_utf8(json.clone()).ok())
@@ -87,10 +87,10 @@ impl VectorResultsProducer {
                     .join("\n");
 
                 // Log the exact payload for debugging
-                tracing::debug!("Final payload being sent:\n{}", body);
+                tracing::debug!("final_payload.sending\n{}", body);
 
                 tracing::debug!(
-                    "Sending final request to Vector with body size {}",
+                    "final_request.sending_to_vector_with_size_{}",
                     body.len()
                 );
                 if let Err(e) = client
@@ -100,22 +100,17 @@ impl VectorResultsProducer {
                     .send()
                     .await
                 {
-                    tracing::error!(error = ?e, "Failed to send final batch request to Vector");
+                    tracing::error!(error = ?e, "final_request.failed_to_vector");
                 } else {
-                    tracing::debug!("Successfully sent final batch request");
+                    tracing::debug!("final_request.sent_successfully");
                 }
             }
 
-            tracing::info!("Vector producer worker shutting down");
+            tracing::info!("worker.shutdown");
         })
     }
 }
 
-impl Drop for VectorResultsProducer {
-    fn drop(&mut self) {
-        // No longer need to handle shutdown in Drop since the worker is managed externally
-    }
-}
 
 impl ResultsProducer for VectorResultsProducer {
     fn produce_checker_result(&self, result: &CheckResult) -> Result<(), ExtractCodeError> {
@@ -124,7 +119,7 @@ impl ResultsProducer for VectorResultsProducer {
 
         // Send the serialized result to the worker task
         if self.sender.send(json).is_err() {
-            tracing::error!("Failed to send result to Vector worker - channel closed");
+            tracing::error!("event.send_failed_channel_closed");
             return Err(ExtractCodeError::VectorRequestStatusError(
                 reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             ));
