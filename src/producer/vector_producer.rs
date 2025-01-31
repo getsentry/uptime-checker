@@ -1,3 +1,6 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
 use crate::producer::{ExtractCodeError, ResultsProducer};
 use crate::types::result::CheckResult;
 use reqwest::Client;
@@ -9,23 +12,27 @@ use tokio::time::{sleep, Duration};
 pub struct VectorResultsProducer {
     schema: Schema,
     sender: UnboundedSender<Vec<u8>>,
+    pending_items: Arc<AtomicUsize>,
 }
 
 impl VectorResultsProducer {
+
     pub fn new(
         topic_name: &str,
         endpoint: String,
         vector_batch_size: usize,
         retry_vector_errors_forever: bool,
         max_retries: Option<u32>,
+        region: String,
     ) -> (Self, JoinHandle<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
+        let pending_items = Arc::new(AtomicUsize::new(0));
 
         let (sender, receiver) = mpsc::unbounded_channel();
-        let worker = Self::spawn_worker(vector_batch_size, client, endpoint, receiver, retry_vector_errors_forever, max_retries);
+        let worker = Self::spawn_worker(vector_batch_size, client, endpoint, receiver, retry_vector_errors_forever, max_retries, pending_items.clone(), region);
 
-        (Self { schema, sender }, worker)
+        (Self { schema, sender, pending_items }, worker)
     }
 
     fn spawn_worker(
@@ -35,6 +42,8 @@ impl VectorResultsProducer {
         mut receiver: UnboundedReceiver<Vec<u8>>,
         retry_vector_errors_forever: bool,
         max_retries: Option<u32>,
+        pending_items: Arc<AtomicUsize>,
+        region: String,
     ) -> JoinHandle<()> {
         tracing::info!("vector_worker.starting");
 
@@ -42,6 +51,9 @@ impl VectorResultsProducer {
             let mut batch = Vec::with_capacity(vector_batch_size);
 
             while let Some(json) = receiver.recv().await {
+                pending_items.fetch_sub(1, Ordering::SeqCst);
+                metrics::gauge!("producer.pending_items").set(pending_items.load(Ordering::SeqCst) as f64);
+
                 batch.push(json);
 
                 if batch.len() < vector_batch_size {
@@ -51,7 +63,12 @@ impl VectorResultsProducer {
                 let batch_to_send =
                     std::mem::replace(&mut batch, Vec::with_capacity(vector_batch_size));
                     if let Err(e) =
-                        send_batch(batch_to_send, client.clone(), endpoint.clone(), retry_vector_errors_forever, max_retries).await
+                        {
+                            let start = std::time::Instant::now();
+                            let result = send_batch(batch_to_send, client.clone(), endpoint.clone(), retry_vector_errors_forever, max_retries).await;
+                            metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => region.clone(), "histogram" => "timer").record(start.elapsed().as_secs_f64());
+                            result
+                        }
                 {
                     tracing::error!(error = ?e, "vector_batch.send_failed");
                 }
@@ -78,6 +95,7 @@ impl ResultsProducer for VectorResultsProducer {
             tracing::error!("event.send_failed_channel_closed");
             return Err(ExtractCodeError::VectorError);
         }
+        self.pending_items.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         Ok(())
     }
@@ -206,6 +224,7 @@ mod tests {
             TEST_BATCH_SIZE,
             false,
             TEST_MAX_RETRIES,
+            "us-west-1".to_string(),
         );
 
         // Create and send BATCH_SIZE + 2 events
@@ -295,6 +314,8 @@ mod tests {
             TEST_BATCH_SIZE,
             false,
             TEST_MAX_RETRIES,
+            "us-west-1".to_string(),
+
         );
 
         // Send a single event (less than BATCH_SIZE)
@@ -350,6 +371,7 @@ mod tests {
             TEST_BATCH_SIZE,
             false,
             TEST_MAX_RETRIES,
+            "us-west-1".to_string(),
         );
         let result = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
