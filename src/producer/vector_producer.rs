@@ -17,7 +17,7 @@ impl VectorResultsProducer {
         endpoint: String,
         vector_batch_size: usize,
         retry_vector_errors_forever: bool,
-        max_retries: u32,
+        max_retries: Option<u32>,
     ) -> (Self, JoinHandle<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
@@ -34,7 +34,7 @@ impl VectorResultsProducer {
         endpoint: String,
         mut receiver: UnboundedReceiver<Vec<u8>>,
         retry_vector_errors_forever: bool,
-        max_retries: u32,
+        max_retries: Option<u32>,
     ) -> JoinHandle<()> {
         tracing::info!("vector_worker.starting");
 
@@ -88,7 +88,7 @@ async fn send_batch(
     client: Client,
     endpoint: String,
     retry_vector_errors_forever: bool,
-    max_retries: u32,
+    max_retries: Option<u32>,
 ) -> Result<(), ExtractCodeError> {
     if batch.is_empty() {
         return Ok(());
@@ -128,7 +128,7 @@ async fn send_batch(
                     batch_size = batch.len(),
                     "request.failed_to_vector_retrying"
                 );
-                if !retry_vector_errors_forever && num_of_retries >= max_retries {
+                if !retry_vector_errors_forever && num_of_retries >= max_retries.unwrap_or(0) {
                     return Err(ExtractCodeError::VectorError);
                 }
                 num_of_retries += 1;
@@ -141,7 +141,7 @@ async fn send_batch(
                     delay_ms = ?delay.as_millis(),
                     "request.failed_to_vector_retrying"
                 );
-                if !retry_vector_errors_forever && num_of_retries >= max_retries {
+                if !retry_vector_errors_forever && num_of_retries >= max_retries.unwrap_or(0) {
                     return Err(ExtractCodeError::VectorError);
                 }
                 num_of_retries += 1;
@@ -173,7 +173,7 @@ mod tests {
     use uuid::{uuid, Uuid};
 
     const TEST_BATCH_SIZE: usize = 10;
-    const TEST_MAX_RETRIES: u32 = 2;
+    const TEST_MAX_RETRIES: Option<u32> = Some(2);
 
     fn create_test_result() -> CheckResult {
         CheckResult {

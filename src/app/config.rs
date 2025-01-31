@@ -94,7 +94,7 @@ pub struct Config {
     pub redis_enable_cluster: bool,
     
     /// The maximum number of retries to attempt when sending results to vector
-    pub vector_max_retries: u32,
+    pub vector_max_retries: Option<u32>,
 
     /// Whether to retry sending results to vector indefinitely
     pub retry_vector_errors_forever: bool,
@@ -137,7 +137,7 @@ impl Default for Config {
             config_provider_mode: ConfigProviderMode::Redis,
             vector_batch_size: 10,
             vector_endpoint: "http://localhost:8020".to_owned(),
-            vector_max_retries: 5,
+            vector_max_retries: Some(5),
             retry_vector_errors_forever: false,
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
@@ -175,6 +175,10 @@ impl Config {
 
         let config: Config = builder.extract()?;
 
+        if config.retry_vector_errors_forever && config.vector_max_retries.is_some() {
+            return Err(anyhow::anyhow!("vector_max_retries must be set to None when retry_vector_errors_forever is true"));
+        }
+
         Ok(config)
     }
 }
@@ -195,7 +199,7 @@ mod tests {
 
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where
-        F: FnOnce(Config),
+        F: FnOnce(anyhow::Result<Config>),
     {
         Jail::expect_with(|jail| {
             jail.create_file("config.yaml", yaml)?;
@@ -211,7 +215,7 @@ mod tests {
                 command: cli::Commands::Run,
             };
 
-            let config = Config::extract(&app).unwrap();
+            let config = Config::extract(&app);
             test_fn(config);
             Ok(())
         })
@@ -233,6 +237,7 @@ mod tests {
             "#,
             &[],
             |config| {
+                let config = config.unwrap();
                 assert_eq!(
                     config,
                     Config {
@@ -267,9 +272,8 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
-                        vector_max_retries: 5,
+                        vector_max_retries: Some(5),
                         retry_vector_errors_forever: false,
-
                     }
                 );
             },
@@ -311,7 +315,7 @@ mod tests {
             ],
             |config| {
                 assert_eq!(
-                    config,
+                    config.unwrap(),
                     Config {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env_override")),
@@ -341,13 +345,58 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
-                        vector_max_retries: 5,
+                        vector_max_retries: Some(5),
                         retry_vector_errors_forever: false,
                     }
                 );
             },
         )
     }
+
+    #[test]
+    fn test_invalid_config() {
+        // Test that setting both retry_vector_errors_forever and vector_max_retries is invalid
+        test_with_config(
+            r#"
+            sentry_dsn: my_dsn
+            sentry_env: my_env
+            log_format: json
+            retry_vector_errors_forever: true
+            vector_max_retries: 5
+            "#,
+            &[
+                ("UPTIME_CHECKER_SENTRY_ENV", "my_env_override"),
+                (
+                    "UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER",
+                    "10.0.0.1,10.0.0.2:7000",
+                ),
+                (
+                    "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
+                    "10.0.0.1,10.0.0.2:7000",
+                ),
+                ("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "kafka"),
+                ("UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_UPDATE_MS", "2000"),
+                (
+                    "UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_TOTAL_PARTITIONS",
+                    "32",
+                ),
+                ("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234"),
+                ("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379"),
+                ("UPTIME_CHECKER_REGION", "us-west"),
+                ("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true"),
+                ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
+                ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
+            ],
+            |result| {
+                assert!(result.is_err());
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "vector_max_retries must be set to None when retry_vector_errors_forever is true"
+                );
+            },
+        )
+    }
+
 
     #[test]
     fn test_config_default_checker_ordinal() {
@@ -358,7 +407,7 @@ mod tests {
             "#,
             &[],
             |config| {
-                assert_eq!(config.checker_number, 0);
+                assert_eq!(config.unwrap().checker_number, 0);
             },
         )
     }
