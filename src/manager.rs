@@ -108,7 +108,10 @@ impl Manager {
     /// The returned shutdown function may be called to stop the consumer and thus shutdown all
     /// PartitionedService's, stopping check execution.
     pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
-        let checker = Arc::new(HttpChecker::new(!config.allow_internal_ips));
+        let checker = Arc::new(HttpChecker::new(
+            !config.allow_internal_ips,
+            config.disable_connection_reuse,
+        ));
 
         let (executor_sender, (executor_join_handle, results_worker)) = match &config.producer_mode
         {
