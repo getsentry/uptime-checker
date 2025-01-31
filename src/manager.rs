@@ -120,6 +120,7 @@ impl Manager {
                     &config.results_kafka_topic,
                     config.vector_endpoint.clone(),
                     config.vector_batch_size,
+                    config.vector_max_retries,
                 );
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
                 // referneces of the Sender (executor_sender) are dropped.

@@ -4,6 +4,7 @@ use reqwest::Client;
 use sentry_kafka_schemas::Schema;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
+use tokio::time::{sleep, Duration};
 
 pub struct VectorResultsProducer {
     schema: Schema,
@@ -15,12 +16,13 @@ impl VectorResultsProducer {
         topic_name: &str,
         endpoint: String,
         vector_batch_size: usize,
+        max_retries: u32,
     ) -> (Self, JoinHandle<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
 
         let (sender, receiver) = mpsc::unbounded_channel();
-        let worker = Self::spawn_worker(vector_batch_size, client, endpoint, receiver);
+        let worker = Self::spawn_worker(vector_batch_size, client, endpoint, max_retries, receiver);
 
         (Self { schema, sender }, worker)
     }
@@ -29,6 +31,7 @@ impl VectorResultsProducer {
         vector_batch_size: usize,
         client: Client,
         endpoint: String,
+        max_retries: u32,
         mut receiver: UnboundedReceiver<Vec<u8>>,
     ) -> JoinHandle<()> {
         tracing::info!("vector_worker.starting");
@@ -45,13 +48,13 @@ impl VectorResultsProducer {
 
                 let batch_to_send =
                     std::mem::replace(&mut batch, Vec::with_capacity(vector_batch_size));
-                if let Err(e) = send_batch(batch_to_send, client.clone(), endpoint.clone()).await {
+                if let Err(e) = send_batch(batch_to_send, client.clone(), endpoint.clone(), max_retries).await {
                     tracing::error!(error = ?e, "vector_batch.send_failed");
                 }
             }
 
             if !batch.is_empty() {
-                if let Err(e) = send_batch(batch, client, endpoint).await {
+                if let Err(e) = send_batch(batch, client, endpoint, max_retries).await {
                     tracing::error!(error = ?e, "final_batch.send_failed");
                 }
             }
@@ -80,6 +83,7 @@ async fn send_batch(
     batch: Vec<Vec<u8>>,
     client: Client,
     endpoint: String,
+    max_retries: u32,
 ) -> Result<(), ExtractCodeError> {
     if batch.is_empty() {
         return Ok(());
@@ -91,20 +95,56 @@ async fn send_batch(
         .map(|s| s + "\n")
         .collect();
 
-    let response = client
-        .post(&endpoint)
-        .header("Content-Type", "application/json")
-        .body(body)
-        .send()
-        .await;
+    const BASE_DELAY_MS: u64 = 100;
 
-    match response {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            tracing::error!(error = ?e, "request.failed_to_vector");
-            Err(ExtractCodeError::VectorError)
+    for retry in 0..=max_retries {
+        println!("retry: {}", retry);
+        let response = client
+            .post(&endpoint)
+            .header("Content-Type", "application/json")
+            .body(body.clone())
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) => {
+                if resp.status().is_server_error() {
+                    if retry == max_retries {
+                        tracing::error!(status = ?resp.status(), "request.failed_to_vector_after_retries");
+                        return Err(ExtractCodeError::VectorError);
+                    }
+                    let delay = Duration::from_millis(BASE_DELAY_MS * (2_u64.pow(retry)));
+                    tracing::warn!(
+                        status = ?resp.status(),
+                        retry = retry + 1,
+                        delay_ms = ?delay.as_millis(),
+                        "request.failed_to_vector_retrying"
+                    );
+                    sleep(delay).await;
+                } else {
+                    return Ok(());
+                }
+            },
+            Err(e) => {
+                if retry == max_retries {
+                    tracing::error!(error = ?e, "request.failed_to_vector_after_retries");
+                    return Err(ExtractCodeError::VectorError);
+                }
+                
+                let delay = Duration::from_millis(BASE_DELAY_MS * (2_u64.pow(retry)));
+                tracing::warn!(
+                    error = ?e,
+                    retry = retry + 1,
+                    delay_ms = ?delay.as_millis(),
+                    "request.failed_to_vector_retrying"
+                );
+                sleep(delay).await;
+            }
         }
     }
+
+    // This should never be reached due to the return in the last iteration
+    Err(ExtractCodeError::VectorError)
 }
 
 #[cfg(test)]
@@ -128,6 +168,7 @@ mod tests {
     use uuid::{uuid, Uuid};
 
     const TEST_BATCH_SIZE: usize = 10;
+    const TEST_MAX_RETRIES: u32 = 2;
 
     fn create_test_result() -> CheckResult {
         CheckResult {
@@ -152,57 +193,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_single_event() {
-        let mock_server = MockServer::start();
-        let test_result = create_test_result();
-
-        let mock = mock_server.mock(|when, then| {
-            when.method(Method::POST)
-                .path("/")
-                .header("Content-Type", "application/json")
-                .matches(|req| {
-                    if let Some(body) = &req.body {
-                        let lines: Vec<_> = body
-                            .split(|&b| b == b'\n')
-                            .filter(|l| !l.is_empty())
-                            .collect();
-                        if lines.len() != 1 {
-                            return false;
-                        }
-                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
-                            return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
-                                && value["status"] == "success"
-                                && value["region"] == "us-west-1";
-                        }
-                    }
-                    false
-                });
-            then.status(200);
-        });
-
-        let (producer, worker) =
-            VectorResultsProducer::new("uptime-results", mock_server.url("/").to_string(), 10);
-        let result = producer.produce_checker_result(&test_result);
-        assert!(result.is_ok());
-
-        // Wait a bit for the request to be processed
-        sleep(Duration::from_millis(100)).await;
-
-        // Drop the producer which will close the channel
-        drop(producer);
-
-        // Now we can await the worker
-        let _ = worker.await;
-        mock.assert();
-    }
-
-    #[tokio::test]
     async fn test_batch_events() {
         let mock_server = MockServer::start();
         let (producer, worker) = VectorResultsProducer::new(
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            TEST_MAX_RETRIES,
         );
 
         // Create and send BATCH_SIZE + 2 events
@@ -258,54 +255,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_server_error() {
-        let mock_server = MockServer::start();
-        let test_result = create_test_result();
-
-        let error_mock = mock_server.mock(|when, then| {
-            when.method(Method::POST)
-                .path("/")
-                .header("Content-Type", "application/json")
-                .matches(|req| {
-                    if let Some(body) = &req.body {
-                        let lines: Vec<_> = body
-                            .split(|&b| b == b'\n')
-                            .filter(|l| !l.is_empty())
-                            .collect();
-                        if lines.len() != 1 {
-                            return false;
-                        }
-                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
-                            return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
-                                && value["status"] == "success"
-                                && value["region"] == "us-west-1";
-                        }
-                    }
-                    false
-                });
-            then.status(500).body("Internal Server Error");
-        });
-
-        let (producer, worker) = VectorResultsProducer::new(
-            "uptime-results",
-            mock_server.url("/").to_string(),
-            TEST_BATCH_SIZE,
-        );
-        let result = producer.produce_checker_result(&test_result);
-        assert!(result.is_ok());
-
-        // Wait a bit for the request to be processed
-        sleep(Duration::from_millis(100)).await;
-
-        // Drop the producer which will close the channel
-        drop(producer);
-
-        // Now we can await the worker
-        let _ = worker.await;
-        error_mock.assert();
-    }
-
-    #[tokio::test]
     async fn test_flush_on_shutdown() {
         let mock_server = MockServer::start();
         // Create a mock that expects a single request with less than BATCH_SIZE events
@@ -338,6 +287,7 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            TEST_MAX_RETRIES,
         );
 
         // Send a single event (less than BATCH_SIZE)
@@ -357,4 +307,56 @@ mod tests {
         // Verify that the event was sent despite not reaching BATCH_SIZE
         mock.assert();
     }
+
+    #[tokio::test]
+    async fn test_server_error_retries() {
+        let mock_server = MockServer::start();
+        let test_result = create_test_result();
+
+        let error_mock = mock_server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/")
+                .header("Content-Type", "application/json")
+                .matches(|req| {
+                    if let Some(body) = &req.body {
+                        let lines: Vec<_> = body
+                            .split(|&b| b == b'\n')
+                            .filter(|l| !l.is_empty())
+                            .collect();
+                        if lines.len() != 1 {
+                            return false;
+                        }
+                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
+                            return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
+                                && value["status"] == "success"
+                                && value["region"] == "us-west-1";
+                        }
+                    }
+                    false
+                });
+            then.status(500).body("Internal Server Error");
+        });
+
+        let (producer, worker) = VectorResultsProducer::new(
+            "uptime-results",
+            mock_server.url("/").to_string(),
+            TEST_BATCH_SIZE,
+            TEST_MAX_RETRIES,
+        );
+        let result = producer.produce_checker_result(&test_result);
+        assert!(result.is_ok());
+
+        // Wait a bit for the requests to be processed
+        sleep(Duration::from_millis(300)).await;
+
+        // Drop the producer which will close the channel
+        drop(producer);
+
+        // Now we can await the worker
+        let _ = worker.await;
+        
+        // Verify that the server was called 3 times
+        error_mock.assert_hits(3); // 1 initial attempt + 2 retries
+    }
+
 }
