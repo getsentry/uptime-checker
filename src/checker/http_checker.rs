@@ -650,6 +650,7 @@ mod tests {
 
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
         });
         let tick = make_tick();
 
@@ -739,6 +740,8 @@ mod tests {
 
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
+
         });
         let tick = make_tick();
         let config = CheckConfig {
