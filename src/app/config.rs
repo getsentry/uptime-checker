@@ -92,6 +92,9 @@ pub struct Config {
 
     /// Whether we're using redis in standalone or cluster mode
     pub redis_enable_cluster: bool,
+    
+    /// The maximum number of retries to attempt when sending results to vector
+    pub vector_max_retries: u32,
 
     /// The general purpose redis node to use with this service
     pub redis_host: String,
@@ -141,6 +144,7 @@ impl Default for Config {
             disable_connection_reuse: true,
             checker_number: 0,
             total_checkers: 1,
+            vector_max_retries: 5,
         }
     }
 }
@@ -258,6 +262,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        vector_max_retries: 5,
                     }
                 );
             },
@@ -329,6 +334,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        vector_max_retries: 5,
                     }
                 );
             },
