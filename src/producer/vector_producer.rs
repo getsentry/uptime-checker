@@ -9,6 +9,14 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
+struct VectorRequestWorkerConfig {
+    vector_batch_size: usize,
+    endpoint: String,
+    retry_vector_errors_forever: bool,
+    max_retries: Option<u32>,
+    region: String,
+}
+
 pub struct VectorResultsProducer {
     schema: Schema,
     sender: UnboundedSender<Vec<u8>>,
@@ -29,26 +37,30 @@ impl VectorResultsProducer {
         let client = Client::new();
         let pending_items = Arc::new(AtomicUsize::new(0));
 
+        let config = VectorRequestWorkerConfig {
+            vector_batch_size,
+            endpoint,
+            retry_vector_errors_forever,
+            max_retries,
+            region,
+        };
+
         let (sender, receiver) = mpsc::unbounded_channel();
-        let worker = Self::spawn_worker(vector_batch_size, client, endpoint, receiver, retry_vector_errors_forever, max_retries, pending_items.clone(), region);
+        let worker = Self::spawn_worker(config, client, receiver, pending_items.clone());
 
         (Self { schema, sender, pending_items }, worker)
     }
 
     fn spawn_worker(
-        vector_batch_size: usize,
+        config: VectorRequestWorkerConfig,
         client: Client,
-        endpoint: String,
         mut receiver: UnboundedReceiver<Vec<u8>>,
-        retry_vector_errors_forever: bool,
-        max_retries: Option<u32>,
         pending_items: Arc<AtomicUsize>,
-        region: String,
     ) -> JoinHandle<()> {
         tracing::info!("vector_worker.starting");
 
         tokio::spawn(async move {
-            let mut batch = Vec::with_capacity(vector_batch_size);
+            let mut batch = Vec::with_capacity(config.vector_batch_size);
 
             while let Some(json) = receiver.recv().await {
                 pending_items.fetch_sub(1, Ordering::SeqCst);
@@ -56,17 +68,23 @@ impl VectorResultsProducer {
 
                 batch.push(json);
 
-                if batch.len() < vector_batch_size {
+                if batch.len() < config.vector_batch_size {
                     continue;
                 }
 
                 let batch_to_send =
-                    std::mem::replace(&mut batch, Vec::with_capacity(vector_batch_size));
+                    std::mem::replace(&mut batch, Vec::with_capacity(config.vector_batch_size));
                     if let Err(e) =
                         {
                             let start = std::time::Instant::now();
-                            let result = send_batch(batch_to_send, client.clone(), endpoint.clone(), retry_vector_errors_forever, max_retries).await;
-                            metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => region.clone(), "histogram" => "timer").record(start.elapsed().as_secs_f64());
+                            let result = send_batch(
+                                batch_to_send,
+                                client.clone(),
+                                config.endpoint.clone(),
+                                config.retry_vector_errors_forever,
+                                config.max_retries
+                            ).await;
+                            metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => config.region.clone(), "histogram" => "timer").record(start.elapsed().as_secs_f64());
                             result
                         }
                 {
@@ -75,7 +93,13 @@ impl VectorResultsProducer {
             }
 
             if !batch.is_empty() {
-                if let Err(e) = send_batch(batch, client, endpoint, retry_vector_errors_forever, max_retries).await {
+                if let Err(e) = send_batch(
+                    batch,
+                    client,
+                    config.endpoint,
+                    config.retry_vector_errors_forever,
+                    config.max_retries
+                ).await {
                     tracing::error!(error = ?e, "final_batch.send_failed");
                 }
             }
