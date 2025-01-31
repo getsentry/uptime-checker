@@ -91,14 +91,20 @@ local deploy_pop_jobs(regions) =
   };
 
 
-local deploy_primary_pops_stage(region) = {
-  ['deploy-primary-pops-' + region]: {
-    fetch_materials: true,
-    jobs+: deploy_pop_jobs(
-      region_pops[region],
-    ),
-  },
-};
+local deploy_primary_pops_stage(region) =
+  if region == 's4s' then
+    [
+      {
+        ['deploy-primary-pops-' + region]: {
+          fetch_materials: true,
+          jobs+: deploy_pop_jobs(
+            region_pops[region],
+          ),
+        },
+      },
+    ]
+  else
+    [];
 
 
 function(region) {
@@ -115,5 +121,5 @@ function(region) {
     },
   },
   lock_behavior: 'unlockWhenFinished',
-  stages: [checks_stage] + deploy_canary_stage(region) + [deploy_primary_stage] + [deploy_primary_pops_stage(region)],
+  stages: [checks_stage] + deploy_canary_stage(region) + [deploy_primary_stage] + deploy_primary_pops_stage(region),
 }
