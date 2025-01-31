@@ -48,7 +48,9 @@ impl VectorResultsProducer {
 
                 let batch_to_send =
                     std::mem::replace(&mut batch, Vec::with_capacity(vector_batch_size));
-                if let Err(e) = send_batch(batch_to_send, client.clone(), endpoint.clone(), max_retries).await {
+                if let Err(e) =
+                    send_batch(batch_to_send, client.clone(), endpoint.clone(), max_retries).await
+                {
                     tracing::error!(error = ?e, "vector_batch.send_failed");
                 }
             }
@@ -124,13 +126,13 @@ async fn send_batch(
                 } else {
                     return Ok(());
                 }
-            },
+            }
             Err(e) => {
                 if retry == max_retries {
                     tracing::error!(error = ?e, "request.failed_to_vector_after_retries");
                     return Err(ExtractCodeError::VectorError);
                 }
-                
+
                 let delay = Duration::from_millis(BASE_DELAY_MS * (2_u64.pow(retry)));
                 tracing::warn!(
                     error = ?e,
@@ -354,9 +356,8 @@ mod tests {
 
         // Now we can await the worker
         let _ = worker.await;
-        
+
         // Verify that the server was called 3 times
         error_mock.assert_hits(3); // 1 initial attempt + 2 retries
     }
-
 }
