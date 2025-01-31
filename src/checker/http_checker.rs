@@ -124,7 +124,10 @@ fn hyper_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, String)> 
     while let Some(source) = inner.source() {
         if let Some(hyper_error) = source.downcast_ref::<hyper::Error>() {
             if hyper_error.is_incomplete_message() {
-                return Some((CheckStatusReasonType::ConnectionError, hyper_error.to_string()));
+                return Some((
+                    CheckStatusReasonType::ConnectionError,
+                    hyper_error.to_string(),
+                ));
             }
             return Some((CheckStatusReasonType::Failure, hyper_error.to_string()));
         }
