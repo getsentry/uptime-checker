@@ -96,6 +96,9 @@ pub struct Config {
     /// The maximum number of retries to attempt when sending results to vector
     pub vector_max_retries: u32,
 
+    /// Whether to retry sending results to vector indefinitely
+    pub retry_vector_errors_forever: bool,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -134,6 +137,8 @@ impl Default for Config {
             config_provider_mode: ConfigProviderMode::Redis,
             vector_batch_size: 10,
             vector_endpoint: "http://localhost:8020".to_owned(),
+            vector_max_retries: 5,
+            retry_vector_errors_forever: false,
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
             config_provider_redis_total_partitions: 128,
@@ -144,7 +149,6 @@ impl Default for Config {
             disable_connection_reuse: true,
             checker_number: 0,
             total_checkers: 1,
-            vector_max_retries: 5,
         }
     }
 }
@@ -170,6 +174,7 @@ impl Config {
         }
 
         let config: Config = builder.extract()?;
+
         Ok(config)
     }
 }
@@ -263,6 +268,8 @@ mod tests {
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         vector_max_retries: 5,
+                        retry_vector_errors_forever: false,
+
                     }
                 );
             },
@@ -335,6 +342,7 @@ mod tests {
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         vector_max_retries: 5,
+                        retry_vector_errors_forever: false,
                     }
                 );
             },

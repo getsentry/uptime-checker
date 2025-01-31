@@ -16,13 +16,14 @@ impl VectorResultsProducer {
         topic_name: &str,
         endpoint: String,
         vector_batch_size: usize,
+        retry_vector_errors_forever: bool,
         max_retries: u32,
     ) -> (Self, JoinHandle<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
         let client = Client::new();
 
         let (sender, receiver) = mpsc::unbounded_channel();
-        let worker = Self::spawn_worker(vector_batch_size, client, endpoint, max_retries, receiver);
+        let worker = Self::spawn_worker(vector_batch_size, client, endpoint, receiver, retry_vector_errors_forever, max_retries);
 
         (Self { schema, sender }, worker)
     }
@@ -31,8 +32,9 @@ impl VectorResultsProducer {
         vector_batch_size: usize,
         client: Client,
         endpoint: String,
-        max_retries: u32,
         mut receiver: UnboundedReceiver<Vec<u8>>,
+        retry_vector_errors_forever: bool,
+        max_retries: u32,
     ) -> JoinHandle<()> {
         tracing::info!("vector_worker.starting");
 
@@ -48,15 +50,15 @@ impl VectorResultsProducer {
 
                 let batch_to_send =
                     std::mem::replace(&mut batch, Vec::with_capacity(vector_batch_size));
-                if let Err(e) =
-                    send_batch(batch_to_send, client.clone(), endpoint.clone(), max_retries).await
+                    if let Err(e) =
+                        send_batch(batch_to_send, client.clone(), endpoint.clone(), retry_vector_errors_forever, max_retries).await
                 {
                     tracing::error!(error = ?e, "vector_batch.send_failed");
                 }
             }
 
             if !batch.is_empty() {
-                if let Err(e) = send_batch(batch, client, endpoint, max_retries).await {
+                if let Err(e) = send_batch(batch, client, endpoint, retry_vector_errors_forever, max_retries).await {
                     tracing::error!(error = ?e, "final_batch.send_failed");
                 }
             }
@@ -85,6 +87,7 @@ async fn send_batch(
     batch: Vec<Vec<u8>>,
     client: Client,
     endpoint: String,
+    retry_vector_errors_forever: bool,
     max_retries: u32,
 ) -> Result<(), ExtractCodeError> {
     if batch.is_empty() {
@@ -98,9 +101,10 @@ async fn send_batch(
         .collect();
 
     const BASE_DELAY_MS: u64 = 100;
-    const MAX_DELAY_MS: u64 = 3_600_000; // Cap maximum delay at 1 hour
+    const MAX_DELAY_MS: u64 = 2000;
 
-    for retry in 0..=max_retries {
+    let mut num_of_retries = 0;
+    loop {
         let response = client
             .post(&endpoint)
             .header("Content-Type", "application/json")
@@ -110,49 +114,42 @@ async fn send_batch(
         
         // Calculate delay with a maximum cap
         let delay = Duration::from_millis(
-            (BASE_DELAY_MS * (2_u64.pow(retry))).min(MAX_DELAY_MS)
+            (BASE_DELAY_MS * (2_u64.pow(num_of_retries))).max(MAX_DELAY_MS)
         );
         
         match response {
             Ok(resp) if !resp.status().is_server_error() => return Ok(()),
             Ok(resp) => {
-                if retry == max_retries {
-                    // Consider implementing a dead letter queue or persistent storage here
-                    tracing::error!(
-                        status = ?resp.status(),
-                        batch_size = batch.len(),
-                        "request.failed_to_vector_after_retries"
-                    );
-                    return Err(ExtractCodeError::VectorError);
-                }
                 
                 tracing::warn!(
                     status = ?resp.status(),
-                    retry = retry + 1,
+                    retry = num_of_retries + 1,
                     delay_ms = ?delay.as_millis(),
                     batch_size = batch.len(),
                     "request.failed_to_vector_retrying"
                 );
+                if !retry_vector_errors_forever && num_of_retries >= max_retries {
+                    return Err(ExtractCodeError::VectorError);
+                }
+                num_of_retries += 1;
                 sleep(delay).await;
             }
             Err(e) => {
-                if retry == max_retries {
-                    tracing::error!(error = ?e, "request.failed_to_vector_after_retries");
-                    return Err(ExtractCodeError::VectorError);
-                }
-
                 tracing::warn!(
                     error = ?e,
-                    retry = retry + 1,
+                    retry = num_of_retries + 1,
                     delay_ms = ?delay.as_millis(),
                     "request.failed_to_vector_retrying"
                 );
+                if !retry_vector_errors_forever && num_of_retries >= max_retries {
+                    return Err(ExtractCodeError::VectorError);
+                }
+                num_of_retries += 1;
                 sleep(delay).await;
             }
         }
     }
 
-    Err(ExtractCodeError::VectorError)
 }
 
 #[cfg(test)]
@@ -207,6 +204,7 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            false,
             TEST_MAX_RETRIES,
         );
 
@@ -295,6 +293,7 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            false,
             TEST_MAX_RETRIES,
         );
 
@@ -349,6 +348,7 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            false,
             TEST_MAX_RETRIES,
         );
         let result = producer.produce_checker_result(&test_result);
