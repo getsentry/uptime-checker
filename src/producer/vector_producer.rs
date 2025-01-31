@@ -24,7 +24,6 @@ pub struct VectorResultsProducer {
 }
 
 impl VectorResultsProducer {
-
     pub fn new(
         topic_name: &str,
         endpoint: String,
@@ -48,7 +47,14 @@ impl VectorResultsProducer {
         let (sender, receiver) = mpsc::unbounded_channel();
         let worker = Self::spawn_worker(config, client, receiver, pending_items.clone());
 
-        (Self { schema, sender, pending_items }, worker)
+        (
+            Self {
+                schema,
+                sender,
+                pending_items,
+            },
+            worker,
+        )
     }
 
     fn spawn_worker(
@@ -64,7 +70,8 @@ impl VectorResultsProducer {
 
             while let Some(json) = receiver.recv().await {
                 pending_items.fetch_sub(1, Ordering::SeqCst);
-                metrics::gauge!("producer.pending_items").set(pending_items.load(Ordering::SeqCst) as f64);
+                metrics::gauge!("producer.pending_items")
+                    .set(pending_items.load(Ordering::SeqCst) as f64);
 
                 batch.push(json);
 
@@ -74,20 +81,19 @@ impl VectorResultsProducer {
 
                 let batch_to_send =
                     std::mem::replace(&mut batch, Vec::with_capacity(config.vector_batch_size));
-                    if let Err(e) =
-                        {
-                            let start = std::time::Instant::now();
-                            let result = send_batch(
-                                batch_to_send,
-                                client.clone(),
-                                config.endpoint.clone(),
-                                config.retry_vector_errors_forever,
-                                config.max_retries
-                            ).await;
-                            metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => config.region.clone(), "histogram" => "timer").record(start.elapsed().as_secs_f64());
-                            result
-                        }
-                {
+                if let Err(e) = {
+                    let start = std::time::Instant::now();
+                    let result = send_batch(
+                        batch_to_send,
+                        client.clone(),
+                        config.endpoint.clone(),
+                        config.retry_vector_errors_forever,
+                        config.max_retries,
+                    )
+                    .await;
+                    metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => config.region.clone(), "histogram" => "timer").record(start.elapsed().as_secs_f64());
+                    result
+                } {
                     tracing::error!(error = ?e, "vector_batch.send_failed");
                 }
             }
@@ -98,8 +104,10 @@ impl VectorResultsProducer {
                     client,
                     config.endpoint,
                     config.retry_vector_errors_forever,
-                    config.max_retries
-                ).await {
+                    config.max_retries,
+                )
+                .await
+                {
                     tracing::error!(error = ?e, "final_batch.send_failed");
                 }
             }
@@ -119,7 +127,8 @@ impl ResultsProducer for VectorResultsProducer {
             tracing::error!("event.send_failed_channel_closed");
             return Err(ExtractCodeError::VectorError);
         }
-        self.pending_items.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.pending_items
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         Ok(())
     }
@@ -153,16 +162,14 @@ async fn send_batch(
             .body(body.clone())
             .send()
             .await;
-        
+
         // Calculate delay with a maximum cap
-        let delay = Duration::from_millis(
-            (BASE_DELAY_MS * (2_u64.pow(num_of_retries))).max(MAX_DELAY_MS)
-        );
-        
+        let delay =
+            Duration::from_millis((BASE_DELAY_MS * (2_u64.pow(num_of_retries))).max(MAX_DELAY_MS));
+
         match response {
             Ok(resp) if !resp.status().is_server_error() => return Ok(()),
             Ok(resp) => {
-                
                 tracing::warn!(
                     status = ?resp.status(),
                     retry = num_of_retries + 1,
@@ -191,7 +198,6 @@ async fn send_batch(
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -339,7 +345,6 @@ mod tests {
             false,
             TEST_MAX_RETRIES,
             "us-west-1".to_string(),
-
         );
 
         // Send a single event (less than BATCH_SIZE)
