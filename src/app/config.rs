@@ -176,7 +176,9 @@ impl Config {
         let config: Config = builder.extract()?;
 
         if config.retry_vector_errors_forever && config.vector_max_retries.is_some() {
-            return Err(anyhow::anyhow!("vector_max_retries must be set to None when retry_vector_errors_forever is true"));
+            return Err(anyhow::anyhow!(
+                "vector_max_retries must be set to None when retry_vector_errors_forever is true"
+            ));
         }
 
         Ok(config)
@@ -396,7 +398,6 @@ mod tests {
             },
         )
     }
-
 
     #[test]
     fn test_config_default_checker_ordinal() {
