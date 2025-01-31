@@ -98,7 +98,7 @@ async fn send_batch(
         .collect();
 
     const BASE_DELAY_MS: u64 = 100;
-    const MAX_DELAY_MS: u64 = 30_000; // Cap maximum delay at 30 seconds
+    const MAX_DELAY_MS: u64 = 3_600_000; // Cap maximum delay at 1 hour
 
     for retry in 0..=max_retries {
         let response = client
