@@ -119,11 +119,14 @@ fn connection_error(err: &reqwest::Error) -> Option<String> {
     None
 }
 
-fn hyper_error(err: &reqwest::Error) -> Option<String> {
+fn hyper_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, String)> {
     let mut inner = &err as &dyn Error;
     while let Some(source) = inner.source() {
         if let Some(hyper_error) = source.downcast_ref::<hyper::Error>() {
-            return Some(hyper_error.to_string());
+            if hyper_error.is_incomplete_message() {
+                return Some((CheckStatusReasonType::ConnectionError, hyper_error.to_string()));
+            }
+            return Some((CheckStatusReasonType::Failure, hyper_error.to_string()));
         }
         inner = source;
     }
@@ -229,9 +232,9 @@ impl Checker for HttpChecker {
                         status_type: CheckStatusReasonType::ConnectionError,
                         description: message,
                     }
-                } else if let Some(message) = hyper_error(&e) {
+                } else if let Some((status_type, message)) = hyper_error(&e) {
                     CheckStatusReason {
-                        status_type: CheckStatusReasonType::Failure,
+                        status_type,
                         description: message,
                     }
                 } else {
