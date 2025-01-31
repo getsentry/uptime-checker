@@ -52,7 +52,7 @@ local deploy_canary_stage(region) =
       },
     ] else [];
 
-local deployPrimaryStage = {
+local deploy_primary_stage = {
   'deploy-primary': {
     fetch_materials: true,
     jobs: {
@@ -115,5 +115,5 @@ function(region) {
     },
   },
   lock_behavior: 'unlockWhenFinished',
-  stages: [checks_stage] + deploy_canary_stage(region) + [deployPrimaryStage] + [deploy_primary_pops_stage(region)],
+  stages: [checks_stage] + deploy_canary_stage(region) + [deploy_primary_stage] + [deploy_primary_pops_stage(region)],
 }
