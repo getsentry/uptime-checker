@@ -7,7 +7,7 @@ local region_pops = {
   us: [
     // 'us-pop-1',
   ],
-  s4s: ['us-s4s-FIX-ME-1'],
+  s4s: ['pop-st-1'],
 };
 
 local checks_stage = {
@@ -71,7 +71,7 @@ local deploy_primary_stage = {
 };
 local deploy_pop_job(region) =
   {
-    timeout: 1200,
+    timeout: 600,
     elastic_profile_id: 'uptime-checker',
     environment_variables: {
       SENTRY_REGION: region,
