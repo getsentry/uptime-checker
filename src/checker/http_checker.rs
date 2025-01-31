@@ -29,11 +29,15 @@ struct Options {
     /// When set to true (the default) resolution to internal network addresses will be restricted.
     /// This should primarily be disabled for tests.
     validate_url: bool,
+    disable_connection_reuse: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { validate_url: true }
+        Self {
+            validate_url: true,
+            disable_connection_reuse: false,
+        }
     }
 }
 
@@ -143,16 +147,20 @@ impl HttpChecker {
             builder = builder.ip_filter(is_external_ip);
         }
 
-        let client = builder
-            .pool_max_idle_per_host(0)
-            .build()
-            .expect("Failed to build checker client");
+        let client = if options.disable_connection_reuse {
+            builder.pool_max_idle_per_host(0)
+        } else {
+            builder
+        }.build().expect("Failed to build checker client");
 
         Self { client }
     }
 
-    pub fn new(validate_url: bool) -> Self {
-        Self::new_internal(Options { validate_url })
+    pub fn new(validate_url: bool, disable_connection_reuse: bool) -> Self {
+        Self::new_internal(Options {
+            validate_url,
+            disable_connection_reuse,
+        })
     }
 }
 
@@ -295,6 +303,7 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -327,6 +336,7 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -371,6 +381,7 @@ mod tests {
         let timeout = TimeDelta::milliseconds(TIMEOUT);
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -410,6 +421,7 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
         });
 
         let head_mock = server.mock(|when, then| {
@@ -446,7 +458,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_restricted_resolution() {
-        let checker = HttpChecker::new_internal(Options { validate_url: true });
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: true,
+            disable_connection_reuse: true,
+        });
 
         let localhost_config = CheckConfig {
             url: "http://localhost/whatever".to_string(),
@@ -471,7 +486,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_url() {
-        let checker = HttpChecker::new_internal(Options { validate_url: true });
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: true,
+            disable_connection_reuse: true,
+        });
 
         // Private address space
         let restricted_ip_config = CheckConfig {
@@ -515,6 +533,7 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -682,6 +701,7 @@ mod tests {
     async fn test_connection_refused() {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
         });
         let tick = make_tick();
         let config = CheckConfig {
