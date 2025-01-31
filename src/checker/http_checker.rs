@@ -151,7 +151,9 @@ impl HttpChecker {
             builder.pool_max_idle_per_host(0)
         } else {
             builder
-        }.build().expect("Failed to build checker client");
+        }
+        .build()
+        .expect("Failed to build checker client");
 
         Self { client }
     }
@@ -741,7 +743,6 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-
         });
         let tick = make_tick();
         let config = CheckConfig {
