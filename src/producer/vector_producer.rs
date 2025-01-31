@@ -98,34 +98,42 @@ async fn send_batch(
         .collect();
 
     const BASE_DELAY_MS: u64 = 100;
+    const MAX_DELAY_MS: u64 = 30_000; // Cap maximum delay at 30 seconds
 
     for retry in 0..=max_retries {
-        println!("retry: {}", retry);
         let response = client
             .post(&endpoint)
             .header("Content-Type", "application/json")
             .body(body.clone())
             .send()
             .await;
-
+        
+        // Calculate delay with a maximum cap
+        let delay = Duration::from_millis(
+            (BASE_DELAY_MS * (2_u64.pow(retry))).min(MAX_DELAY_MS)
+        );
+        
         match response {
+            Ok(resp) if !resp.status().is_server_error() => return Ok(()),
             Ok(resp) => {
-                if resp.status().is_server_error() {
-                    if retry == max_retries {
-                        tracing::error!(status = ?resp.status(), "request.failed_to_vector_after_retries");
-                        return Err(ExtractCodeError::VectorError);
-                    }
-                    let delay = Duration::from_millis(BASE_DELAY_MS * (2_u64.pow(retry)));
-                    tracing::warn!(
+                if retry == max_retries {
+                    // Consider implementing a dead letter queue or persistent storage here
+                    tracing::error!(
                         status = ?resp.status(),
-                        retry = retry + 1,
-                        delay_ms = ?delay.as_millis(),
-                        "request.failed_to_vector_retrying"
+                        batch_size = batch.len(),
+                        "request.failed_to_vector_after_retries"
                     );
-                    sleep(delay).await;
-                } else {
-                    return Ok(());
+                    return Err(ExtractCodeError::VectorError);
                 }
+                
+                tracing::warn!(
+                    status = ?resp.status(),
+                    retry = retry + 1,
+                    delay_ms = ?delay.as_millis(),
+                    batch_size = batch.len(),
+                    "request.failed_to_vector_retrying"
+                );
+                sleep(delay).await;
             }
             Err(e) => {
                 if retry == max_retries {
@@ -133,7 +141,6 @@ async fn send_batch(
                     return Err(ExtractCodeError::VectorError);
                 }
 
-                let delay = Duration::from_millis(BASE_DELAY_MS * (2_u64.pow(retry)));
                 tracing::warn!(
                     error = ?e,
                     retry = retry + 1,
@@ -145,7 +152,6 @@ async fn send_batch(
         }
     }
 
-    // This should never be reached due to the return in the last iteration
     Err(ExtractCodeError::VectorError)
 }
 
