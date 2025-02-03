@@ -13,7 +13,7 @@ clap = { version = "4.4.6", features = ["derive"] }
 chrono = { version = "0.4.31", default-features = false, features = ["std", "serde"] }
 httpmock = "0.7.0-rc.1"
 reqwest = { version = "0.12.2", features = ["hickory-dns"] }
-openssl = "0.10.66"
+openssl = "0.10.70"
 rust_arroyo = { version = "*", git = "https://github.com/getsentry/arroyo", rev = "0b84afc07131d8b8d48abcb7c8de8cfa2a98e526" }
 tokio = { version = "1.28.0", features = ["macros", "sync", "tracing", "signal", "rt-multi-thread", "test-util"] }
 uuid = { version = "1.8.0", features = ["serde", "v4", "v5"] }
