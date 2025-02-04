@@ -1,5 +1,15 @@
 local gocdtasks = import 'github.com/getsentry/gocd-jsonnet/libs/gocd-tasks.libsonnet';
 
+local region_pops = {
+  de: [
+    // 'de-pop-1',
+  ],
+  us: [
+    // 'us-pop-1',
+  ],
+  s4s: ['pop-st'],
+};
+
 local checks_stage = {
   checks: {
     fetch_materials: true,
@@ -42,7 +52,7 @@ local deploy_canary_stage(region) =
       },
     ] else [];
 
-local deployPrimaryStage = {
+local deploy_primary_stage = {
   'deploy-primary': {
     fetch_materials: true,
     jobs: {
@@ -59,6 +69,43 @@ local deployPrimaryStage = {
     },
   },
 };
+local deploy_pop_job(region) =
+  {
+    timeout: 600,
+    elastic_profile_id: 'uptime-checker',
+    environment_variables: {
+      SENTRY_REGION: region,
+      LABEL_SELECTOR: 'service=uptime-checker',
+
+    },
+    tasks: [
+      gocdtasks.script(importstr '../bash/deploy.sh'),
+    ],
+  };
+
+
+local deploy_pop_jobs(regions) =
+  {
+    ['deploy-primary-pops-region-' + region]: deploy_pop_job(region)
+    for region in regions
+  };
+
+
+local deploy_primary_pops_stage(region) =
+  if region == 's4s' then
+    [
+      {
+        ['deploy-primary-pops-' + region]: {
+          fetch_materials: true,
+          jobs+: deploy_pop_jobs(
+            region_pops[region],
+          ),
+        },
+      },
+    ]
+  else
+    [];
+
 
 function(region) {
   environment_variables: {
@@ -74,5 +121,5 @@ function(region) {
     },
   },
   lock_behavior: 'unlockWhenFinished',
-  stages: [checks_stage] + deploy_canary_stage(region) + [deployPrimaryStage],
+  stages: [checks_stage] + deploy_canary_stage(region) + [deploy_primary_stage] + deploy_primary_pops_stage(region),
 }
