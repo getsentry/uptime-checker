@@ -121,7 +121,6 @@ impl Manager {
                     config.vector_endpoint.clone(),
                     config.vector_batch_size,
                     config.retry_vector_errors_forever,
-                    config.vector_max_retries,
                     config.region.clone(),
                 );
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all

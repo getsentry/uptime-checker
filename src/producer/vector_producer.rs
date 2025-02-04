@@ -13,7 +13,6 @@ struct VectorRequestWorkerConfig {
     vector_batch_size: usize,
     endpoint: String,
     retry_vector_errors_forever: bool,
-    max_retries: Option<u32>,
     region: String,
 }
 
@@ -29,7 +28,6 @@ impl VectorResultsProducer {
         endpoint: String,
         vector_batch_size: usize,
         retry_vector_errors_forever: bool,
-        max_retries: Option<u32>,
         region: String,
     ) -> (Self, JoinHandle<()>) {
         let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
@@ -40,7 +38,6 @@ impl VectorResultsProducer {
             vector_batch_size,
             endpoint,
             retry_vector_errors_forever,
-            max_retries,
             region,
         };
 
@@ -88,7 +85,6 @@ impl VectorResultsProducer {
                         client.clone(),
                         config.endpoint.clone(),
                         config.retry_vector_errors_forever,
-                        config.max_retries,
                     )
                     .await;
                     metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => config.region.clone(), "histogram" => "timer").record(start.elapsed().as_secs_f64());
@@ -104,7 +100,6 @@ impl VectorResultsProducer {
                     client,
                     config.endpoint,
                     config.retry_vector_errors_forever,
-                    config.max_retries,
                 )
                 .await
                 {
@@ -139,7 +134,6 @@ async fn send_batch(
     client: Client,
     endpoint: String,
     retry_vector_errors_forever: bool,
-    max_retries: Option<u32>,
 ) -> Result<(), ExtractCodeError> {
     if batch.is_empty() {
         return Ok(());
@@ -177,7 +171,7 @@ async fn send_batch(
                     batch_size = batch.len(),
                     "request.failed_to_vector_retrying"
                 );
-                if !retry_vector_errors_forever && num_of_retries >= max_retries.unwrap_or(0) {
+                if !retry_vector_errors_forever {
                     return Err(ExtractCodeError::VectorError);
                 }
                 num_of_retries += 1;
@@ -190,7 +184,7 @@ async fn send_batch(
                     delay_ms = ?delay.as_millis(),
                     "request.failed_to_vector_retrying"
                 );
-                if !retry_vector_errors_forever && num_of_retries >= max_retries.unwrap_or(0) {
+                if !retry_vector_errors_forever {
                     return Err(ExtractCodeError::VectorError);
                 }
                 num_of_retries += 1;
@@ -220,8 +214,7 @@ mod tests {
     use tokio::time::sleep;
     use uuid::{uuid, Uuid};
 
-    const TEST_BATCH_SIZE: usize = 10;
-    const TEST_MAX_RETRIES: Option<u32> = Some(2);
+    const TEST_BATCH_SIZE: usize = 2;
 
     fn create_test_result() -> CheckResult {
         CheckResult {
@@ -253,12 +246,11 @@ mod tests {
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
             false,
-            TEST_MAX_RETRIES,
             "us-west-1".to_string(),
         );
 
-        // Create and send BATCH_SIZE + 2 events
-        for _ in 0..(TEST_BATCH_SIZE + 2) {
+        // Create and send BATCH_SIZE + 1 event
+        for _ in 0..(TEST_BATCH_SIZE + 1) {
             let test_result = create_test_result();
             let result = producer.produce_checker_result(&test_result);
             assert!(result.is_ok());
@@ -276,7 +268,7 @@ mod tests {
                             .filter(|l| !l.is_empty())
                             .collect();
                         let len = lines.len();
-                        if len != 10 && len != 2 {
+                        if len != TEST_BATCH_SIZE && len != 1 {
                             return false;
                         }
                         // Verify each line is valid JSON with expected fields
@@ -343,7 +335,6 @@ mod tests {
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
             false,
-            TEST_MAX_RETRIES,
             "us-west-1".to_string(),
         );
 
@@ -377,20 +368,20 @@ mod tests {
                 .matches(|req| {
                     if let Some(body) = &req.body {
                         let lines: Vec<_> = body
-                            .split(|&b| b == b'\n')
-                            .filter(|l| !l.is_empty())
-                            .collect();
-                        if lines.len() != 1 {
-                            return false;
-                        }
-                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
-                            return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
-                                && value["status"] == "success"
-                                && value["region"] == "us-west-1";
-                        }
-                    }
-                    false
-                });
+                         .split(|&b| b == b'\n')
+                         .filter(|l| !l.is_empty())
+                         .collect();
+                     if lines.len() != 1 {
+                         return false;
+                     }
+                     if let Ok(value) = serde_json::from_slice::<serde_json::Value>(lines[0]) {
+                         return value["subscription_id"] == "23d6048d67c948d9a19c0b47979e9a03"
+                             && value["status"] == "success"
+                             && value["region"] == "us-west-1";
+                     }
+                 }
+                 false
+             });
             then.status(500).body("Internal Server Error");
         });
 
@@ -398,23 +389,23 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
-            false,
-            TEST_MAX_RETRIES,
+            true,
             "us-west-1".to_string(),
         );
+        
+        // Send two test results to form a complete batch
         let result = producer.produce_checker_result(&test_result);
+        let result2 = producer.produce_checker_result(&test_result);
         assert!(result.is_ok());
-
-        // Wait a bit for the requests to be processed
-        sleep(Duration::from_millis(300)).await;
+        assert!(result2.is_ok());
 
         // Drop the producer which will close the channel
         drop(producer);
-
-        // Now we can await the worker
+        
+        // Wait for the worker to complete naturally
         let _ = worker.await;
 
-        // Verify that the server was called 3 times
-        error_mock.assert_hits(3); // 1 initial attempt + 2 retries
+        // Verify that the server was called at least once
+        error_mock.assert_hits(2);
     }
 }
