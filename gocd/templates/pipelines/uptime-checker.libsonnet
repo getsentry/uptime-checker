@@ -7,7 +7,7 @@ local region_pops = {
   us: [
     // 'us-pop-1',
   ],
-  s4s: ['pop-st'],
+  s4s: ['pop-st-1'],
 };
 
 local checks_stage = {
