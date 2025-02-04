@@ -174,7 +174,6 @@ impl Config {
 
         let config: Config = builder.extract()?;
 
-
         Ok(config)
     }
 }

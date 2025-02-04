@@ -355,5 +355,4 @@ mod tests {
         // Verify that the event was sent despite not reaching BATCH_SIZE
         mock.assert();
     }
-
 }
