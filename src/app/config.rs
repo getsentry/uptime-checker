@@ -103,6 +103,9 @@ pub struct Config {
     /// The vector endpoint to send results to
     pub vector_endpoint: String,
 
+    /// Whether to retry sending results to vector indefinitely
+    pub retry_vector_errors_forever: bool,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -143,6 +146,7 @@ impl Default for Config {
             config_provider_mode: ConfigProviderMode::Kafka,
             vector_batch_size: 10,
             vector_endpoint: "http://localhost:8020".to_owned(),
+            retry_vector_errors_forever: false,
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
             config_provider_redis_total_partitions: 128,
@@ -177,6 +181,7 @@ impl Config {
         }
 
         let config: Config = builder.extract()?;
+
         Ok(config)
     }
 }
@@ -197,7 +202,7 @@ mod tests {
 
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where
-        F: FnOnce(Config),
+        F: FnOnce(anyhow::Result<Config>),
     {
         Jail::expect_with(|jail| {
             jail.create_file("config.yaml", yaml)?;
@@ -213,7 +218,7 @@ mod tests {
                 command: cli::Commands::Run,
             };
 
-            let config = Config::extract(&app).unwrap();
+            let config = Config::extract(&app);
             test_fn(config);
             Ok(())
         })
@@ -235,6 +240,7 @@ mod tests {
             "#,
             &[],
             |config| {
+                let config = config.unwrap();
                 assert_eq!(
                     config,
                     Config {
@@ -273,6 +279,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        retry_vector_errors_forever: false,
                     }
                 );
             },
@@ -313,7 +320,7 @@ mod tests {
             ],
             |config| {
                 assert_eq!(
-                    config,
+                    config.unwrap(),
                     Config {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env_override")),
@@ -347,6 +354,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        retry_vector_errors_forever: false,
                     }
                 );
             },
@@ -362,7 +370,7 @@ mod tests {
             "#,
             &[],
             |config| {
-                assert_eq!(config.checker_number, 0);
+                assert_eq!(config.unwrap().checker_number, 0);
             },
         )
     }
