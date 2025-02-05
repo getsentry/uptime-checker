@@ -103,6 +103,9 @@ pub struct Config {
     /// The vector endpoint to send results to
     pub vector_endpoint: String,
 
+    /// Whether we're using redis in standalone or cluster mode
+    pub redis_enable_cluster: bool,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -146,6 +149,7 @@ impl Default for Config {
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
             config_provider_redis_total_partitions: 128,
+            redis_enable_cluster: false,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
             region: "default".to_owned(),
             allow_internal_ips: false,
@@ -264,6 +268,7 @@ mod tests {
                         config_provider_mode: ConfigProviderMode::Kafka,
                         config_provider_redis_update_ms: 1000,
                         config_provider_redis_total_partitions: 128,
+                        redis_enable_cluster: false,
                         redis_host: "redis://127.0.0.1:6379".to_owned(),
                         region: "default".to_owned(),
                         allow_internal_ips: false,
@@ -304,6 +309,7 @@ mod tests {
                     "32",
                 ),
                 ("UPTIME_CHECKER_STATSD_ADDR", "10.0.0.1:1234"),
+                ("UPTIME_CHECKER_REDIS_ENABLE_CLUSTER", "true"),
                 ("UPTIME_CHECKER_REDIS_HOST", "10.0.0.3:6379"),
                 ("UPTIME_CHECKER_REGION", "us-west"),
                 ("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true"),
@@ -338,6 +344,7 @@ mod tests {
                         config_provider_mode: ConfigProviderMode::Kafka,
                         config_provider_redis_update_ms: 2000,
                         config_provider_redis_total_partitions: 32,
+                        redis_enable_cluster: true,
                         redis_host: "10.0.0.3:6379".to_owned(),
                         region: "us-west".to_owned(),
                         allow_internal_ips: true,

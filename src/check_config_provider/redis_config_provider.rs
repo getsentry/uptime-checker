@@ -13,6 +13,9 @@ use std::time::Duration;
 use tokio::time::interval;
 use uuid::Uuid;
 
+#[allow(unused_imports)]
+use crate::redis::{RedisAsyncConnection, RedisClient};
+
 #[derive(Debug)]
 pub struct RedisPartition {
     number: u16,
@@ -67,7 +70,7 @@ impl RedisKey for CheckConfig {
 }
 
 pub struct RedisConfigProvider {
-    redis: redis::Client,
+    redis: RedisClient,
     partitions: HashSet<u16>,
     check_interval: Duration,
 }
@@ -77,9 +80,11 @@ impl RedisConfigProvider {
         redis_url: &str,
         partitions: HashSet<u16>,
         check_interval: Duration,
+        enable_cluster: bool,
     ) -> Result<Self, redis::RedisError> {
+        let client = crate::redis::build_redis_client(redis_url, enable_cluster);
         Ok(Self {
-            redis: redis::Client::open(redis_url)?,
+            redis: client,
             partitions,
             check_interval,
         })
@@ -119,11 +124,7 @@ impl RedisConfigProvider {
         // Fetch configs for all partitions from Redis and register them with the manager
         manager.update_partitions(&self.partitions);
 
-        let mut conn = self
-            .redis
-            .get_multiplexed_tokio_connection()
-            .await
-            .expect("Unable to connect to Redis");
+        let mut conn = self.redis.get_async_connection().await;
         metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region.clone())
             .set(partitions.len() as f64);
 
@@ -187,11 +188,7 @@ impl RedisConfigProvider {
         shutdown: CancellationToken,
         region: String,
     ) {
-        let mut conn = self
-            .redis
-            .get_multiplexed_tokio_connection()
-            .await
-            .expect("Unable to connect to Redis");
+        let mut conn = self.redis.get_async_connection().await;
         let mut interval = interval(self.check_interval);
 
         while !shutdown.is_cancelled() {
@@ -318,6 +315,7 @@ pub fn run_config_provider(
         &config.redis_host,
         determine_owned_partitions(config),
         Duration::from_millis(config.config_provider_redis_update_ms),
+        false,
     )
     .expect("Failed to create Redis config provider");
 
@@ -359,13 +357,13 @@ pub fn determine_owned_partitions(config: &Config) -> HashSet<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use redis::AsyncCommands;
     use redis_test_macro::redis_test;
     use std::time::Duration;
-    use uuid::Uuid;
 
     async fn setup_test() -> (
         Config,
-        redis::aio::MultiplexedConnection,
+        RedisAsyncConnection,
         Vec<RedisPartition>,
         Arc<Manager>,
         CancellationToken,
@@ -378,16 +376,15 @@ mod tests {
             ..Default::default()
         };
         let test_partitions: HashSet<u16> = vec![0, 1].into_iter().collect();
-        let mut conn = redis::Client::open(config.redis_host.clone())
-            .unwrap()
-            .get_multiplexed_tokio_connection()
-            .await
-            .unwrap();
+        let client = redis::Client::open(config.redis_host.clone()).unwrap();
+        let mut conn =
+            RedisAsyncConnection::Single(client.get_multiplexed_tokio_connection().await.unwrap());
 
         let partitions = RedisConfigProvider::new(
             config.redis_host.as_str(),
             test_partitions.clone(),
             Duration::from_millis(10),
+            false,
         )
         .unwrap()
         .get_partition_keys();
@@ -472,7 +469,7 @@ mod tests {
     }
 
     async fn send_update(
-        mut conn: redis::aio::MultiplexedConnection,
+        mut conn: RedisAsyncConnection,
         partition: &RedisPartition,
         config: &CheckConfig,
     ) {
@@ -493,7 +490,7 @@ mod tests {
     }
 
     async fn send_delete(
-        mut conn: redis::aio::MultiplexedConnection,
+        mut conn: RedisAsyncConnection,
         partition: &RedisPartition,
         config: &CheckConfig,
     ) {

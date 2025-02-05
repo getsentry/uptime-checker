@@ -65,6 +65,7 @@ impl PartitionedService {
             config.redis_host.clone(),
             config_loaded,
             config.region.clone(),
+            config.redis_enable_cluster,
         );
 
         Self {
