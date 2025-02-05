@@ -83,10 +83,7 @@ pub enum RedisAsyncConnection {
 }
 
 impl ConnectionLike for RedisAsyncConnection {
-    fn req_packed_command<'a>(
-        &'a mut self,
-        cmd: &'a Cmd,
-    ) -> RedisFuture<'a, Value> {
+    fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value> {
         match self {
             RedisAsyncConnection::Cluster(conn) => Box::pin(conn.req_packed_command(cmd)),
             RedisAsyncConnection::Single(conn) => Box::pin(conn.req_packed_command(cmd)),
@@ -117,13 +114,11 @@ impl ConnectionLike for RedisAsyncConnection {
     }
 }
 
-
 pub struct RedisConfigProvider {
     redis: RedisConnection,
     partitions: HashSet<u16>,
     check_interval: Duration,
 }
-
 
 impl RedisConfigProvider {
     pub fn new(
@@ -448,7 +443,8 @@ mod tests {
         };
         let test_partitions: HashSet<u16> = vec![0, 1].into_iter().collect();
         let client = redis::Client::open(config.redis_host.clone()).unwrap();
-        let mut conn = RedisAsyncConnection::Single(client.get_multiplexed_tokio_connection().await.unwrap());
+        let mut conn =
+            RedisAsyncConnection::Single(client.get_multiplexed_tokio_connection().await.unwrap());
 
         let partitions = RedisConfigProvider::new(
             config.redis_host.as_str(),
