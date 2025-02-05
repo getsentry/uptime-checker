@@ -10,10 +10,10 @@ mod logging;
 mod manager;
 mod metrics;
 mod producer;
+mod redis;
 mod scheduler;
 mod test_utils;
 mod types;
-mod redis;
 
 use std::process;
 

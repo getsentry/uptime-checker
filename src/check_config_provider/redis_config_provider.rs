@@ -69,7 +69,6 @@ impl RedisKey for CheckConfig {
     }
 }
 
-
 pub struct RedisConfigProvider {
     redis: RedisClient,
     partitions: HashSet<u16>,

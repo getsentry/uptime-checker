@@ -1,6 +1,6 @@
 use redis::aio::ConnectionLike;
-use redis::{Cmd, Pipeline, RedisFuture, Value};
 use redis::cluster::ClusterClient;
+use redis::{Cmd, Pipeline, RedisFuture, Value};
 
 #[derive(Clone)]
 pub enum RedisAsyncConnection {
@@ -45,23 +45,32 @@ pub enum RedisClient {
     Single(redis::Client),
 }
 
-pub fn build_redis_client(redis_url: &str, enable_cluster: bool) -> RedisClient{
+pub fn build_redis_client(redis_url: &str, enable_cluster: bool) -> RedisClient {
     if enable_cluster {
-        RedisClient::Cluster(ClusterClient::builder(vec![redis_url.to_string()]).build().expect("Failed to build cluster client"))
+        RedisClient::Cluster(
+            ClusterClient::builder(vec![redis_url.to_string()])
+                .build()
+                .expect("Failed to build cluster client"),
+        )
     } else {
         RedisClient::Single(redis::Client::open(redis_url).expect("Failed to open redis client"))
     }
 }
 
-
 impl RedisClient {
     pub async fn get_async_connection(&self) -> RedisAsyncConnection {
         match self {
             RedisClient::Cluster(client) => RedisAsyncConnection::Cluster(
-                client.get_async_connection().await.expect("Unable to connect to Redis")
+                client
+                    .get_async_connection()
+                    .await
+                    .expect("Unable to connect to Redis"),
             ),
             RedisClient::Single(client) => RedisAsyncConnection::Single(
-                client.get_multiplexed_tokio_connection().await.expect("Unable to connect to Redis")
+                client
+                    .get_multiplexed_tokio_connection()
+                    .await
+                    .expect("Unable to connect to Redis"),
             ),
         }
     }

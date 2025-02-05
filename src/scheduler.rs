@@ -12,9 +12,8 @@ use tokio_util::sync::CancellationToken;
 use crate::check_executor::{queue_check, CheckSender};
 use crate::config_store::{RwConfigStore, Tick};
 use crate::config_waiter::BootResult;
-use redis::AsyncCommands;
 use crate::redis::build_redis_client;
-
+use redis::AsyncCommands;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_scheduler(
