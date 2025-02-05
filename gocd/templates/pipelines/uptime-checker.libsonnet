@@ -11,7 +11,7 @@ local region_pops = {
     'pop-va',
   ],
   s4s: [
-    'pop-st',
+    'pop-st-1',
   ],
 };
 
