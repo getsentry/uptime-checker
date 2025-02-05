@@ -71,7 +71,7 @@ impl RedisKey for CheckConfig {
     }
 }
 
-pub enum RedisConnection {
+pub enum RedisClient {
     Cluster(ClusterClient),
     Single(redis::Client),
 }
@@ -115,7 +115,7 @@ impl ConnectionLike for RedisAsyncConnection {
 }
 
 pub struct RedisConfigProvider {
-    redis: RedisConnection,
+    redis: RedisClient,
     partitions: HashSet<u16>,
     check_interval: Duration,
 }
@@ -128,9 +128,9 @@ impl RedisConfigProvider {
         enable_cluster: bool,
     ) -> Result<Self, redis::RedisError> {
         let client = if enable_cluster {
-            RedisConnection::Cluster(ClusterClient::builder(vec![redis_url.to_string()]).build()?)
+            RedisClient::Cluster(ClusterClient::builder(vec![redis_url.to_string()]).build()?)
         } else {
-            RedisConnection::Single(redis::Client::open(redis_url)?)
+            RedisClient::Single(redis::Client::open(redis_url)?)
         };
         Ok(Self {
             redis: client,
@@ -141,13 +141,13 @@ impl RedisConfigProvider {
 
     async fn get_redis_connection(&self) -> RedisAsyncConnection {
         match &self.redis {
-            RedisConnection::Cluster(client) => RedisAsyncConnection::Cluster(
+            RedisClient::Cluster(client) => RedisAsyncConnection::Cluster(
                 client
                     .get_async_connection()
                     .await
                     .expect("Unable to connect to Redis"),
             ),
-            RedisConnection::Single(client) => RedisAsyncConnection::Single(
+            RedisClient::Single(client) => RedisAsyncConnection::Single(
                 client
                     .get_multiplexed_tokio_connection()
                     .await
