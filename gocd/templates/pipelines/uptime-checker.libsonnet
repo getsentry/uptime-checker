@@ -97,19 +97,16 @@ local deploy_pop_jobs(regions) =
 
 
 local deploy_primary_pops_stage(region) =
-  if region == 's4s' then
-    [
-      {
-        ['deploy-primary-pops-' + region]: {
-          fetch_materials: true,
-          jobs+: deploy_pop_jobs(
-            region_pops[region],
-          ),
-        },
+  [
+    {
+      ['deploy-primary-pops-' + region]: {
+        fetch_materials: true,
+        jobs+: deploy_pop_jobs(
+          region_pops[region],
+        ),
       },
-    ]
-  else
-    [];
+    },
+  ];
 
 
 function(region) {
