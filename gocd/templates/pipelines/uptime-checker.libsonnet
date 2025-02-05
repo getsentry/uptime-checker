@@ -2,12 +2,17 @@ local gocdtasks = import 'github.com/getsentry/gocd-jsonnet/libs/gocd-tasks.libs
 
 local region_pops = {
   de: [
-    // 'de-pop-1',
+    'pop-de',
+    'pop-nl',
   ],
   us: [
-    // 'us-pop-1',
+    'pop-or',
+    'pop-sc',
+    'pop-va',
   ],
-  s4s: ['pop-st-1'],
+  s4s: [
+    'pop-st',
+  ],
 };
 
 local checks_stage = {
