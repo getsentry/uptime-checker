@@ -12,7 +12,9 @@ use tokio_util::sync::CancellationToken;
 use crate::check_executor::{queue_check, CheckSender};
 use crate::config_store::{RwConfigStore, Tick};
 use crate::config_waiter::BootResult;
-use redis::{AsyncCommands, Client};
+use redis::AsyncCommands;
+use crate::redis::build_redis_client;
+
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_scheduler(
@@ -24,6 +26,7 @@ pub fn run_scheduler(
     redis_host: String,
     config_loaded_receiver: Receiver<BootResult>,
     region: String,
+    redis_enable_cluster: bool,
 ) -> JoinHandle<()> {
     tracing::info!(partition, "scheduler.starting");
     tokio::spawn(async move {
@@ -35,6 +38,7 @@ pub fn run_scheduler(
             progress_key,
             redis_host,
             region,
+            redis_enable_cluster,
         )
         .await
     })
@@ -47,12 +51,10 @@ async fn scheduler_loop(
     progress_key: String,
     redis_host: String,
     region: String,
+    redis_enable_cluster: bool,
 ) {
-    let client = Client::open(redis_host.clone()).unwrap();
-    let mut connection = client
-        .get_multiplexed_tokio_connection()
-        .await
-        .expect("Unable to connect to Redis");
+    let client = build_redis_client(&redis_host, redis_enable_cluster);
+    let mut connection = client.get_async_connection().await;
     let result: Option<String> = connection
         .get(&progress_key)
         .await
@@ -235,6 +237,7 @@ mod tests {
             config.redis_host.clone(),
             boot_rx,
             config.region.clone(),
+            false,
         );
         let _ = boot_tx.send(BootResult::Started);
 
@@ -343,6 +346,7 @@ mod tests {
             config.redis_host.clone(),
             boot_rx,
             config.region.clone(),
+            false,
         );
         let _ = boot_tx.send(BootResult::Started);
 
@@ -448,6 +452,7 @@ mod tests {
             config.redis_host.clone(),
             boot_rx,
             config.region.clone(),
+            false,
         );
 
         let _ = boot_tx.send(BootResult::Started);

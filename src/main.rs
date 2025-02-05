@@ -13,6 +13,7 @@ mod producer;
 mod scheduler;
 mod test_utils;
 mod types;
+mod redis;
 
 use std::process;
 
