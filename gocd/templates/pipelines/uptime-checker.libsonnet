@@ -2,13 +2,13 @@ local gocdtasks = import 'github.com/getsentry/gocd-jsonnet/libs/gocd-tasks.libs
 
 local region_pops = {
   de: [
-    'pop-de',
-    'pop-nl',
+    'de-pop-1',  // pop-de
+    'de-pop-2',  // pop-nl
   ],
   us: [
-    'pop-or',
-    'pop-sc',
-    'pop-va',
+    'us-pop-1',  // pop-va
+    'us-pop-2',  // pop-or
+    'us-pop-9',  // pop-sc
   ],
   s4s: [
     'pop-st-1',
