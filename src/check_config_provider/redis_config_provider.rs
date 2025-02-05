@@ -315,7 +315,7 @@ pub fn run_config_provider(
         &config.redis_host,
         determine_owned_partitions(config),
         Duration::from_millis(config.config_provider_redis_update_ms),
-        false,
+        config.redis_enable_cluster,
     )
     .expect("Failed to create Redis config provider");
 
