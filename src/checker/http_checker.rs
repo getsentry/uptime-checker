@@ -174,7 +174,6 @@ fn make_trace_header(config: &CheckConfig, trace_id: &Uuid, span_id: SpanId) -> 
     // https://develop.sentry.dev/sdk/telemetry/traces/#header-sentry-trace
     // for more information.
 
-
     if config.trace_sampling {
         format!("{}-{}", trace_id.simple(), span_id)
     } else {
@@ -576,10 +575,7 @@ mod tests {
             ..Default::default()
         };
         let trace_header = make_trace_header(&config, &trace_id, span_id);
-        assert_eq!(
-            trace_header,
-            format!("{}-{}-0", trace_id.simple(), span_id)
-        );
+        assert_eq!(trace_header, format!("{}-{}-0", trace_id.simple(), span_id));
         assert_eq!(trace_header.to_string().matches("-").count(), 2);
 
         // Test with sampling enabled
