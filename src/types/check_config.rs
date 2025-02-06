@@ -24,6 +24,9 @@ pub enum CheckInterval {
 /// The largest check interval
 pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
 
+/// A random hardcoded id that we use to generated v5 uuids based on subscription ids.
+pub const SUBSCRIPTION_ID_NAMESPACE: Uuid = Uuid::from_u128(31415926535897932384626433832795u128);
+
 /// The CheckConfig represents a configuration for a single check.
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,9 +111,12 @@ impl CheckConfig {
             return true;
         };
 
-        let running_region_idx = (tick.time().timestamp() / self.interval as i64)
-            .checked_rem(active_regions.len() as i64)
-            .unwrap();
+        let subscription_seed_id =
+            Uuid::new_v5(&SUBSCRIPTION_ID_NAMESPACE, self.subscription_id.as_bytes());
+        let running_region_idx = (((tick.time().timestamp() / self.interval as i64) as u128)
+            + subscription_seed_id.as_u128())
+        .checked_rem(active_regions.len() as u128)
+        .unwrap();
         active_regions[running_region_idx as usize] == current_region
     }
 }
@@ -306,23 +312,42 @@ mod tests {
 
         // Shouldn't error if regions are somehow empty, just return true
         let empty_region_config = CheckConfig {
+            subscription_id: Uuid::from_u128(0),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             active_regions: Some(vec![]),
             ..Default::default()
         };
+        let empty_region_config_2 = CheckConfig {
+            subscription_id: Uuid::from_u128(1),
+            ..empty_region_config.clone()
+        };
         assert!(empty_region_config.should_run(tick, "us_west"));
+        assert!(empty_region_config_2.should_run(tick, "us_west"));
 
         // When there's just one region we should also always run
         let one_region_config = CheckConfig {
+            subscription_id: Uuid::from_u128(0),
             active_regions: Some(vec!["us_west".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
+        };
+        let one_region_config_2 = CheckConfig {
+            subscription_id: Uuid::from_u128(1),
+            ..one_region_config.clone()
         };
         assert!(one_region_config.should_run(
             Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
             "us_west"
         ));
         assert!(one_region_config.should_run(
+            Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
+            "us_west"
+        ));
+        assert!(one_region_config_2.should_run(
+            Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
+            "us_west"
+        ));
+        assert!(one_region_config_2.should_run(
             Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
             "us_west"
         ));
@@ -333,6 +358,15 @@ mod tests {
             "other_region",
         ));
         assert!(!one_region_config.should_run(
+            Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
+            "other_region",
+        ));
+        // If configured region doesn't match at all we should never run
+        assert!(!one_region_config_2.should_run(
+            Tick::from_time(DateTime::from_timestamp(1, 0).unwrap()),
+            "other_region",
+        ));
+        assert!(!one_region_config_2.should_run(
             Tick::from_time(DateTime::from_timestamp(61, 0).unwrap()),
             "other_region",
         ));
@@ -353,8 +387,7 @@ mod tests {
             0,
             TestInterval::OneSecond,
             1,
-            vec![&"us_west"],
-            vec![&"us_east", &"eu_west"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -362,8 +395,7 @@ mod tests {
             1,
             TestInterval::OneSecond,
             1,
-            vec![&"us_east"],
-            vec![&"us_west", &"eu_west"],
+            vec![&"us_east", &"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -371,8 +403,7 @@ mod tests {
             2,
             TestInterval::OneSecond,
             1,
-            vec![&"eu_west"],
-            vec![&"us_west", &"us_east"],
+            vec![&"eu_west", &"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config,
@@ -380,8 +411,7 @@ mod tests {
             3,
             TestInterval::OneSecond,
             1,
-            vec![&"us_west"],
-            vec![&"eu_west", &"us_east"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
 
         // Try different spots in the minute
@@ -391,8 +421,7 @@ mod tests {
             0,
             TestInterval::OneSecond,
             29,
-            vec![&"us_west"],
-            vec![&"eu_west", &"us_east"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -400,8 +429,7 @@ mod tests {
             0,
             TestInterval::OneSecond,
             59,
-            vec![&"us_west"],
-            vec![&"eu_west", &"us_east"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -409,8 +437,7 @@ mod tests {
             1,
             TestInterval::OneSecond,
             23,
-            vec![&"us_east"],
-            vec![&"eu_west", &"us_west"],
+            vec![&"us_east", &"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -418,8 +445,7 @@ mod tests {
             1,
             TestInterval::OneSecond,
             59,
-            vec![&"us_east"],
-            vec![&"eu_west", &"us_west"],
+            vec![&"us_east", &"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -427,8 +453,7 @@ mod tests {
             2,
             TestInterval::OneSecond,
             25,
-            vec![&"eu_west"],
-            vec![&"us_east", &"us_west"],
+            vec![&"eu_west", &"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config,
@@ -436,8 +461,7 @@ mod tests {
             2,
             TestInterval::OneSecond,
             51,
-            vec![&"eu_west"],
-            vec![&"us_east", &"us_west"],
+            vec![&"eu_west", &"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config,
@@ -445,8 +469,7 @@ mod tests {
             3,
             TestInterval::OneSecond,
             20,
-            vec![&"us_west"],
-            vec![&"us_east", &"eu_west"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -454,8 +477,7 @@ mod tests {
             3,
             TestInterval::OneSecond,
             40,
-            vec![&"us_west"],
-            vec![&"us_east", &"eu_west"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
 
         // Try a more complicated start minute
@@ -465,8 +487,7 @@ mod tests {
             12345,
             TestInterval::OneMinute,
             0,
-            vec![&"us_west"],
-            vec![&"us_east", &"eu_west"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -474,8 +495,7 @@ mod tests {
             12345,
             TestInterval::OneMinute,
             1,
-            vec![&"us_east"],
-            vec![&"eu_west", &"us_west"],
+            vec![&"us_east", &"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config,
@@ -483,8 +503,7 @@ mod tests {
             12345,
             TestInterval::OneMinute,
             2,
-            vec![&"eu_west"],
-            vec![&"us_west", &"us_east"],
+            vec![&"eu_west", &"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config,
@@ -492,8 +511,7 @@ mod tests {
             12345,
             TestInterval::OneMinute,
             3,
-            vec![&"us_west"],
-            vec![&"us_east", &"eu_west"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
 
         // Try a larger interval to be sure things work
@@ -514,8 +532,7 @@ mod tests {
             0,
             TestInterval::OneMinute,
             0,
-            vec![&"us_west"],
-            vec![&"us_east", &"eu_west"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -523,8 +540,7 @@ mod tests {
             1,
             TestInterval::OneMinute,
             5,
-            vec![&"us_east"],
-            vec![&"us_west", &"eu_west"],
+            vec![&"us_east", &"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -532,8 +548,7 @@ mod tests {
             2,
             TestInterval::OneMinute,
             10,
-            vec![&"eu_west"],
-            vec![&"us_west", &"us_east"],
+            vec![&"eu_west", &"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -541,8 +556,7 @@ mod tests {
             3,
             TestInterval::OneMinute,
             11,
-            vec![&"us_west"],
-            vec![&"eu_west", &"us_east"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
 
         // Try more complicated times
@@ -553,8 +567,7 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             15,
-            vec![&"us_west"],
-            vec![&"eu_west", &"us_east"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -562,8 +575,7 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             39,
-            vec![&"us_east"],
-            vec![&"eu_west", &"us_west"],
+            vec![&"us_east", &"eu_west", &"us_west"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -571,8 +583,7 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             40,
-            vec![&"eu_west"],
-            vec![&"us_east", &"us_west"],
+            vec![&"eu_west", &"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -580,8 +591,7 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             59,
-            vec![&"eu_west"],
-            vec![&"us_east", &"us_west"],
+            vec![&"eu_west", &"us_west", &"us_east"],
         );
         run_interval_test(
             &multi_region_config_large_interval,
@@ -589,19 +599,17 @@ mod tests {
             13423,
             TestInterval::OneMinute,
             60,
-            vec![&"us_west"],
-            vec![&"us_east", &"eu_west"],
+            vec![&"us_west", &"us_east", &"eu_west"],
         );
     }
 
     fn run_interval_test(
-        config: &CheckConfig,
+        base_config: &CheckConfig,
         interval: TestInterval,
         interval_count: i64,
         offset_type: TestInterval,
         offset_count: i64,
-        should_run: Vec<&str>,
-        should_not_run: Vec<&str>,
+        should_run_order: Vec<&str>, // The order regions should run in
     ) {
         let tick = Tick::from_time(
             DateTime::from_timestamp(
@@ -610,21 +618,47 @@ mod tests {
             )
             .unwrap(),
         );
-        for region in should_run {
+
+        // We hardcode ids here. We have to do this so that we have a list of ids that produce a
+        // subscription id that results in the order of processing our tests are expecting.
+        let test_ids = [
+            Uuid::from_u128(9),
+            Uuid::from_u128(0),
+            Uuid::from_u128(2),
+            Uuid::from_u128(1_000_000),
+            Uuid::from_u128(1_000_003),
+            Uuid::from_u128(1_000_001),
+        ];
+
+        for (i, subscription_id) in test_ids.iter().enumerate() {
+            let config = CheckConfig {
+                subscription_id: *subscription_id,
+                ..base_config.clone()
+            };
+            let expected_region = should_run_order[i.checked_rem(should_run_order.len()).unwrap()];
+
+            // This region should run
             assert!(
-                config.should_run(tick, region),
-                "Expected that region {} would run for tick {}",
-                region,
-                tick
+                config.should_run(tick, expected_region),
+                "Subscription {} (int {}, offset {}) should run in region {} at tick {}. Results for regions {:?}",
+                subscription_id,
+                subscription_id.as_u128(),
+                subscription_id.as_u128().checked_rem(should_run_order.len() as u128).unwrap(),
+                expected_region,
+                tick,
+                should_run_order.iter().map(|region| format!("{}: {}\n", region, config.should_run(tick, region))).collect::<Vec<_>>(),
             );
-        }
-        for region in should_not_run {
-            assert!(
-                !config.should_run(tick, region),
-                "Expected that region {} would not run for tick {}",
-                region,
-                tick
-            );
+
+            // All other regions should not run
+            for other_region in should_run_order.iter().filter(|&&r| r != expected_region) {
+                assert!(
+                    !config.should_run(tick, other_region),
+                    "Subscription {} should not run in region {} at tick {}",
+                    subscription_id,
+                    other_region,
+                    tick
+                );
+            }
         }
     }
 }
