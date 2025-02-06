@@ -23,6 +23,8 @@ pub enum CheckInterval {
 
 /// The largest check interval
 pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
+
+/// A random hardcoded id that we use to generated v5 uuids based on subscription ids.
 pub const SUBSCRIPTION_ID_NAMESPACE: Uuid = Uuid::from_u128(31415926535897932384626433832795u128);
 
 /// The CheckConfig represents a configuration for a single check.
