@@ -173,10 +173,13 @@ fn make_trace_header(config: &CheckConfig, trace_id: &Uuid, span_id: SpanId) -> 
     // according to the service's sampling policy. see
     // https://develop.sentry.dev/sdk/telemetry/traces/#header-sentry-trace
     // for more information.
+
+    let trace_id_without_dashes = trace_id.to_string().replace("-", "");
+
     if config.trace_sampling {
-        format!("{}-{}", trace_id, span_id)
+        format!("{}-{}", trace_id_without_dashes, span_id)
     } else {
-        format!("{}-{}-{}", trace_id, span_id, '0')
+        format!("{}-{}-{}", trace_id_without_dashes, span_id, '0')
     }
 }
 
@@ -574,7 +577,8 @@ mod tests {
             ..Default::default()
         };
         let trace_header = make_trace_header(&config, &trace_id, span_id);
-        assert_eq!(trace_header, format!("{}-{}-0", trace_id, span_id));
+        assert_eq!(trace_header, format!("{}-{}-0", trace_id.to_string().replace("-", ""), span_id));
+        assert_eq!(trace_header.to_string().matches("-").count(), 2);
 
         // Test with sampling enabled
         let config_with_sampling = CheckConfig {
@@ -583,7 +587,8 @@ mod tests {
             ..Default::default()
         };
         let trace_header_sampling = make_trace_header(&config_with_sampling, &trace_id, span_id);
-        assert_eq!(trace_header_sampling, format!("{}-{}", trace_id, span_id));
+        assert_eq!(trace_header_sampling, format!("{}-{}", trace_id.to_string().replace("-", ""), span_id));
+        assert_eq!(trace_header_sampling.to_string().matches("-").count(), 1);
     }
 
     #[tokio::test]
