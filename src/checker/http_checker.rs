@@ -577,7 +577,10 @@ mod tests {
             ..Default::default()
         };
         let trace_header = make_trace_header(&config, &trace_id, span_id);
-        assert_eq!(trace_header, format!("{}-{}-0", trace_id.to_string().replace("-", ""), span_id));
+        assert_eq!(
+            trace_header,
+            format!("{}-{}-0", trace_id.to_string().replace("-", ""), span_id)
+        );
         assert_eq!(trace_header.to_string().matches("-").count(), 2);
 
         // Test with sampling enabled
@@ -587,7 +590,10 @@ mod tests {
             ..Default::default()
         };
         let trace_header_sampling = make_trace_header(&config_with_sampling, &trace_id, span_id);
-        assert_eq!(trace_header_sampling, format!("{}-{}", trace_id.to_string().replace("-", ""), span_id));
+        assert_eq!(
+            trace_header_sampling,
+            format!("{}-{}", trace_id.to_string().replace("-", ""), span_id)
+        );
         assert_eq!(trace_header_sampling.to_string().matches("-").count(), 1);
     }
 
