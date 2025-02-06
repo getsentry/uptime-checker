@@ -155,8 +155,10 @@ async fn executor_loop(
 
             num_running.fetch_add(1, Ordering::SeqCst);
 
-            metrics::gauge!("executor.queue_size", "uptime_region" => region.clone()).set(queue_size.load(Ordering::SeqCst) as f64);
-            metrics::gauge!("executor.num_running", "uptime_region" => region.clone()).set(num_running.load(Ordering::SeqCst) as f64);
+            metrics::gauge!("executor.queue_size", "uptime_region" => region.clone())
+                .set(queue_size.load(Ordering::SeqCst) as f64);
+            metrics::gauge!("executor.num_running", "uptime_region" => region.clone())
+                .set(num_running.load(Ordering::SeqCst) as f64);
 
             async move {
                 let _ = tokio::spawn(async move {
