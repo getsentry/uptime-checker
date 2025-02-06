@@ -111,6 +111,13 @@ impl CheckConfig {
             return true;
         };
 
+        // We deterministically produce a new uuid here based on the subscription id and use it to
+        // help distribute when we run each check in a region. Without this, we end up running all
+        // checks for each region at the same time, and then idling.
+        //
+        // We have to use this instead of the subscription id itself because we already use the
+        // subscription id distribute checks across the check interval. If we used it here, then
+        // it'd mean that we still end up running checks for a given region at the same time.
         let subscription_seed_id =
             Uuid::new_v5(&SUBSCRIPTION_ID_NAMESPACE, self.subscription_id.as_bytes());
         let running_region_idx = (((tick.time().timestamp() / self.interval as i64) as u128)
