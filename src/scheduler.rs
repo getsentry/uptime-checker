@@ -92,6 +92,12 @@ async fn scheduler_loop(
         let mut results = vec![];
 
         for config in configs {
+            // Stat to see if the cadence that configs are processed is spiky between regions
+            metrics::counter!(
+                "scheduler.config_might_run",
+                "uptime_region" => region.clone(),
+            )
+            .increment(1);
             if config.should_run(tick, &region) {
                 results.push(queue_check(&executor_sender, tick, config));
             } else {
