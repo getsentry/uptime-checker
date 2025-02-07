@@ -12,7 +12,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::app::config::{ConfigProviderMode, ProducerMode};
-use crate::check_config_provider::kafka_config_provider::run_config_consumer;
 use crate::check_config_provider::redis_config_provider::run_config_provider;
 use crate::check_executor::{run_executor, CheckSender};
 use crate::config_waiter::wait_for_partition_boot;
@@ -167,11 +166,6 @@ impl Manager {
         });
 
         let consumer_join_handle = match &manager.config.config_provider_mode {
-            ConfigProviderMode::Kafka => run_config_consumer(
-                &manager.config,
-                manager.clone(),
-                manager.shutdown_signal.clone(),
-            ),
             ConfigProviderMode::Redis => run_config_provider(
                 &manager.config,
                 manager.clone(),

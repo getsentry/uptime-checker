@@ -14,7 +14,6 @@ use crate::{app::cli, logging};
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigProviderMode {
-    Kafka,
     Redis,
 }
 
@@ -71,18 +70,6 @@ pub struct Config {
 
     /// The topic to produce uptime checks into.
     pub results_kafka_topic: String,
-
-    /// The kafka cluster to load configs from to. Expected to be a string of comma separated
-    /// addresses.
-    ///
-    /// ```txt
-    /// 10.0.0.1:5000,10.0.0.2:6000
-    /// ```
-    #[serde_as(as = "serde_with::StringWithSeparator::<CommaSeparator, String>")]
-    pub configs_kafka_cluster: Vec<String>,
-
-    /// The topic to load [`CheckConfig`]s from.
-    pub configs_kafka_topic: String,
 
     /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
@@ -141,9 +128,7 @@ impl Default for Config {
             },
             results_kafka_cluster: vec![],
             results_kafka_topic: "uptime-results".to_owned(),
-            configs_kafka_cluster: vec![],
-            configs_kafka_topic: "uptime-configs".to_owned(),
-            config_provider_mode: ConfigProviderMode::Kafka,
+            config_provider_mode: ConfigProviderMode::Redis,
             vector_batch_size: 10,
             vector_endpoint: "http://localhost:8020".to_owned(),
             producer_mode: ProducerMode::Kafka,
@@ -259,13 +244,8 @@ mod tests {
                             "10.0.0.1".to_owned(),
                             "10.0.0.2:9000".to_owned()
                         ],
-                        configs_kafka_cluster: vec![
-                            "10.0.0.1".to_owned(),
-                            "10.0.0.2:9000".to_owned()
-                        ],
                         results_kafka_topic: "uptime-results".to_owned(),
-                        configs_kafka_topic: "uptime-configs".to_owned(),
-                        config_provider_mode: ConfigProviderMode::Kafka,
+                        config_provider_mode: ConfigProviderMode::Redis,
                         config_provider_redis_update_ms: 1000,
                         config_provider_redis_total_partitions: 128,
                         redis_enable_cluster: false,
@@ -302,7 +282,7 @@ mod tests {
                     "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
                     "10.0.0.1,10.0.0.2:7000",
                 ),
-                ("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "kafka"),
+                ("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "redis"),
                 ("UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_UPDATE_MS", "2000"),
                 (
                     "UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_TOTAL_PARTITIONS",
@@ -335,13 +315,8 @@ mod tests {
                             "10.0.0.1".to_owned(),
                             "10.0.0.2:7000".to_owned()
                         ],
-                        configs_kafka_cluster: vec![
-                            "10.0.0.1".to_owned(),
-                            "10.0.0.2:7000".to_owned()
-                        ],
                         results_kafka_topic: "uptime-results".to_owned(),
-                        configs_kafka_topic: "uptime-configs".to_owned(),
-                        config_provider_mode: ConfigProviderMode::Kafka,
+                        config_provider_mode: ConfigProviderMode::Redis,
                         config_provider_redis_update_ms: 2000,
                         config_provider_redis_total_partitions: 32,
                         redis_enable_cluster: true,
