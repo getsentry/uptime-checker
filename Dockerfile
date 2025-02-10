@@ -7,7 +7,8 @@ RUN apk add --no-cache \
     make \
     g++ \
     pkgconfig \
-    openssl-dev
+    openssl-dev \
+    protobuf-compiler
 
 # Configure cargo
 RUN mkdir -p ~/.cargo && \
