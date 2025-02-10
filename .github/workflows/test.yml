@@ -15,6 +15,8 @@ jobs:
           redis-version: "7.x"
       - name: Install Rust Toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3      
       - name: Run Cargo Tests
         run: cargo test
 
