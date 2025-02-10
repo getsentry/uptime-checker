@@ -90,7 +90,7 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
     }
     None
 }
-fn ssl_error(err: &reqwest::Error) -> Option<String> {
+fn tls_error(err: &reqwest::Error) -> Option<String> {
     let mut inner = &err as &dyn Error;
     while let Some(source) = inner.source() {
         if let Some(e) = source.downcast_ref::<ErrorStack>() {
@@ -123,11 +123,17 @@ fn connection_error(err: &reqwest::Error) -> Option<String> {
     None
 }
 
-fn hyper_error(err: &reqwest::Error) -> Option<String> {
+fn hyper_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, String)> {
     let mut inner = &err as &dyn Error;
     while let Some(source) = inner.source() {
         if let Some(hyper_error) = source.downcast_ref::<hyper::Error>() {
-            return Some(hyper_error.to_string());
+            if hyper_error.is_incomplete_message() {
+                return Some((
+                    CheckStatusReasonType::ConnectionError,
+                    hyper_error.to_string(),
+                ));
+            }
+            return Some((CheckStatusReasonType::Failure, hyper_error.to_string()));
         }
         inner = source;
     }
@@ -230,25 +236,29 @@ impl Checker for HttpChecker {
                         status_type: CheckStatusReasonType::DnsError,
                         description: message,
                     }
-                } else if let Some(message) = ssl_error(&e) {
+                } else if let Some(message) = tls_error(&e) {
                     CheckStatusReason {
-                        status_type: CheckStatusReasonType::Failure,
+                        status_type: CheckStatusReasonType::TlsError,
                         description: message,
                     }
                 } else if let Some(message) = connection_error(&e) {
                     CheckStatusReason {
-                        status_type: CheckStatusReasonType::Failure,
+                        status_type: CheckStatusReasonType::ConnectionError,
                         description: message,
                     }
-                } else if let Some(message) = hyper_error(&e) {
+                } else if let Some((status_type, message)) = hyper_error(&e) {
                     CheckStatusReason {
-                        status_type: CheckStatusReasonType::Failure,
+                        status_type,
                         description: message,
                     }
                 } else {
+                    // if any error falls through we should log it,
+                    // none should fall through.
+                    let error_msg = e.without_url();
+                    tracing::info!("check_url.error: {:?}", error_msg);
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
-                        description: format!("{:?}", e.without_url()),
+                        description: format!("{:?}", error_msg),
                     }
                 }
             }),
@@ -693,7 +703,7 @@ mod tests {
             );
             assert_eq!(
                 result.status_reason.as_ref().map(|r| r.status_type),
-                Some(CheckStatusReasonType::Failure),
+                Some(CheckStatusReasonType::TlsError),
                 "Test case: {:?}",
                 cert_type
             );
@@ -722,7 +732,7 @@ mod tests {
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
             result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::Failure)
+            Some(CheckStatusReasonType::ConnectionError)
         );
         assert_eq!(
             result.status_reason.map(|r| r.description),
@@ -761,7 +771,7 @@ mod tests {
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
             result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::Failure)
+            Some(CheckStatusReasonType::ConnectionError)
         );
         let result_description = result.status_reason.map(|r| r.description).unwrap();
         assert_eq!(

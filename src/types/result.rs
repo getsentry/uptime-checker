@@ -29,6 +29,8 @@ pub enum CheckStatus {
 pub enum CheckStatusReasonType {
     Timeout,
     DnsError,
+    TlsError,
+    ConnectionError,
     Failure,
 }
 
