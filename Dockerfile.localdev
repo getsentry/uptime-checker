@@ -30,7 +30,6 @@ WORKDIR /app
 RUN mkdir -p /app/src
 VOLUME /app/src
 COPY src /app/src
-COPY redis-test-macro /app/redis-test-macro
 
 # Just copy the Cargo.toml files and trigger a build so that we compile our
 # dependencies only. This way we avoid layer cache invalidation if our
