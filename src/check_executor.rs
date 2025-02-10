@@ -215,6 +215,8 @@ fn record_result_metrics(result: &CheckResult) {
         Some(CheckStatusReasonType::Failure) => Some("failure"),
         Some(CheckStatusReasonType::DnsError) => Some("dns_error"),
         Some(CheckStatusReasonType::Timeout) => Some("timeout"),
+        Some(CheckStatusReasonType::TlsError) => Some("tls_error"),
+        Some(CheckStatusReasonType::ConnectionError) => Some("connection_error"),
         None => None,
     };
     let status_code = match request_info.as_ref().and_then(|a| a.http_status_code) {
