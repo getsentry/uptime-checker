@@ -92,9 +92,6 @@ pub struct Config {
 
     /// Whether we're using redis in standalone or cluster mode
     pub redis_enable_cluster: bool,
-    
-    /// The maximum number of retries to attempt when sending results to vector
-    pub vector_max_retries: Option<u32>,
 
     /// Whether to retry sending results to vector indefinitely
     pub retry_vector_errors_forever: bool,
@@ -232,9 +229,8 @@ mod tests {
             "#,
             &[],
             |config| {
-                let config = config.unwrap();
                 assert_eq!(
-                    config,
+                    config.unwrap(),
                     Config {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env")),
