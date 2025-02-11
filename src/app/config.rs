@@ -170,7 +170,6 @@ impl Config {
         }
 
         let config: Config = builder.extract()?;
-
         Ok(config)
     }
 }
@@ -191,7 +190,7 @@ mod tests {
 
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where
-        F: FnOnce(anyhow::Result<Config>),
+        F: FnOnce(Config),
     {
         Jail::expect_with(|jail| {
             jail.create_file("config.yaml", yaml)?;
@@ -207,7 +206,7 @@ mod tests {
                 command: cli::Commands::Run,
             };
 
-            let config = Config::extract(&app);
+            let config = Config::extract(&app).unwrap();
             test_fn(config);
             Ok(())
         })
@@ -230,7 +229,7 @@ mod tests {
             &[],
             |config| {
                 assert_eq!(
-                    config.unwrap(),
+                    config,
                     Config {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env")),
@@ -305,7 +304,7 @@ mod tests {
             ],
             |config| {
                 assert_eq!(
-                    config.unwrap(),
+                    config,
                     Config {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env_override")),
@@ -351,7 +350,7 @@ mod tests {
             "#,
             &[],
             |config| {
-                assert_eq!(config.unwrap().checker_number, 0);
+                assert_eq!(config.checker_number, 0);
             },
         )
     }
