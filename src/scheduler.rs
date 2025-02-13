@@ -64,6 +64,9 @@ async fn scheduler_loop(
         Some(result) => {
             let last_completed_check_nanos: i64 = result.parse().unwrap_or(Utc::now().timestamp());
             let next_check = Utc.timestamp_nanos(last_completed_check_nanos) + tick_frequency;
+            // There's a race where a checker is running for a given progress_key, and another is starting.
+            // Since we add `tick_frequency` to the date here, the date can end up in the future, which causes
+            // a panic when we subtract it from `Utc::now()`. We avoid this by clamping to Utc::now().
             next_check.min(Utc::now().duration_trunc(TimeDelta::seconds(1)).unwrap())
         }
         // We truncate the initial date to the nearest second so that we're aligned to the second
