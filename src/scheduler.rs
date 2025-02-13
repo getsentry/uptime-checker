@@ -178,13 +178,13 @@ async fn scheduler_loop(
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Add;
     use crate::app::config::Config;
     use crate::check_executor::CheckSender;
     use chrono::{Duration, TimeDelta, Utc};
     use redis::{Client, Commands};
     use redis_test_macro::redis_test;
     use similar_asserts::assert_eq;
+    use std::ops::Add;
     use std::sync::Arc;
     use tokio::sync::oneshot;
     use tokio_util::sync::CancellationToken;
@@ -538,7 +538,11 @@ mod tests {
         let _: () = connection
             .set(
                 progress_key.clone(),
-                Utc::now().add(TimeDelta::seconds(60)).timestamp_nanos_opt().unwrap().to_string(),
+                Utc::now()
+                    .add(TimeDelta::seconds(60))
+                    .timestamp_nanos_opt()
+                    .unwrap()
+                    .to_string(),
             )
             .expect("Couldn't save progress of scheduler");
 
