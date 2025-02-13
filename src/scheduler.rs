@@ -95,7 +95,7 @@ async fn scheduler_loop(
         let mut results = vec![];
         let mut bucket_size: usize = 0;
 
-        for config in configs{
+        for config in configs {
             // Stat to see if the cadence that configs are processed is spiky between regions
             metrics::counter!(
                 "scheduler.config_might_run",
