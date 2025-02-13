@@ -44,6 +44,7 @@ pub fn run_scheduler(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn scheduler_loop(
     partition: u16,
     config_store: Arc<RwConfigStore>,
