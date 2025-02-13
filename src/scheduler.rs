@@ -63,7 +63,8 @@ async fn scheduler_loop(
     let start = match result {
         Some(result) => {
             let last_completed_check_nanos: i64 = result.parse().unwrap_or(Utc::now().timestamp());
-            Utc.timestamp_nanos(last_completed_check_nanos) + tick_frequency
+            let next_check = Utc.timestamp_nanos(last_completed_check_nanos) + tick_frequency;
+            next_check.min(Utc::now().duration_trunc(TimeDelta::seconds(1)).unwrap())
         }
         // We truncate the initial date to the nearest second so that we're aligned to the second
         // boundary here
@@ -174,9 +175,10 @@ async fn scheduler_loop(
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Add;
     use crate::app::config::Config;
     use crate::check_executor::CheckSender;
-    use chrono::{Duration, Utc};
+    use chrono::{Duration, TimeDelta, Utc};
     use redis::{Client, Commands};
     use redis_test_macro::redis_test;
     use similar_asserts::assert_eq;
@@ -520,5 +522,77 @@ mod tests {
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
         assert_eq!(progress, 62000000000);
+    }
+
+    #[traced_test]
+    #[redis_test(start_paused = true)]
+    async fn test_scheduler_start_bad_start_val() {
+        let config = Config::default();
+        let partition = 1;
+        let progress_key = build_progress_key(partition);
+        let client = Client::open(config.redis_host.clone()).unwrap();
+        let mut connection = client.get_connection().expect("Unable to connect to Redis");
+        let _: () = connection
+            .set(
+                progress_key.clone(),
+                Utc::now().add(TimeDelta::seconds(60)).timestamp_nanos_opt().unwrap().to_string(),
+            )
+            .expect("Couldn't save progress of scheduler");
+
+        let config_store = Arc::new(ConfigStore::new_rw());
+
+        let config1 = Arc::new(CheckConfig {
+            subscription_id: Uuid::from_u128(1),
+            ..Default::default()
+        });
+
+        {
+            let mut rw_store = config_store.write().unwrap();
+            rw_store.add_config(config1.clone());
+        }
+
+        let (executor_tx, mut executor_rx) = CheckSender::new();
+        let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
+        let shutdown_token = CancellationToken::new();
+
+        let join_handle = run_scheduler(
+            partition,
+            config_store,
+            executor_tx,
+            shutdown_token.clone(),
+            progress_key.clone(),
+            config.redis_host.clone(),
+            boot_rx,
+            config.region.clone(),
+            false,
+        );
+
+        let _ = boot_tx.send(BootResult::Started);
+
+        // // Wait and execute both ticks
+        let scheduled_check1 = executor_rx.recv().await.unwrap();
+        let scheduled_check1_time = scheduled_check1.get_tick().time();
+        assert_eq!(scheduled_check1.get_config().clone(), config1);
+
+        // Record results for both to complete both ticks
+        scheduled_check1.record_result(CheckResult {
+            guid: Uuid::new_v4(),
+            subscription_id: config1.subscription_id,
+            status: CheckStatus::Success,
+            status_reason: None,
+            trace_id: Default::default(),
+            span_id: Default::default(),
+            scheduled_check_time: scheduled_check1_time,
+            actual_check_time: Utc::now(),
+            duration: Some(Duration::seconds(1)),
+            request_info: None,
+            region: config.region.clone(),
+        });
+
+        shutdown_token.cancel();
+        // XXX: Without this loop we end up stuck forever, we should try to understand that better
+        while executor_rx.recv().await.is_some() {}
+        join_handle.await.unwrap();
+        assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
     }
 }
