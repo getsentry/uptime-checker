@@ -29,6 +29,10 @@ struct Options {
     /// When set to true (the default) resolution to internal network addresses will be restricted.
     /// This should primarily be disabled for tests.
     validate_url: bool,
+
+    /// When set to true sets the pool_max_idle_per_host to 0. Effectively removing connection
+    /// pooling and forcing a new connection for each new request. This may help reduce connection
+    /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
 }
 
