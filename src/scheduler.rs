@@ -31,6 +31,7 @@ pub fn run_scheduler(
     tokio::spawn(async move {
         let _ = config_loaded_receiver.await;
         scheduler_loop(
+            partition,
             config_store,
             executor_sender,
             shutdown,
@@ -43,7 +44,9 @@ pub fn run_scheduler(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn scheduler_loop(
+    partition: u16,
     config_store: Arc<RwConfigStore>,
     executor_sender: CheckSender,
     shutdown: CancellationToken,
@@ -89,11 +92,8 @@ async fn scheduler_loop(
             .read()
             .expect("Lock poisoned")
             .get_configs(tick);
-        tracing::debug!(%tick, bucket_size = configs.len(), "scheduler.tick_scheduled");
-        metrics::gauge!("scheduler.bucket_size", "uptime_region" => region.clone())
-            .set(configs.len() as f64);
-
         let mut results = vec![];
+        let mut bucket_size: usize = 0;
 
         for config in configs {
             // Stat to see if the cadence that configs are processed is spiky between regions
@@ -104,6 +104,7 @@ async fn scheduler_loop(
             .increment(1);
             if config.should_run(tick, &region) {
                 results.push(queue_check(&executor_sender, tick, config));
+                bucket_size += 1;
             } else {
                 tracing::debug!(%config.subscription_id, %tick, "scheduler.skipped_config");
 
@@ -114,6 +115,9 @@ async fn scheduler_loop(
                 .increment(1);
             }
         }
+        tracing::debug!(%tick, bucket_size = bucket_size, "scheduler.tick_scheduled");
+        metrics::gauge!("scheduler.bucket_size", "uptime_region" => region.clone(), "partition" => partition.to_string())
+        .set(bucket_size as f64);
 
         // Spawn a task to wait for checks to complete.
         //
