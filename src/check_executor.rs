@@ -150,11 +150,10 @@ async fn executor_loop(
             let job_checker = checker.clone();
             let job_producer = producer.clone();
             let job_region = region.clone();
-            let job_queue_size = queue_size.clone();
             let job_num_running = num_running.clone();
 
             num_running.fetch_add(1, Ordering::SeqCst);
-
+            queue_size.fetch_sub(1, Ordering::SeqCst);
             metrics::gauge!("executor.queue_size", "uptime_region" => region.clone())
                 .set(queue_size.load(Ordering::SeqCst) as f64);
             metrics::gauge!("executor.num_running", "uptime_region" => region.clone())
@@ -184,7 +183,6 @@ async fn executor_loop(
                     tracing::debug!(result = ?check_result, "executor.check_complete");
 
                     scheduled_check.record_result(check_result);
-                    job_queue_size.fetch_sub(1, Ordering::SeqCst);
                     job_num_running.fetch_sub(1, Ordering::SeqCst);
                 })
                 .await;
