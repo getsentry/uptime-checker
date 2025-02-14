@@ -229,11 +229,11 @@ mod tests {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let config1 = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(1),
+            subscription_id: Uuid::from_u128(435),
             ..Default::default()
         });
         let config2 = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(3),
+            subscription_id: Uuid::from_u128(14),
             ..Default::default()
         });
 
@@ -338,14 +338,16 @@ mod tests {
         // so that it's in us_west.
         // For config 2, we need it to be `<val> % 60 == 3` and
         // `<val> % active_regions.length() == 1` so that it's in us_east.
+        // Note: These numbers are chosen so that the uuid5 we generate for them modulos to 1/3
+        // respectively, and places them in the same slot.
         let config1 = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(61),
+            subscription_id: Uuid::from_u128(2500),
             active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
         });
         let config2 = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(63),
+            subscription_id: Uuid::from_u128(1317),
             active_regions: Some(vec!["us_east".to_string(), "us_west".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
@@ -449,11 +451,11 @@ mod tests {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let config1 = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(1),
+            subscription_id: Uuid::from_u128(435),
             ..Default::default()
         });
         let config2 = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(3),
+            subscription_id: Uuid::from_u128(14),
             ..Default::default()
         });
 
