@@ -94,6 +94,7 @@ async fn scheduler_loop(
             .get_configs(tick);
         let mut results = vec![];
         let mut bucket_size: usize = 0;
+        let total_configs = configs.len();
 
         for config in configs {
             // Stat to see if the cadence that configs are processed is spiky between regions
@@ -115,7 +116,11 @@ async fn scheduler_loop(
                 .increment(1);
             }
         }
-        tracing::info!(%tick, bucket_size = bucket_size, uptime_region = region, partition=partition.to_string(), "scheduler.tick_scheduled");
+        tracing::info!(
+            %tick, bucket_size = bucket_size, uptime_region = region, partition=partition.to_string(),
+            total_configs=total_configs, skipped_configs=total_configs - bucket_size,
+            "scheduler.tick_scheduled"
+        );
         metrics::gauge!("scheduler.bucket_size", "uptime_region" => region.clone(), "partition" => partition.to_string())
         .set(bucket_size as f64);
 
