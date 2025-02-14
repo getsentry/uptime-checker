@@ -115,7 +115,7 @@ async fn scheduler_loop(
                 .increment(1);
             }
         }
-        tracing::debug!(%tick, bucket_size = bucket_size, "scheduler.tick_scheduled");
+        tracing::debug!(%tick, bucket_size = bucket_size, uptime_region = region, partition=partition.to_string(), "scheduler.tick_scheduled");
         metrics::gauge!("scheduler.bucket_size", "uptime_region" => region.clone(), "partition" => partition.to_string())
         .set(bucket_size as f64);
 
