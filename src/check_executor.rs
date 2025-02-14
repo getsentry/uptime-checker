@@ -343,15 +343,26 @@ mod tests {
         assert_eq!(poll!(resolve_rx_2.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_3.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_4.as_mut()), Poll::Pending);
+        // Move time forward less than one second. Two will start running
+        time::sleep(Duration::from_millis(999)).await;
+        // No task has completed yet, some are running, some are queued
+        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 2);
+        assert_eq!(sender.num_running.load(Ordering::SeqCst), 2);
+        assert_eq!(poll!(resolve_rx_1.as_mut()), Poll::Pending);
+        assert_eq!(poll!(resolve_rx_2.as_mut()), Poll::Pending);
+        assert_eq!(poll!(resolve_rx_3.as_mut()), Poll::Pending);
+        assert_eq!(poll!(resolve_rx_4.as_mut()), Poll::Pending);
 
-        // Move time forward one second. The first two will complete, but the last two will not yet
-        time::sleep(Duration::from_millis(1001)).await;
+        // Move time forward over the second boundary. The first two will complete,
+        // but the last two will not yet
+        time::sleep(Duration::from_millis(2)).await;
+
         assert!(matches!(poll!(resolve_rx_1.as_mut()), Poll::Ready(_)));
         assert!(matches!(poll!(resolve_rx_2.as_mut()), Poll::Ready(_)));
         assert_eq!(poll!(resolve_rx_3.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_4.as_mut()), Poll::Pending);
 
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 2);
+        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 0);
         assert_eq!(sender.num_running.load(Ordering::SeqCst), 2);
 
         // Move forward another second, the last two tasks should now be complete
