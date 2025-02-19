@@ -744,6 +744,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            append_host_dot: false,
         });
         let tick = make_tick();
 
@@ -835,6 +836,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            append_host_dot: false,
         });
         let tick = make_tick();
         let config = CheckConfig {
