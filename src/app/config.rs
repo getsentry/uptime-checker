@@ -112,7 +112,10 @@ pub struct Config {
     /// Sets the maximum time in seconds to keep idle sockets alive in the http checker.
     pub pool_idle_timeout_secs: u64,
 
-    /// The unioque index of this checker out of the total nuimber of checkers. Should be
+    /// Whether to append a dot to the url hostnames
+    pub append_host_dot: bool,
+
+    /// The unique index of this checker out of the total nuimber of checkers. Should be
     /// zero-indexed.
     pub checker_number: u16,
 
@@ -151,6 +154,7 @@ impl Default for Config {
             disable_connection_reuse: true,
             pool_idle_timeout_secs: 90,
             record_task_metrics: false,
+            append_host_dot: false,
             checker_number: 0,
             total_checkers: 1,
             failure_retries: 0,
@@ -268,6 +272,7 @@ mod tests {
                         disable_connection_reuse: true,
                         record_task_metrics: false,
                         pool_idle_timeout_secs: 90,
+                        append_host_dot: false,
                         checker_number: 0,
                         total_checkers: 1,
                         producer_mode: ProducerMode::Kafka,
@@ -311,6 +316,7 @@ mod tests {
                 ("UPTIME_CHECKER_ALLOW_INTERNAL_IPS", "true"),
                 ("UPTIME_CHECKER_DISABLE_CONNECTION_REUSE", "false"),
                 ("UPTIME_CHECKER_POOL_IDLE_TIMEOUT_SECS", "600"),
+                ("UPTIME_CHECKER_APPEND_HOST_DOT", "true"),
                 ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
                 ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
                 ("UPTIME_CHECKER_FAILURE_RETRIES", "2"),
@@ -344,6 +350,7 @@ mod tests {
                         disable_connection_reuse: false,
                         record_task_metrics: false,
                         pool_idle_timeout_secs: 600,
+                        append_host_dot: true,
                         checker_number: 2,
                         total_checkers: 5,
                         producer_mode: ProducerMode::Kafka,
