@@ -13,8 +13,8 @@ use sentry::protocol::SpanId;
 use std::error::Error;
 use std::time::Duration;
 use tokio::time::Instant;
-use uuid::Uuid;
 use url::Url;
+use uuid::Uuid;
 
 pub const CHECKER_RESULT_NAMESPACE: Uuid = Uuid::from_u128(0x67f0b2d5_e476_4f00_9b99_9e6b95c3b7e3);
 
@@ -79,13 +79,10 @@ async fn do_request(
         .expect("Timeout duration could not be converted to std::time::Duration");
 
     let url = if append_host_dot {
-        match add_dot_to_host(&check_config.url) {
-            Ok(modified_url) => modified_url,
-            Err(err) => {
-                tracing::error!(?err, "http_checker.do_request.parse_url_failed");
-                check_config.url.clone()
-            }
-        }
+        add_dot_to_host(&check_config.url).unwrap_or_else(|err| {
+            tracing::error!(?err, "http_checker.do_request.parse_url_failed");
+            check_config.url.clone()
+        })
     } else {
         check_config.url.clone()
     };
