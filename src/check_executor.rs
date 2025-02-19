@@ -274,13 +274,22 @@ mod tests {
 
     use super::*;
     use crate::{
-        checker::dummy_checker::DummyChecker, producer::dummy_producer::DummyResultsProducer,
+        checker::dummy_checker::{DummyChecker, DummyResult},
+        producer::dummy_producer::DummyResultsProducer,
         types::check_config::CheckInterval,
     };
 
     #[tokio::test(start_paused = true)]
     async fn test_executor_simple() {
-        let checker = Arc::new(DummyChecker::new(Duration::from_secs(1)));
+        let delayed_result = DummyResult {
+            delay: Some(Duration::from_secs(1)),
+            status: CheckStatus::Success,
+        };
+
+        let (dummy_checker, dummy_result_queue) = DummyChecker::new();
+        dummy_result_queue.send(delayed_result).unwrap();
+
+        let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
         let (sender, _) = run_executor(1, checker, producer, "us-west".to_string());
@@ -305,7 +314,18 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_executor_concurrent_limit() {
-        let checker = Arc::new(DummyChecker::new(Duration::from_secs(1)));
+        let delayed_result = DummyResult {
+            delay: Some(Duration::from_secs(1)),
+            status: CheckStatus::Success,
+        };
+
+        let (dummy_checker, dummy_result_queue) = DummyChecker::new();
+        dummy_result_queue.send(delayed_result.clone()).unwrap();
+        dummy_result_queue.send(delayed_result.clone()).unwrap();
+        dummy_result_queue.send(delayed_result.clone()).unwrap();
+        dummy_result_queue.send(delayed_result.clone()).unwrap();
+
+        let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
         // Only allow 2 configs to execute concurrently
@@ -376,7 +396,15 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_executor_missed() {
-        let checker = Arc::new(DummyChecker::new(Duration::from_secs(1)));
+        let delayed_result = DummyResult {
+            delay: Some(Duration::from_secs(1)),
+            status: CheckStatus::Success,
+        };
+
+        let (dummy_checker, dummy_result_queue) = DummyChecker::new();
+        dummy_result_queue.send(delayed_result).unwrap();
+
+        let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
         let (sender, _) = run_executor(1, checker, producer, "us-west".to_string());
