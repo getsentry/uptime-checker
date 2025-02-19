@@ -111,6 +111,7 @@ impl Manager {
         let checker = Arc::new(HttpChecker::new(
             !config.allow_internal_ips,
             config.disable_connection_reuse,
+            config.append_host_dot,
         ));
 
         let (executor_sender, (executor_join_handle, results_worker)) = match &config.producer_mode
