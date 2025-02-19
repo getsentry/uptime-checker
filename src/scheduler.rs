@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval, Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::check_executor::{queue_check, CheckSender};
+use crate::check_executor::CheckSender;
 use crate::config_store::{RwConfigStore, Tick};
 use crate::config_waiter::BootResult;
 use crate::redis::build_redis_client;
@@ -104,7 +104,7 @@ async fn scheduler_loop(
             )
             .increment(1);
             if config.should_run(tick, &region) {
-                results.push(queue_check(&executor_sender, tick, config));
+                results.push(executor_sender.queue_check(tick, config));
                 bucket_size += 1;
             } else {
                 tracing::debug!(%config.subscription_id, %tick, "scheduler.skipped_config");
