@@ -341,8 +341,8 @@ mod tests {
             status: CheckStatus::Success,
         };
 
-        let (dummy_checker, dummy_result_queue) = DummyChecker::new();
-        dummy_result_queue.send(delayed_result).unwrap();
+        let dummy_checker = DummyChecker::new();
+        dummy_checker.queue_result(delayed_result);
 
         let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
@@ -374,11 +374,11 @@ mod tests {
             status: CheckStatus::Success,
         };
 
-        let (dummy_checker, dummy_result_queue) = DummyChecker::new();
-        dummy_result_queue.send(delayed_result.clone()).unwrap();
-        dummy_result_queue.send(delayed_result.clone()).unwrap();
-        dummy_result_queue.send(delayed_result.clone()).unwrap();
-        dummy_result_queue.send(delayed_result.clone()).unwrap();
+        let dummy_checker = DummyChecker::new();
+        dummy_checker.queue_result(delayed_result.clone());
+        dummy_checker.queue_result(delayed_result.clone());
+        dummy_checker.queue_result(delayed_result.clone());
+        dummy_checker.queue_result(delayed_result.clone());
 
         let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
@@ -456,8 +456,8 @@ mod tests {
             status: CheckStatus::Success,
         };
 
-        let (dummy_checker, dummy_result_queue) = DummyChecker::new();
-        dummy_result_queue.send(delayed_result).unwrap();
+        let dummy_checker = DummyChecker::new();
+        dummy_checker.queue_result(delayed_result);
 
         let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
@@ -489,9 +489,9 @@ mod tests {
         };
 
         // One failure then one success
-        let (dummy_checker, dummy_result_queue) = DummyChecker::new();
-        dummy_result_queue.send(failed_result).unwrap();
-        dummy_result_queue.send(success_result).unwrap();
+        let dummy_checker = DummyChecker::new();
+        dummy_checker.queue_result(failed_result);
+        dummy_checker.queue_result(success_result);
 
         let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
@@ -527,11 +527,11 @@ mod tests {
 
         // Three failure then one success, we won't get the success since our retry limit is 2, so
         // we'll fail once, retry twice, and report the last failure
-        let (dummy_checker, dummy_result_queue) = DummyChecker::new();
-        dummy_result_queue.send(failed_result.clone()).unwrap();
-        dummy_result_queue.send(failed_result.clone()).unwrap();
-        dummy_result_queue.send(failed_result.clone()).unwrap();
-        dummy_result_queue.send(success_result).unwrap();
+        let dummy_checker = DummyChecker::new();
+        dummy_checker.queue_result(failed_result.clone());
+        dummy_checker.queue_result(failed_result.clone());
+        dummy_checker.queue_result(failed_result.clone());
+        dummy_checker.queue_result(success_result);
 
         let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
