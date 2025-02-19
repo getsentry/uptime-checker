@@ -191,7 +191,10 @@ impl HttpChecker {
         .expect("Failed to build checker client");
 
         let append_host_dot = options.append_host_dot;
-        Self { client, append_host_dot }
+        Self {
+            client,
+            append_host_dot,
+        }
     }
 
     pub fn new(validate_url: bool, disable_connection_reuse: bool, append_host_dot: bool) -> Self {
