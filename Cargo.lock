@@ -2880,7 +2880,7 @@ dependencies = [
 [[package]]
 name = "reqwest"
 version = "0.12.2"
-source = "git+https://github.com/getsentry/reqwest?branch=restricted-connector#7331a73eb2379c141d65d0cfed4ebcd36927a495"
+source = "git+https://github.com/getsentry/reqwest-uptime?branch=jferg/log-dns-timing#ba7a942d66d9b581b19d39086ec245cb053f239f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -2904,6 +2904,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
+ "rand",
  "rustls-pemfile",
  "serde",
  "serde_json",
