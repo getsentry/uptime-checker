@@ -39,7 +39,7 @@ pub fn build_progress_key(partition: u16) -> String {
 }
 
 impl PartitionedService {
-    pub fn start(config: Arc<Config>, executor_sender: CheckSender, partition: u16) -> Self {
+    pub fn start(config: Arc<Config>, executor_sender: Arc<CheckSender>, partition: u16) -> Self {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let waiter_config_store = config_store.clone();
@@ -95,7 +95,7 @@ impl PartitionedService {
 pub struct Manager {
     config: Arc<Config>,
     services: RwLock<HashMap<u16, Arc<PartitionedService>>>,
-    executor_sender: CheckSender,
+    executor_sender: Arc<CheckSender>,
     shutdown_sender: UnboundedSender<PartitionedService>,
     shutdown_signal: CancellationToken,
 }
@@ -125,6 +125,7 @@ impl Manager {
                 // referneces of the Sender (executor_sender) are dropped.
                 let (executor_sender, executor_handle) = run_executor(
                     config.checker_concurrency,
+                    config.failure_retries,
                     checker.clone(),
                     Arc::new(results_producer),
                     config.region.clone(),
@@ -146,6 +147,7 @@ impl Manager {
                 // referneces of the Sender (executor_sender) are dropped.
                 let (sender, handle) = run_executor(
                     config.checker_concurrency,
+                    config.failure_retries,
                     checker.clone(),
                     producer,
                     config.region.clone(),
@@ -281,7 +283,7 @@ mod tests {
             let manager = Arc::new(Self {
                 config,
                 services: RwLock::new(HashMap::new()),
-                executor_sender,
+                executor_sender: Arc::new(executor_sender),
                 shutdown_sender,
                 shutdown_signal: CancellationToken::new(),
             });
@@ -298,7 +300,8 @@ mod tests {
     #[tokio::test]
     async fn test_partitioned_service_get_config_store() {
         let (executor_sender, _) = CheckSender::new();
-        let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
+        let service =
+            PartitionedService::start(Arc::new(Config::default()), Arc::new(executor_sender), 0);
         service.get_config_store();
         service.stop().await;
     }
@@ -306,7 +309,8 @@ mod tests {
     #[tokio::test]
     async fn test_start_stop() {
         let (executor_sender, _) = CheckSender::new();
-        let service = PartitionedService::start(Arc::new(Config::default()), executor_sender, 0);
+        let service =
+            PartitionedService::start(Arc::new(Config::default()), Arc::new(executor_sender), 0);
         service.stop().await;
     }
 
@@ -317,7 +321,7 @@ mod tests {
             config_provider_mode: ConfigProviderMode::Redis,
             ..Default::default()
         };
-        let service = PartitionedService::start(Arc::new(config), executor_sender, 0);
+        let service = PartitionedService::start(Arc::new(config), Arc::new(executor_sender), 0);
         service.stop().await;
     }
 

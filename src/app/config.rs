@@ -111,6 +111,9 @@ pub struct Config {
 
     /// Total number of uptime checkers running
     pub total_checkers: u16,
+
+    /// The number of times to retry failed checks before reporting them as failed
+    pub failure_retries: u16,
 }
 
 impl Default for Config {
@@ -141,6 +144,7 @@ impl Default for Config {
             disable_connection_reuse: true,
             checker_number: 0,
             total_checkers: 1,
+            failure_retries: 0,
         }
     }
 }
@@ -258,6 +262,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        failure_retries: 0,
                     }
                 );
             },
@@ -296,6 +301,7 @@ mod tests {
                 ("UPTIME_CHECKER_DISABLE_CONNECTION_REUSE", "false"),
                 ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
                 ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
+                ("UPTIME_CHECKER_FAILURE_RETRIES", "2"),
             ],
             |config| {
                 assert_eq!(
@@ -329,6 +335,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        failure_retries: 2,
                     }
                 );
             },
