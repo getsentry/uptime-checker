@@ -926,7 +926,7 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: true,
+            append_host_dot: false,
         });
         let tick = make_tick();
         let config = CheckConfig {
