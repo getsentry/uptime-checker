@@ -2880,7 +2880,7 @@ dependencies = [
 [[package]]
 name = "reqwest"
 version = "0.12.2"
-source = "git+https://github.com/getsentry/reqwest-uptime?branch=jferg/log-dns-timing#ba7a942d66d9b581b19d39086ec245cb053f239f"
+source = "git+https://github.com/getsentry/reqwest-uptime?rev=7408a3124f56130a1e89935841ae4314440ef309#7408a3124f56130a1e89935841ae4314440ef309"
 dependencies = [
  "base64 0.22.1",
  "bytes",

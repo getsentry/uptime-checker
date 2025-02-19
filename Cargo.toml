@@ -47,7 +47,7 @@ ctor = "0.2"
 hostname = "0.4.0"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
-reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "7408a3124f56130a1e89935841ae4314440ef309g" }
+reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "7408a3124f56130a1e89935841ae4314440ef309" }
 # we're using the jferg/log-dns-timing branch on the reqwest-uptime fork
 
 [profile.release]
