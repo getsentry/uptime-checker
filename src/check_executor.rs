@@ -50,7 +50,7 @@ pub struct CheckSender {
 
 impl CheckSender {
     pub fn new() -> (Self, UnboundedReceiver<ScheduledCheck>) {
-        let (sender, reciever) = mpsc::unbounded_channel();
+        let (sender, receiver) = mpsc::unbounded_channel();
         let queue_size = Arc::new(AtomicU64::new(0));
         let num_running = Arc::new(AtomicU64::new(0));
         let check_sender = Self {
@@ -59,7 +59,26 @@ impl CheckSender {
             num_running,
         };
 
-        (check_sender, reciever)
+        (check_sender, receiver)
+    }
+
+    /// Queues a check for execution, returning a oneshot receiver that will be fired once the check
+    /// has resolved to a CheckResult.
+    pub fn queue_check(&self, tick: Tick, config: Arc<CheckConfig>) -> Receiver<CheckResult> {
+        let (resolve_tx, resolve_rx) = oneshot::channel();
+
+        let scheduled_check = ScheduledCheck {
+            tick,
+            config,
+            resolve_tx,
+        };
+
+        self.queue_size.fetch_add(1, Ordering::SeqCst);
+        self.sender
+            .send(scheduled_check)
+            .expect("Failed to queue ScheduledCheck");
+
+        resolve_rx
     }
 }
 
@@ -108,30 +127,6 @@ pub fn run_executor(
     });
 
     (check_sender, executor)
-}
-
-/// Queues a check for execution, returning a oneshot receiver that will be fired once the check
-/// has resolved to a CheckResult.
-pub fn queue_check(
-    check_sender: &CheckSender,
-    tick: Tick,
-    config: Arc<CheckConfig>,
-) -> Receiver<CheckResult> {
-    let (resolve_tx, resolve_rx) = oneshot::channel();
-
-    let scheduled_check = ScheduledCheck {
-        tick,
-        config,
-        resolve_tx,
-    };
-
-    check_sender.queue_size.fetch_add(1, Ordering::SeqCst);
-    check_sender
-        .sender
-        .send(scheduled_check)
-        .expect("Failed to queue ScheduledCheck");
-
-    resolve_rx
 }
 
 async fn executor_loop(
@@ -300,7 +295,7 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = queue_check(&sender, tick, config.clone());
+        let resolve_rx = sender.queue_check(tick, config.clone());
         tokio::pin!(resolve_rx);
 
         // Will not be resolved yet
@@ -339,7 +334,7 @@ mod tests {
                     subscription_id: Uuid::from_u128(i),
                     ..Default::default()
                 });
-                queue_check(&sender, tick, config)
+                sender.queue_check(tick, config)
             })
             .collect();
 
@@ -416,7 +411,7 @@ mod tests {
             ..Default::default()
         });
 
-        let result = queue_check(&sender, tick, config.clone()).await.unwrap();
+        let result = sender.queue_check(tick, config.clone()).await.unwrap();
 
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::MissedWindow);
