@@ -19,7 +19,7 @@ use redis::AsyncCommands;
 pub fn run_scheduler(
     partition: u16,
     config_store: Arc<RwConfigStore>,
-    executor_sender: CheckSender,
+    executor_sender: Arc<CheckSender>,
     shutdown: CancellationToken,
     progress_key: String,
     redis_host: String,
@@ -48,7 +48,7 @@ pub fn run_scheduler(
 async fn scheduler_loop(
     partition: u16,
     config_store: Arc<RwConfigStore>,
-    executor_sender: CheckSender,
+    executor_sender: Arc<CheckSender>,
     shutdown: CancellationToken,
     progress_key: String,
     redis_host: String,
@@ -250,7 +250,7 @@ mod tests {
         let join_handle = run_scheduler(
             partition,
             config_store,
-            executor_tx,
+            Arc::new(executor_tx),
             shutdown_token.clone(),
             build_progress_key(0),
             config.redis_host.clone(),
@@ -366,7 +366,7 @@ mod tests {
         let join_handle = run_scheduler(
             partition,
             config_store,
-            executor_tx,
+            Arc::new(executor_tx),
             shutdown_token.clone(),
             build_progress_key(0),
             config.redis_host.clone(),
@@ -472,7 +472,7 @@ mod tests {
         let join_handle = run_scheduler(
             partition,
             config_store,
-            executor_tx,
+            Arc::new(executor_tx),
             shutdown_token.clone(),
             progress_key.clone(),
             config.redis_host.clone(),
@@ -576,7 +576,7 @@ mod tests {
         let join_handle = run_scheduler(
             partition,
             config_store,
-            executor_tx,
+            Arc::new(executor_tx),
             shutdown_token.clone(),
             progress_key.clone(),
             config.redis_host.clone(),
