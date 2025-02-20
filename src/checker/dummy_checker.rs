@@ -30,17 +30,24 @@ impl Default for DummyResult {
 
 #[derive(Debug)]
 pub struct DummyChecker {
+    sender: UnboundedSender<DummyResult>,
     results: RwLock<UnboundedReceiver<DummyResult>>,
 }
 
 impl DummyChecker {
-    pub fn new() -> (Self, UnboundedSender<DummyResult>) {
+    pub fn new() -> Self {
         let (sender, reciever) = mpsc::unbounded_channel();
-        let checker = Self {
+        Self {
+            sender,
             results: RwLock::new(reciever),
-        };
+        }
+    }
 
-        (checker, sender)
+    /// Add a result to the queue for when
+    pub fn queue_result(&self, result: DummyResult) {
+        self.sender
+            .send(result)
+            .expect("Failed to queue dummy result");
     }
 }
 
