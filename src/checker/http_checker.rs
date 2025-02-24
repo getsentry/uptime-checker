@@ -235,6 +235,11 @@ impl Checker for HttpChecker {
                         status_type: CheckStatusReasonType::Timeout,
                         description: "Request timed out".to_string(),
                     }
+                } else if e.is_redirect() {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::RedirectError,
+                        description: "Too many redirects".to_string(),
+                    }
                 } else if let Some(message) = dns_error(&e) {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::DnsError,

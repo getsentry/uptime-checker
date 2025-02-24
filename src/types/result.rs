@@ -31,6 +31,7 @@ pub enum CheckStatusReasonType {
     DnsError,
     TlsError,
     ConnectionError,
+    RedirectError,
     Failure,
 }
 
