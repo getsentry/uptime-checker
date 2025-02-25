@@ -2,11 +2,11 @@ use futures::{Future, StreamExt};
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::Vacant;
 use std::pin::Pin;
+use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
-use std::time::Duration;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;

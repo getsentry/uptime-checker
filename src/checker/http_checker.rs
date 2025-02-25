@@ -172,7 +172,11 @@ impl HttpChecker {
         Self { client }
     }
 
-    pub fn new(validate_url: bool, disable_connection_reuse: bool, pool_idle_timeout: Duration) -> Self {
+    pub fn new(
+        validate_url: bool,
+        disable_connection_reuse: bool,
+        pool_idle_timeout: Duration,
+    ) -> Self {
         Self::new_internal(Options {
             validate_url,
             disable_connection_reuse,
@@ -291,13 +295,13 @@ impl Checker for HttpChecker {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
     use crate::checker::http_checker::make_trace_header;
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
+    use std::time::Duration;
 
     use super::{HttpChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
