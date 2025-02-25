@@ -750,6 +750,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_too_many_redirects() {
+        let server = MockServer::start();
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+        });
+
+        // Create a redirect loop where each request redirects back to itself
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/redirect")
+                .header_exists("sentry-trace");
+            then.status(302)
+                .header("Location", server.url("/redirect").as_str());
+        });
+
+        let config = CheckConfig {
+            url: server.url("/redirect").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::RedirectError)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("Too many redirects".to_string())
+        );
+
+        // Verify that the mock was called at least once
+        // The reqwest client follows redirects multiple times before giving up
+        redirect_mock.assert_hits(10);
+    }
+
+    #[tokio::test]
     #[cfg(target_os = "linux")]
     async fn test_connection_reset() {
         // Set up a TCP listener that sends an incomplete response
