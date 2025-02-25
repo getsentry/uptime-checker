@@ -2,6 +2,7 @@ use futures::{Future, StreamExt};
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::Vacant;
 use std::pin::Pin;
+use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
@@ -111,6 +112,7 @@ impl Manager {
         let checker = Arc::new(HttpChecker::new(
             !config.allow_internal_ips,
             config.disable_connection_reuse,
+            Duration::from_secs(config.pool_idle_timeout_secs),
         ));
 
         let (executor_sender, (executor_join_handle, results_worker)) = match &config.producer_mode

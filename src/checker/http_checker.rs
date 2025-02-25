@@ -11,6 +11,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::SpanId;
 use std::error::Error;
+use std::time::Duration;
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -34,6 +35,7 @@ struct Options {
     /// pooling and forcing a new connection for each new request. This may help reduce connection
     /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
+    pool_idle_timeout: Duration,
 }
 
 impl Default for Options {
@@ -41,6 +43,7 @@ impl Default for Options {
         Self {
             validate_url: true,
             disable_connection_reuse: false,
+            pool_idle_timeout: Duration::from_secs(90),
         }
     }
 }
@@ -151,7 +154,8 @@ impl HttpChecker {
 
         let mut builder = ClientBuilder::new()
             .hickory_dns(true)
-            .default_headers(default_headers);
+            .default_headers(default_headers)
+            .pool_idle_timeout(options.pool_idle_timeout);
 
         if options.validate_url {
             builder = builder.ip_filter(is_external_ip);
@@ -168,10 +172,15 @@ impl HttpChecker {
         Self { client }
     }
 
-    pub fn new(validate_url: bool, disable_connection_reuse: bool) -> Self {
+    pub fn new(
+        validate_url: bool,
+        disable_connection_reuse: bool,
+        pool_idle_timeout: Duration,
+    ) -> Self {
         Self::new_internal(Options {
             validate_url,
             disable_connection_reuse,
+            pool_idle_timeout,
         })
     }
 }
@@ -292,6 +301,7 @@ mod tests {
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
+    use std::time::Duration;
 
     use super::{HttpChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
@@ -321,6 +331,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -354,6 +365,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -399,6 +411,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -439,6 +452,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let head_mock = server.mock(|when, then| {
@@ -478,6 +492,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let localhost_config = CheckConfig {
@@ -506,6 +521,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         // Private address space
@@ -551,6 +567,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -673,6 +690,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
         let tick = make_tick();
 
@@ -725,6 +743,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -763,6 +782,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
         let tick = make_tick();
         let config = CheckConfig {
