@@ -253,7 +253,7 @@ impl Manager {
         tracing::info!(partition, "partition_update.unregistering");
         let mut services = self.services.write().unwrap();
 
-        let Some(service) = services.remove(&partition).take() else {
+        let Some(service) = services.remove(&partition) else {
             tracing::error!(partition, "partition_update.not_registered");
             return;
         };
