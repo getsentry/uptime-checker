@@ -6,6 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
+use std::time::Duration;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -111,6 +112,7 @@ impl Manager {
         let checker = Arc::new(HttpChecker::new(
             !config.allow_internal_ips,
             config.disable_connection_reuse,
+            Duration::from_secs(config.pool_idle_timeout_secs),
         ));
 
         let (executor_sender, (executor_join_handle, results_worker)) = match &config.producer_mode
