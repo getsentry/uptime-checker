@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::app::config::{ConfigProviderMode, ProducerMode};
 use crate::check_config_provider::redis_config_provider::run_config_provider;
-use crate::check_executor::{run_executor, CheckSender};
+use crate::check_executor::{run_executor, CheckSender, ExecutorConfig};
 use crate::config_waiter::wait_for_partition_boot;
 use crate::producer::kafka_producer::KafkaResultsProducer;
 use crate::{
@@ -115,24 +115,25 @@ impl Manager {
             Duration::from_secs(config.pool_idle_timeout_secs),
         ));
 
-        let (executor_sender, (executor_join_handle, results_worker)) = match &config.producer_mode
-        {
+        let executor_conf = ExecutorConfig {
+            concurrency: config.checker_concurrency,
+            failure_retries: config.failure_retries,
+            region: config.region.clone(),
+            record_task_metrics: config.record_task_metrics,
+        };
+
+        let (executor_sender, executor_join_handle, results_worker) = match &config.producer_mode {
             ProducerMode::Vector => {
                 let (results_producer, results_worker) = VectorResultsProducer::new(
                     &config.results_kafka_topic,
                     config.vector_endpoint.clone(),
                     config.vector_batch_size,
                 );
+                let producer = Arc::new(results_producer);
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
                 // referneces of the Sender (executor_sender) are dropped.
-                let (executor_sender, executor_handle) = run_executor(
-                    config.checker_concurrency,
-                    config.failure_retries,
-                    checker.clone(),
-                    Arc::new(results_producer),
-                    config.region.clone(),
-                );
-                (executor_sender, (executor_handle, results_worker))
+                let (sender, handle) = run_executor(checker.clone(), producer, executor_conf);
+                (sender, handle, results_worker)
             }
             ProducerMode::Kafka => {
                 let kafka_overrides =
@@ -147,15 +148,9 @@ impl Manager {
                 ));
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
                 // referneces of the Sender (executor_sender) are dropped.
-                let (sender, handle) = run_executor(
-                    config.checker_concurrency,
-                    config.failure_retries,
-                    checker.clone(),
-                    producer,
-                    config.region.clone(),
-                );
+                let (sender, handle) = run_executor(checker.clone(), producer, executor_conf);
                 let dummy_worker = tokio::spawn(async {});
-                (sender, (handle, dummy_worker))
+                (sender, handle, dummy_worker)
             }
         };
 
