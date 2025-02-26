@@ -105,6 +105,10 @@ pub struct Config {
     /// Whether to disable connection re-use in the http checker
     pub disable_connection_reuse: bool,
 
+    /// Whether to record metrics for check executor tasks. May be used to diagnose scheduling
+    /// problems with the http check executors.
+    pub record_task_metrics: bool,
+
     /// Sets the maximum time in seconds to keep idle sockets alive in the http checker.
     pub pool_idle_timeout_secs: u64,
 
@@ -146,6 +150,7 @@ impl Default for Config {
             allow_internal_ips: false,
             disable_connection_reuse: true,
             pool_idle_timeout_secs: 90,
+            record_task_metrics: false,
             checker_number: 0,
             total_checkers: 1,
             failure_retries: 0,
@@ -261,6 +266,7 @@ mod tests {
                         region: "default".to_owned(),
                         allow_internal_ips: false,
                         disable_connection_reuse: true,
+                        record_task_metrics: false,
                         pool_idle_timeout_secs: 90,
                         checker_number: 0,
                         total_checkers: 1,
@@ -336,6 +342,7 @@ mod tests {
                         region: "us-west".to_owned(),
                         allow_internal_ips: true,
                         disable_connection_reuse: false,
+                        record_task_metrics: false,
                         pool_idle_timeout_secs: 600,
                         checker_number: 2,
                         total_checkers: 5,
