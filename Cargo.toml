@@ -28,7 +28,7 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json"] }
 tracing-test = "0.2.5"
 console = "0.15.8"
-sentry-kafka-schemas = "1.0.5"
+sentry-kafka-schemas = "1.1.0"
 serde_with = { version = "3.8.1", features = ["chrono"] }
 rmp-serde = "1.3.0"
 serde_repr = "0.1.19"
@@ -46,6 +46,7 @@ rcgen = "0.11"
 time = "0.3"
 ctor = "0.2"
 hostname = "0.4.0"
+tokio-metrics = "0.4.0"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
 reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "012bc30a15cead582fc770a1a2ff76bc8c800ae5" }

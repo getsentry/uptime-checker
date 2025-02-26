@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{TimeDelta, Utc};
 use futures::StreamExt;
@@ -113,12 +114,25 @@ impl CheckResult {
     }
 }
 
+pub struct ExecutorConfig {
+    /// Number of checks that will be executed at the same time.
+    pub concurrency: usize,
+
+    /// Number of times a check will be retred when the execution of the check results in a
+    /// failure.
+    pub failure_retries: u16,
+
+    /// The region the checker checker is running as
+    pub region: String,
+
+    /// Track metrics about executed tasks
+    pub record_task_metrics: bool,
+}
+
 pub fn run_executor(
-    concurrency: usize,
-    failure_retries: u16,
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
-    region: String,
+    conf: ExecutorConfig,
 ) -> (Arc<CheckSender>, JoinHandle<()>) {
     tracing::info!("executor.starting");
 
@@ -128,12 +142,6 @@ pub fn run_executor(
 
     let check_sender = Arc::new(sender);
     let executor_check_sender = check_sender.clone();
-
-    let conf = ExecutorConfig {
-        concurrency,
-        failure_retries,
-        region,
-    };
 
     let executor_handle = tokio::spawn(async move {
         executor_loop(
@@ -151,18 +159,6 @@ pub fn run_executor(
     (check_sender, executor_handle)
 }
 
-struct ExecutorConfig {
-    /// Number of checks that will be executed at the same time.
-    concurrency: usize,
-
-    /// Number of times a check will be retred when the execution of the check results in a
-    /// failure.
-    failure_retries: u16,
-
-    /// The region the checker checker is running as
-    region: String,
-}
-
 async fn executor_loop(
     conf: ExecutorConfig,
     queue_size: Arc<AtomicU64>,
@@ -174,6 +170,21 @@ async fn executor_loop(
 ) {
     let schedule_check_stream: UnboundedReceiverStream<_> = check_receiver.into();
 
+    // construct a metrics taskmonitor
+    let metrics_monitor = tokio_metrics::TaskMonitor::new();
+
+    // record metrics to datadog every 10 seconds
+    if conf.record_task_metrics {
+        let metrics_region = conf.region.clone();
+        let metrics_monitor = metrics_monitor.clone();
+        tokio::spawn(async move {
+            for interval in metrics_monitor.intervals() {
+                record_task_metrics(interval, metrics_region.clone());
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            }
+        });
+    }
+
     schedule_check_stream
         .for_each_concurrent(conf.concurrency, |scheduled_check| {
             let job_checker = checker.clone();
@@ -181,6 +192,8 @@ async fn executor_loop(
             let job_region = conf.region.clone();
             let job_num_running = num_running.clone();
             let job_check_sender = check_sender.clone();
+
+            let job_metrics_monitor = metrics_monitor.clone();
 
             num_running.fetch_add(1, Ordering::SeqCst);
             queue_size.fetch_sub(1, Ordering::SeqCst);
@@ -190,7 +203,7 @@ async fn executor_loop(
                 .set(num_running.load(Ordering::SeqCst) as f64);
 
             async move {
-                let _ = tokio::spawn(async move {
+                let check_task = async move {
                     let config = &scheduled_check.config;
                     let tick = &scheduled_check.tick;
 
@@ -230,8 +243,13 @@ async fn executor_loop(
 
                     scheduled_check.record_result(check_result);
                     job_num_running.fetch_sub(1, Ordering::SeqCst);
-                })
-                .await;
+                };
+
+                if conf.record_task_metrics {
+                    let _ = job_metrics_monitor.instrument(check_task).await;
+                } else {
+                    let _ = tokio::spawn(check_task).await;
+                }
             }
         })
         .await;
@@ -261,6 +279,7 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
         Some(CheckStatusReasonType::Timeout) => Some("timeout"),
         Some(CheckStatusReasonType::TlsError) => Some("tls_error"),
         Some(CheckStatusReasonType::ConnectionError) => Some("connection_error"),
+        Some(CheckStatusReasonType::RedirectError) => Some("redirect_error"),
         None => None,
     };
     let status_code = match request_info.as_ref().and_then(|a| a.http_status_code) {
@@ -317,6 +336,49 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
     .increment(1);
 }
 
+fn record_task_metrics(interval: tokio_metrics::TaskMetrics, region: String) {
+    metrics::gauge!(
+        "executor_task.mean_first_poll_delay",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_first_poll_delay());
+    metrics::gauge!(
+        "executor_task.mean_idle_duration",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_idle_duration());
+    metrics::gauge!(
+        "executor_task.mean_poll_duration",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_poll_duration());
+    metrics::gauge!(
+        "executor_task.mean_scheduled_duration",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_scheduled_duration());
+    metrics::gauge!(
+        "executor_task.mean_fast_poll_duration",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_fast_poll_duration());
+    metrics::gauge!(
+        "executor_task.mean_long_delay_duration",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_long_delay_duration());
+    metrics::gauge!(
+        "executor_task.mean_short_delay_duration",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_short_delay_duration());
+    metrics::gauge!(
+        "executor_task.mean_long_delay_duration",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_long_delay_duration());
+}
+
 #[cfg(test)]
 mod tests {
     use std::{task::Poll, time::Duration};
@@ -347,7 +409,13 @@ mod tests {
         let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
-        let (sender, _) = run_executor(1, 0, checker, producer, "us-west".to_string());
+        let conf = ExecutorConfig {
+            concurrency: 1,
+            failure_retries: 0,
+            region: "us-west".to_string(),
+            record_task_metrics: false,
+        };
+        let (sender, _) = run_executor(checker, producer, conf);
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -384,7 +452,13 @@ mod tests {
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
         // Only allow 2 configs to execute concurrently
-        let (sender, _) = run_executor(2, 0, checker, producer, "us-west".to_string());
+        let conf = ExecutorConfig {
+            concurrency: 2,
+            failure_retries: 0,
+            region: "us-west".to_string(),
+            record_task_metrics: false,
+        };
+        let (sender, _) = run_executor(checker, producer, conf);
 
         // Send 4 configs into the executor
         let mut configs: Vec<Receiver<CheckResult>> = (0..4)
@@ -462,7 +536,13 @@ mod tests {
         let checker = Arc::new(dummy_checker);
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
-        let (sender, _) = run_executor(1, 0, checker, producer, "us-west".to_string());
+        let conf = ExecutorConfig {
+            concurrency: 1,
+            failure_retries: 0,
+            region: "us-west".to_string(),
+            record_task_metrics: false,
+        };
+        let (sender, _) = run_executor(checker, producer, conf);
 
         let tick = Tick::from_time(Utc::now() - TimeDelta::minutes(2));
         let config = Arc::new(CheckConfig {
@@ -497,7 +577,13 @@ mod tests {
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
         // Allow one retry
-        let (sender, _) = run_executor(1, 1, checker, producer, "us-west".to_string());
+        let conf = ExecutorConfig {
+            concurrency: 1,
+            failure_retries: 1,
+            region: "us-west".to_string(),
+            record_task_metrics: false,
+        };
+        let (sender, _) = run_executor(checker, producer, conf);
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -537,7 +623,13 @@ mod tests {
         let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
 
         // Allow two retries
-        let (sender, _) = run_executor(1, 2, checker, producer, "us-west".to_string());
+        let conf = ExecutorConfig {
+            concurrency: 1,
+            failure_retries: 2,
+            region: "us-west".to_string(),
+            record_task_metrics: false,
+        };
+        let (sender, _) = run_executor(checker, producer, conf);
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {

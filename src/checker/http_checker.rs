@@ -11,6 +11,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::SpanId;
 use std::error::Error;
+use std::time::Duration;
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -34,6 +35,7 @@ struct Options {
     /// pooling and forcing a new connection for each new request. This may help reduce connection
     /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
+    pool_idle_timeout: Duration,
 }
 
 impl Default for Options {
@@ -41,6 +43,7 @@ impl Default for Options {
         Self {
             validate_url: true,
             disable_connection_reuse: false,
+            pool_idle_timeout: Duration::from_secs(90),
         }
     }
 }
@@ -168,7 +171,8 @@ impl HttpChecker {
 
         let mut builder = ClientBuilder::new()
             .hickory_dns(true)
-            .default_headers(default_headers);
+            .default_headers(default_headers)
+            .pool_idle_timeout(options.pool_idle_timeout);
 
         if options.validate_url {
             builder = builder.ip_filter(is_external_ip);
@@ -185,10 +189,15 @@ impl HttpChecker {
         Self { client }
     }
 
-    pub fn new(validate_url: bool, disable_connection_reuse: bool) -> Self {
+    pub fn new(
+        validate_url: bool,
+        disable_connection_reuse: bool,
+        pool_idle_timeout: Duration,
+    ) -> Self {
         Self::new_internal(Options {
             validate_url,
             disable_connection_reuse,
+            pool_idle_timeout,
         })
     }
 }
@@ -252,6 +261,11 @@ impl Checker for HttpChecker {
                         status_type: CheckStatusReasonType::Timeout,
                         description: "Request timed out".to_string(),
                     }
+                } else if e.is_redirect() {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::RedirectError,
+                        description: "Too many redirects".to_string(),
+                    }
                 } else if let Some(message) = dns_error(&e) {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::DnsError,
@@ -314,6 +328,7 @@ mod tests {
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
+    use std::time::Duration;
 
     use super::{HttpChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
@@ -343,6 +358,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -376,6 +392,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -421,6 +438,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -461,6 +479,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let head_mock = server.mock(|when, then| {
@@ -500,6 +519,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let localhost_config = CheckConfig {
@@ -528,6 +548,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         // Private address space
@@ -573,6 +594,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -695,6 +717,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
         let tick = make_tick();
 
@@ -747,6 +770,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -764,6 +788,48 @@ mod tests {
             result.status_reason.map(|r| r.description),
             Some("Connection refused".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_too_many_redirects() {
+        let server = MockServer::start();
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
+        });
+
+        // Create a redirect loop where each request redirects back to itself
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/redirect")
+                .header_exists("sentry-trace");
+            then.status(302)
+                .header("Location", server.url("/redirect").as_str());
+        });
+
+        let config = CheckConfig {
+            url: server.url("/redirect").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::RedirectError)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("Too many redirects".to_string())
+        );
+
+        // Verify that the mock was called at least once
+        // The reqwest client follows redirects multiple times before giving up
+        redirect_mock.assert_hits(10);
     }
 
     #[tokio::test]
@@ -785,6 +851,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
         let tick = make_tick();
         let config = CheckConfig {
