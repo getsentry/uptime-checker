@@ -774,6 +774,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         // Create a redirect loop where each request redirects back to itself
