@@ -146,6 +146,22 @@ fn hyper_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, String)> 
     }
     None
 }
+fn hyper_util_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, String)> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(hyper_util_error) = source.downcast_ref::<hyper_util::client::legacy::Error>() {
+            if hyper_util_error.is_connect() {
+                return Some((
+                    CheckStatusReasonType::ConnectionError,
+                    hyper_util_error.to_string(),
+                ));
+            }
+            return Some((CheckStatusReasonType::Failure, hyper_util_error.to_string()));
+        }
+        inner = source;
+    }
+    None
+}
 
 impl HttpChecker {
     fn new_internal(options: Options) -> Self {
@@ -265,6 +281,11 @@ impl Checker for HttpChecker {
                         description: message,
                     }
                 } else if let Some((status_type, message)) = hyper_error(&e) {
+                    CheckStatusReason {
+                        status_type,
+                        description: message,
+                    }
+                } else if let Some((status_type, message)) = hyper_util_error(&e) {
                     CheckStatusReason {
                         status_type,
                         description: message,
