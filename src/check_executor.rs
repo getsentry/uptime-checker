@@ -16,6 +16,9 @@ use crate::producer::ResultsProducer;
 use crate::types::check_config::CheckConfig;
 use crate::types::result::{CheckResult, CheckStatus, CheckStatusReasonType};
 
+const SLOW_POLL_THRESHOLD: Duration = Duration::from_millis(100);
+const LONG_DELAY_THRESHOLD: Duration = Duration::from_millis(100);
+
 #[derive(Debug)]
 pub struct ScheduledCheck {
     tick: Tick,
@@ -170,8 +173,10 @@ async fn executor_loop(
 ) {
     let schedule_check_stream: UnboundedReceiverStream<_> = check_receiver.into();
 
-    // construct a metrics taskmonitor
-    let metrics_monitor = tokio_metrics::TaskMonitor::new();
+    let metrics_monitor = tokio_metrics::TaskMonitor::builder()
+        .with_slow_poll_threshold(SLOW_POLL_THRESHOLD).clone()
+        .with_long_delay_threshold(LONG_DELAY_THRESHOLD).clone()
+        .build();
 
     // record metrics to datadog every 10 seconds
     if conf.record_task_metrics {
@@ -358,6 +363,11 @@ fn record_task_metrics(interval: tokio_metrics::TaskMetrics, region: String) {
     )
     .set(interval.mean_scheduled_duration());
     metrics::gauge!(
+        "executor_task.mean_slow_poll_duration",
+        "uptime_region" => region.clone(),
+    )
+    .set(interval.mean_slow_poll_duration());
+    metrics::gauge!(
         "executor_task.mean_fast_poll_duration",
         "uptime_region" => region.clone(),
     )
@@ -372,11 +382,6 @@ fn record_task_metrics(interval: tokio_metrics::TaskMetrics, region: String) {
         "uptime_region" => region.clone(),
     )
     .set(interval.mean_short_delay_duration());
-    metrics::gauge!(
-        "executor_task.mean_long_delay_duration",
-        "uptime_region" => region.clone(),
-    )
-    .set(interval.mean_long_delay_duration());
 }
 
 #[cfg(test)]
