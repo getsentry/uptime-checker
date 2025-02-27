@@ -174,8 +174,10 @@ async fn executor_loop(
     let schedule_check_stream: UnboundedReceiverStream<_> = check_receiver.into();
 
     let metrics_monitor = tokio_metrics::TaskMonitor::builder()
-        .with_slow_poll_threshold(SLOW_POLL_THRESHOLD).clone()
-        .with_long_delay_threshold(LONG_DELAY_THRESHOLD).clone()
+        .with_slow_poll_threshold(SLOW_POLL_THRESHOLD)
+        .clone()
+        .with_long_delay_threshold(LONG_DELAY_THRESHOLD)
+        .clone()
         .build();
 
     // record metrics to datadog every 10 seconds
