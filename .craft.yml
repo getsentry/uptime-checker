@@ -1,5 +1,6 @@
 minVersion: 1.0.0
 changelogPolicy: auto
+
 artifactProvider:
   name: none
 statusProvider:
@@ -7,15 +8,16 @@ statusProvider:
   config:
     contexts:
       - 'build-uptime-checker (sentryio)'
+
 targets:
   - name: github
   - id: release
     name: docker
-    source: us-central1-docker.pkg.dev/sentryio/uptime-checker/uptime-checker
+    source: ghcr.io/getsentry/uptime-checker
     target: getsentry/uptime-checker
   - id: latest
     name: docker
-    source: us-central1-docker.pkg.dev/sentryio/uptime-checker/uptime-checker
+    source: ghcr.io/getsentry/uptime-checker
     target: getsentry/uptime-checker
     targetFormat: '{{{target}}}:latest'
 preReleaseCommand: ""

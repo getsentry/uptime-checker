@@ -1,10 +1,10 @@
-name: image
+name: Build Image
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
   push:
     branches:
-      - master
+      - main
       - release/**
 
 concurrency:
@@ -12,148 +12,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-setup:
-    name: Setup build metadata
+  build-image:
+    name: Build and publish uptime-checker to GHCR
+    if: !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
 
     env:
-      FULL_CI: "${{
-        github.event_name != 'pull_request'
-        || contains(github.event.pull_request.labels.*.name, 'Trigger: Full-CI')
-      }}"
-
-    steps:
-      - id: set-outputs
-        run: |
-          echo "full_ci=$FULL_CI" >> $GITHUB_OUTPUT
-
-          if [[ "$FULL_CI" == "true" ]]; then
-            echo "Running full CI"
-            echo 'archs=["amd64", "arm64"]' >> $GITHUB_OUTPUT
-          else
-            echo "Skipping some CI steps"
-            echo 'archs=["amd64"]' >> $GITHUB_OUTPUT
-          fi
-    outputs:
-      archs: "${{ steps.set-outputs.outputs.archs }}"
-      full_ci: "${{ steps.set-outputs.outputs.full_ci }}"
-
-
-  build-image:
-    needs: build-setup
-
-    strategy:
-      matrix:
-        arch: ${{ fromJson(needs.build-setup.outputs.archs) }}
-
-    runs-on: |-
-      ${{fromJson('{
-        "amd64": "ubuntu-20.04",
-        "arm64": "ubuntu-22.04-arm"
-      }')[matrix.arch] }}
-
-    env:
-      IMG_VERSIONED: ghcr.io/getsentry/uptime-checker:${{ matrix.arch }}-${{ github.sha }}
-      NIGHTLY_IMG_CACHE: ghcr.io/getsentry/uptime-checker:${{ matrix.arch }}-nightly
-      BUILDER_IMG_CACHE: ghcr.io/getsentry/uptime-checker:${{ matrix.arch }}-builder
+      VERSIONED_IMAGE: ghcr.io/getsentry/uptime-checker:${{ github.sha }}
+      NIGHTLY_IMAGE: ghcr.io/getsentry/uptime-checker:nightly
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Docker Login
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
         run: docker login --username '${{ github.actor }}' --password '${{ secrets.GITHUB_TOKEN }}' ghcr.io
 
-      - name: build builder img
+      - name: Build and push to GHCR
         run: |
-          set -euxo pipefail
-          args=()
-          if docker pull -q "$BUILDER_IMG_CACHE"; then
-            args+=(--cache-from "$BUILDER_IMG_CACHE")
-          fi
           docker buildx build \
-              "${args[@]}" \
-              --build-arg BUILDKIT_INLINE_CACHE=1 \
-              --platform linux/${{ matrix.arch }} \
-              --tag "$BUILDER_IMG_CACHE" \
-              --target uptime-checker-build \
+              --platform linux/arm64,linux/amd64 \
+               $( [[ "${GITHUB_REF}" == "refs/heads/main" ]] && printf %s "--tag ${NIGHTLY_IMAGE}" ) \
+              --tag "${VERSIONED_IMAGE}" \
+              --file Dockerfile
+              --push
               .
-
-      - name: build nightly img
-        run: |
-          set -euxo pipefail
-          args=()
-          if docker pull -q "$NIGHTLY_IMG_CACHE"; then
-            args+=(--cache-from "$NIGHTLY_IMG_CACHE")
-          fi
-          docker buildx build \
-              "${args[@]}" \
-              --build-arg BUILDKIT_INLINE_CACHE=1 \
-              --platform linux/${{ matrix.arch }} \
-              --tag "$NIGHTLY_IMG_CACHE" \
-              --tag "$IMG_VERSIONED" \
-              --cache-from "${BUILDER_IMG_CACHE}" \
-              --cache-from "${NIGHTLY_IMG_CACHE}" \
-              .
-
-      - name: push all images
-        if: "needs.build-setup.outputs.full_ci == 'true'"
-        run: |
-          docker push "$BUILDER_IMG_CACHE"
-          docker push "$NIGHTLY_IMG_CACHE"
-          docker push "$IMG_VERSIONED"
-
-  assemble:
-    needs: build-image
-    if: github.event_name != 'pull_request'
-
-    runs-on: ubuntu-20.04
-
-    steps:
-      - name: Docker Login
-        run: docker login --username '${{ github.actor }}' --password '${{ secrets.GITHUB_TOKEN }}' ghcr.io
-
-      - name: Assemble Sha Image
-        run: |
-          docker manifest create \
-            'ghcr.io/getsentry/uptime-checker:${{ github.sha }}' \
-            'ghcr.io/getsentry/uptime-checker:arm64-${{ github.sha }}' \
-            'ghcr.io/getsentry/uptime-checker:amd64-${{ github.sha }}'
-
-          docker manifest push ghcr.io/getsentry/uptime-checker:${{ github.sha }}
-
-      - name: Assemble Latest Image
-        if: github.ref_name == 'master'
-        run: |
-          docker manifest create \
-            'ghcr.io/getsentry/uptime-checker:latest' \
-            'ghcr.io/getsentry/uptime-checker:arm64-${{ github.sha }}' \
-            'ghcr.io/getsentry/uptime-checker:amd64-${{ github.sha }}'
-
-          docker manifest push ghcr.io/getsentry/uptime-checker:latest
 
   publish-to-dockerhub:
     name: Publish uptime-checker to DockerHub
-    runs-on: ubuntu-20.04
-    if: ${{ (github.ref_name == 'main') }}
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'main'
     needs:
-      - assemble
+      - build-image
+    env:
+      REVISION: "${{ github.event.pull_request.head.sha || github.sha }}"
+      GHCR_IMAGE_URL: "ghcr.io/getsentry/uptime-checker"
+      DOCKERHUB_IMAGE_URL: "getsentry/uptime-checker"
     steps:
       - uses: actions/checkout@v4
-      - timeout-minutes: 20
-        run: until docker pull "ghcr.io/getsentry/uptime-checker:${{ github.sha }}" 2>/dev/null; do sleep 10; done
-      - name: Push built docker image
+
+      - uses: docker/setup-qemu-action@v3
+
+      - name: Login to Docker Hub
+        shell: bash
+        run: docker login --username=sentrybuilder --password ${{ secrets.DOCKER_HUB_RW_TOKEN }}
+      
+      - name: Copy GHCR image to DockerHub
         shell: bash
         run: |
-          IMAGE_URL="ghcr.io/getsentry/uptime-checker:${{ github.sha }}"
-          docker login --username=sentrybuilder --password ${{ secrets.DOCKER_HUB_RW_TOKEN }}
           # We push 3 tags to Dockerhub:
-          # first, the full sha of the commit
-          docker tag "$IMAGE_URL" getsentry/uptime-checker:${GITHUB_SHA}
-          docker push getsentry/uptime-checker:${GITHUB_SHA}
-          # second, the short sha of the commit
-          SHORT_SHA=$(git rev-parse --short "$GITHUB_SHA")
-          docker tag "$IMAGE_URL" getsentry/uptime-checker:${SHORT_SHA}
-          docker push getsentry/uptime-checker:${SHORT_SHA}
-          # finally, nightly
-          docker tag "$IMAGE_URL" getsentry/uptime-checker:nightly
-          docker push getsentry/uptime-checker:nightly
+          # 1) the full sha of the commit
+          docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:${REVISION}" "${GHCR_IMAGE_URL}:${REVISION}"
+
+          # 2) the short sha
+          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-8)
+          docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:${SHORT_SHA}" "${GHCR_IMAGE_URL}:${REVISION}"
+
+          # 3) nightly
+          docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:nightly" "${GHCR_IMAGE_URL}:${REVISION}"
