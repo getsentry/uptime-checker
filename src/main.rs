@@ -1,16 +1,18 @@
 // TODO: We might want to remove this once more stable, but it's just noisy for now.
 #![allow(dead_code)]
 mod app;
+mod check_config_provider;
 mod check_executor;
 mod checker;
-mod config_consumer;
 mod config_store;
 mod config_waiter;
 mod logging;
 mod manager;
 mod metrics;
 mod producer;
+mod redis;
 mod scheduler;
+mod test_utils;
 mod types;
 
 use std::process;
@@ -29,4 +31,19 @@ pub fn main() {
 
     Hub::current().client().map(|x| x.close(None));
     process::exit(exit_code);
+}
+
+#[cfg(test)]
+mod test {
+    use crate::app::config::Config;
+    use redis::Client;
+
+    #[ctor::dtor]
+    fn cleanup() {
+        // Flushes Redis back to the default state to avoid state crossover between runs.
+        let config = Config::default();
+        let client = Client::open(config.redis_host).unwrap();
+        let mut conn = client.get_connection().unwrap();
+        let _: () = redis::cmd("FLUSHDB").query(&mut conn).unwrap();
+    }
 }

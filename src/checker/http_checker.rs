@@ -1,19 +1,19 @@
-use chrono::{TimeDelta, Utc};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::{Client, ClientBuilder, Response};
-use sentry::protocol::SpanId;
-use std::error::Error;
-use tokio::time::Instant;
-use uuid::Uuid;
-
+use super::ip_filter::is_external_ip;
+use super::Checker;
 use crate::config_store::Tick;
 use crate::types::{
     check_config::CheckConfig,
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
-
-use super::ip_filter::is_external_ip;
-use super::Checker;
+use chrono::{TimeDelta, Utc};
+use openssl::error::ErrorStack;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, ClientBuilder, Response};
+use sentry::protocol::SpanId;
+use std::error::Error;
+use std::time::Duration;
+use tokio::time::Instant;
+use uuid::Uuid;
 
 pub const CHECKER_RESULT_NAMESPACE: Uuid = Uuid::from_u128(0x67f0b2d5_e476_4f00_9b99_9e6b95c3b7e3);
 
@@ -30,11 +30,21 @@ struct Options {
     /// When set to true (the default) resolution to internal network addresses will be restricted.
     /// This should primarily be disabled for tests.
     validate_url: bool,
+
+    /// When set to true sets the pool_max_idle_per_host to 0. Effectively removing connection
+    /// pooling and forcing a new connection for each new request. This may help reduce connection
+    /// errors due to connections being held open too long.
+    disable_connection_reuse: bool,
+    pool_idle_timeout: Duration,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { validate_url: true }
+        Self {
+            validate_url: true,
+            disable_connection_reuse: false,
+            pool_idle_timeout: Duration::from_secs(90),
+        }
     }
 }
 
@@ -87,6 +97,55 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
     }
     None
 }
+fn tls_error(err: &reqwest::Error) -> Option<String> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(e) = source.downcast_ref::<ErrorStack>() {
+            return Some(
+                e.errors()
+                    .iter()
+                    .map(|e| e.reason().unwrap_or("unknown error"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        inner = source;
+    }
+    None
+}
+
+fn connection_error(err: &reqwest::Error) -> Option<String> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(io_err) = source.downcast_ref::<std::io::Error>() {
+            // TODO: should we return the OS code error as well?
+            if io_err.kind() == std::io::ErrorKind::ConnectionRefused {
+                return Some("Connection refused".to_string());
+            } else if io_err.kind() == std::io::ErrorKind::ConnectionReset {
+                return Some("Connection reset".to_string());
+            }
+        }
+        inner = source;
+    }
+    None
+}
+
+fn hyper_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, String)> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(hyper_error) = source.downcast_ref::<hyper::Error>() {
+            if hyper_error.is_incomplete_message() {
+                return Some((
+                    CheckStatusReasonType::ConnectionError,
+                    hyper_error.to_string(),
+                ));
+            }
+            return Some((CheckStatusReasonType::Failure, hyper_error.to_string()));
+        }
+        inner = source;
+    }
+    None
+}
 
 impl HttpChecker {
     fn new_internal(options: Options) -> Self {
@@ -95,19 +154,34 @@ impl HttpChecker {
 
         let mut builder = ClientBuilder::new()
             .hickory_dns(true)
-            .default_headers(default_headers);
+            .default_headers(default_headers)
+            .pool_idle_timeout(options.pool_idle_timeout);
 
         if options.validate_url {
             builder = builder.ip_filter(is_external_ip);
         }
 
-        let client = builder.build().expect("Failed to build checker client");
+        let client = if options.disable_connection_reuse {
+            builder.pool_max_idle_per_host(0)
+        } else {
+            builder
+        }
+        .build()
+        .expect("Failed to build checker client");
 
         Self { client }
     }
 
-    pub fn new() -> Self {
-        Self::new_internal(Default::default())
+    pub fn new(
+        validate_url: bool,
+        disable_connection_reuse: bool,
+        pool_idle_timeout: Duration,
+    ) -> Self {
+        Self::new_internal(Options {
+            validate_url,
+            disable_connection_reuse,
+            pool_idle_timeout,
+        })
     }
 }
 
@@ -118,10 +192,11 @@ fn make_trace_header(config: &CheckConfig, trace_id: &Uuid, span_id: SpanId) -> 
     // according to the service's sampling policy. see
     // https://develop.sentry.dev/sdk/telemetry/traces/#header-sentry-trace
     // for more information.
+
     if config.trace_sampling {
-        format!("{}-{}", trace_id, span_id)
+        format!("{}-{}", trace_id.simple(), span_id)
     } else {
-        format!("{}-{}-{}", trace_id, span_id, '0')
+        format!("{}-{}-{}", trace_id.simple(), span_id, '0')
     }
 }
 
@@ -167,17 +242,41 @@ impl Checker for HttpChecker {
                 if e.is_timeout() {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Timeout,
-                        description: format!("{:?}", e),
+                        description: "Request timed out".to_string(),
+                    }
+                } else if e.is_redirect() {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::RedirectError,
+                        description: "Too many redirects".to_string(),
                     }
                 } else if let Some(message) = dns_error(&e) {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::DnsError,
                         description: message,
                     }
+                } else if let Some(message) = tls_error(&e) {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::TlsError,
+                        description: message,
+                    }
+                } else if let Some(message) = connection_error(&e) {
+                    CheckStatusReason {
+                        status_type: CheckStatusReasonType::ConnectionError,
+                        description: message,
+                    }
+                } else if let Some((status_type, message)) = hyper_error(&e) {
+                    CheckStatusReason {
+                        status_type,
+                        description: message,
+                    }
                 } else {
+                    // if any error falls through we should log it,
+                    // none should fall through.
+                    let error_msg = e.without_url();
+                    tracing::info!("check_url.error: {:?}", error_msg);
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
-                        description: format!("{:?}", e.without_url()),
+                        description: format!("{:?}", error_msg),
                     }
                 }
             }),
@@ -207,13 +306,25 @@ mod tests {
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
+    use std::time::Duration;
 
     use super::{HttpChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
+
     use sentry::protocol::SpanId;
     use uuid::Uuid;
+    #[cfg(target_os = "linux")]
+    use {
+        rcgen::{Certificate, CertificateParams},
+        rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+        rustls::ServerConfig,
+        std::sync::Arc,
+        tokio::io::AsyncWriteExt,
+        tokio::net::TcpListener,
+        tokio_rustls::TlsAcceptor,
+    };
 
     fn make_tick() -> Tick {
         Tick::from_time(Utc::now() - TimeDelta::seconds(60))
@@ -224,6 +335,8 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -256,6 +369,8 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -300,6 +415,8 @@ mod tests {
         let timeout = TimeDelta::milliseconds(TIMEOUT);
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -323,6 +440,10 @@ mod tests {
         assert!(result.duration.is_some_and(|d| d > timeout));
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
+            result.status_reason.as_ref().map(|r| r.description.clone()),
+            Some("Request timed out".to_string())
+        );
+        assert_eq!(
             result.status_reason.map(|r| r.status_type),
             Some(CheckStatusReasonType::Timeout)
         );
@@ -335,6 +456,8 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let head_mock = server.mock(|when, then| {
@@ -371,7 +494,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_restricted_resolution() {
-        let checker = HttpChecker::new_internal(Options { validate_url: true });
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: true,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
+        });
 
         let localhost_config = CheckConfig {
             url: "http://localhost/whatever".to_string(),
@@ -396,7 +523,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_url() {
-        let checker = HttpChecker::new_internal(Options { validate_url: true });
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: true,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
+        });
 
         // Private address space
         let restricted_ip_config = CheckConfig {
@@ -440,6 +571,8 @@ mod tests {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
         });
 
         let get_mock = server.mock(|when, then| {
@@ -478,7 +611,8 @@ mod tests {
             ..Default::default()
         };
         let trace_header = make_trace_header(&config, &trace_id, span_id);
-        assert_eq!(trace_header, format!("{}-{}-0", trace_id, span_id));
+        assert_eq!(trace_header, format!("{}-{}-0", trace_id.simple(), span_id));
+        assert_eq!(trace_header.to_string().matches("-").count(), 2);
 
         // Test with sampling enabled
         let config_with_sampling = CheckConfig {
@@ -487,8 +621,234 @@ mod tests {
             ..Default::default()
         };
         let trace_header_sampling = make_trace_header(&config_with_sampling, &trace_id, span_id);
-        assert_eq!(trace_header_sampling, format!("{}-{}", trace_id, span_id));
+        assert_eq!(
+            trace_header_sampling,
+            format!("{}-{}", trace_id.simple(), span_id)
+        );
+        assert_eq!(trace_header_sampling.to_string().matches("-").count(), 1);
     }
-    // TODO: Figure out how to simulate a DNS failure
-    // assert_eq!(check_domain(&client, "https://hjkhjkljkh.io/".to_string()).await, CheckResult::FAILURE(FailureReason::DnsError("failed to lookup address information: nodename nor servname provided, or not known".to_string())));
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_ssl_errors_linux() {
+        #[derive(Debug, Copy, Clone)]
+        enum TestCertType {
+            Expired,
+            WrongHost,
+            SelfSigned,
+        }
+        // Helper function to create various bad certificates
+        fn create_bad_cert(cert_type: TestCertType) -> (Vec<u8>, Vec<u8>) {
+            let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+            match cert_type {
+                TestCertType::Expired => {
+                    params.not_before = time::OffsetDateTime::now_utc() - time::Duration::days(30);
+                    params.not_after = time::OffsetDateTime::now_utc() - time::Duration::days(1);
+                }
+                TestCertType::WrongHost => {
+                    params = CertificateParams::new(vec!["wronghost.com".to_string()]);
+                }
+                TestCertType::SelfSigned => {
+                    // Default params are self-signed
+                }
+            }
+
+            let cert = Certificate::from_params(params).unwrap();
+            (
+                cert.serialize_private_key_der(),
+                cert.serialize_der().unwrap(),
+            )
+        }
+
+        // Set up mock HTTPS server
+        async fn setup_test_server(cert_type: TestCertType) -> String {
+            let (key_der, cert_der) = create_bad_cert(cert_type);
+
+            let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
+            let cert = vec![CertificateDer::from(cert_der)];
+
+            let server_config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(cert, key)
+                .unwrap();
+
+            let acceptor = TlsAcceptor::from(Arc::new(server_config));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    let acceptor = acceptor.clone();
+                    tokio::spawn(async move {
+                        if let Ok(mut tls_stream) = acceptor.accept(stream).await {
+                            // Simple HTTP response
+                            let response = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+                            let _ = tls_stream.write_all(response).await;
+                        }
+                    });
+                }
+            });
+
+            format!("https://localhost:{}", addr.port())
+        }
+
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
+        });
+        let tick = make_tick();
+
+        // Test various SSL certificate errors
+        let test_cases = vec![
+            (TestCertType::Expired, "certificate verify failed"),
+            (TestCertType::WrongHost, "certificate verify failed"),
+            (TestCertType::SelfSigned, "certificate verify failed"),
+        ];
+
+        for (cert_type, expected_msg) in test_cases {
+            let server_url = setup_test_server(cert_type).await;
+
+            let config = CheckConfig {
+                url: server_url,
+                ..Default::default()
+            };
+
+            let result = checker.check_url(&config, &tick, "us-west").await;
+
+            assert_eq!(
+                result.status,
+                CheckStatus::Failure,
+                "Test case: {:?}",
+                &cert_type
+            );
+            assert_eq!(
+                result.request_info.and_then(|i| i.http_status_code),
+                None,
+                "Test case: {:?}",
+                cert_type
+            );
+            assert_eq!(
+                result.status_reason.as_ref().map(|r| r.status_type),
+                Some(CheckStatusReasonType::TlsError),
+                "Test case: {:?}",
+                cert_type
+            );
+            assert_eq!(
+                result.status_reason.map(|r| r.description).unwrap(),
+                expected_msg,
+                "Test case: {:?}",
+                cert_type
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_connection_refused() {
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
+        });
+        let tick = make_tick();
+        let config = CheckConfig {
+            url: "http://localhost:12345/".to_string(),
+            ..Default::default()
+        };
+        let result = checker.check_url(&config, &tick, "us-west").await;
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("Connection refused".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_too_many_redirects() {
+        let server = MockServer::start();
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
+        });
+
+        // Create a redirect loop where each request redirects back to itself
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/redirect")
+                .header_exists("sentry-trace");
+            then.status(302)
+                .header("Location", server.url("/redirect").as_str());
+        });
+
+        let config = CheckConfig {
+            url: server.url("/redirect").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::RedirectError)
+        );
+        assert_eq!(
+            result.status_reason.map(|r| r.description),
+            Some("Too many redirects".to_string())
+        );
+
+        // Verify that the mock was called at least once
+        // The reqwest client follows redirects multiple times before giving up
+        redirect_mock.assert_hits(10);
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_connection_reset() {
+        // Set up a TCP listener that sends an incomplete response
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                // Send an incomplete HTTP response - just the headers
+                let partial_response: &[u8; 38] = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n";
+                let _ = stream.write_all(partial_response).await;
+                // Close connection immediately without sending body or final \r\n
+            }
+        });
+
+        let checker = HttpChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            pool_idle_timeout: Duration::from_secs(90),
+        });
+        let tick = make_tick();
+        let config = CheckConfig {
+            url: format!("http://localhost:{}", addr.port()),
+            ..Default::default()
+        };
+        let result = checker.check_url(&config, &tick, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+        let result_description = result.status_reason.map(|r| r.description).unwrap();
+        assert_eq!(
+            result_description, "connection closed before message completed",
+            "Expected error message about closed connection: {}",
+            result_description
+        );
+    }
 }
