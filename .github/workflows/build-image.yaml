@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build-image:
     name: Build and publish uptime-checker to GHCR
-    if: !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'
+    if: ${{ !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
 
     env:
