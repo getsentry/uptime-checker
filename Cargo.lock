@@ -4282,6 +4282,7 @@ dependencies = [
  "hostname 0.4.0",
  "httpmock",
  "hyper 1.4.1",
+ "hyper-util",
  "ipnet",
  "metrics",
  "metrics-exporter-statsd",
