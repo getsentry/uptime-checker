@@ -20,6 +20,7 @@ WORKDIR /app
 # Copy only the files needed for dependency caching
 COPY Cargo.toml Cargo.lock ./
 COPY redis-test-macro redis-test-macro/
+COPY reqwest reqwest/
 
 # Create a dummy main.rs to build dependencies
 RUN mkdir src && \
