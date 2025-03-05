@@ -36,8 +36,12 @@ struct Options {
     /// pooling and forcing a new connection for each new request. This may help reduce connection
     /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
+
     pool_idle_timeout: Duration,
     dns_nameservers: Option<Vec<IpAddr>>,
+
+    /// Specifies the network interface to bind the client to.
+    interface: Option<String>,
 }
 
 impl Default for Options {
@@ -47,6 +51,7 @@ impl Default for Options {
             disable_connection_reuse: false,
             pool_idle_timeout: Duration::from_secs(90),
             dns_nameservers: None,
+            interface: None,
         }
     }
 }
@@ -182,14 +187,19 @@ impl HttpChecker {
         if let Some(dns_nameservers) = options.dns_nameservers {
             builder = builder.dns_nameservers(dns_nameservers)
         }
-
-        let client = if options.disable_connection_reuse {
-            builder.pool_max_idle_per_host(0)
-        } else {
-            builder
+        if options.disable_connection_reuse {
+            builder = builder.pool_max_idle_per_host(0);
         }
-        .build()
-        .expect("Failed to build checker client");
+        #[cfg(not(target_os = "linux"))]
+        if options.interface.is_some() {
+            tracing::info!("HTTP Client interface can only be configured for the linux platform");
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(nic) = options.interface {
+            builder = builder.interface(&nic);
+        }
+
+        let client = builder.build().expect("Failed to build checker client");
 
         Self { client }
     }
@@ -199,12 +209,14 @@ impl HttpChecker {
         disable_connection_reuse: bool,
         pool_idle_timeout: Duration,
         dns_nameservers: Option<Vec<IpAddr>>,
+        interface: Option<String>,
     ) -> Self {
         Self::new_internal(Options {
             validate_url,
             disable_connection_reuse,
             pool_idle_timeout,
             dns_nameservers,
+            interface,
         })
     }
 }
@@ -336,6 +348,7 @@ mod tests {
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
     use std::net::IpAddr;
+    use std::time::Duration;
 
     use super::{HttpChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
@@ -365,7 +378,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -399,7 +414,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -445,7 +462,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -486,7 +505,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let head_mock = server.mock(|when, then| {
@@ -524,8 +545,11 @@ mod tests {
     #[tokio::test]
     async fn test_restricted_resolution() {
         let checker = HttpChecker::new_internal(Options {
+            validate_url: true,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let localhost_config = CheckConfig {
@@ -552,8 +576,11 @@ mod tests {
     #[tokio::test]
     async fn test_validate_url() {
         let checker = HttpChecker::new_internal(Options {
+            validate_url: true,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         // Private address space
@@ -599,7 +626,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -722,7 +751,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
         let tick = make_tick();
 
@@ -775,7 +806,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -801,7 +834,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         // Create a redirect loop where each request redirects back to itself
@@ -856,7 +891,9 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            ..Default::default()
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
         let tick = make_tick();
         let config = CheckConfig {

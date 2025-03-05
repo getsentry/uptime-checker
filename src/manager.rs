@@ -114,6 +114,7 @@ impl Manager {
             config.disable_connection_reuse,
             Duration::from_secs(config.pool_idle_timeout_secs),
             config.http_checker_dns_nameservers.clone(),
+            config.interface.to_owned(),
         ));
 
         let executor_conf = ExecutorConfig {
