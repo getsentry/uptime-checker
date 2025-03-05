@@ -13,7 +13,6 @@ use sentry::protocol::SpanId;
 use std::error::Error;
 use std::time::Duration;
 use tokio::time::Instant;
-use url::Url;
 use uuid::Uuid;
 
 pub const CHECKER_RESULT_NAMESPACE: Uuid = Uuid::from_u128(0x67f0b2d5_e476_4f00_9b99_9e6b95c3b7e3);
@@ -25,7 +24,6 @@ const UPTIME_USER_AGENT: &str =
 #[derive(Clone, Debug)]
 pub struct HttpChecker {
     client: Client,
-    append_host_dot: bool,
 }
 
 struct Options {
@@ -38,9 +36,6 @@ struct Options {
     /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
     pool_idle_timeout: Duration,
-    // When set to true this will auto append a `.` to the domain in a url. This is to help us work
-    // around dns issues
-    append_host_dot: bool,
 }
 
 impl Default for Options {
@@ -49,19 +44,8 @@ impl Default for Options {
             validate_url: true,
             disable_connection_reuse: false,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         }
     }
-}
-
-fn add_dot_to_host(url: &str) -> Result<String, url::ParseError> {
-    let mut parsed_url = Url::parse(url)?;
-
-    if let Some(host) = parsed_url.host_str() {
-        parsed_url.set_host(Some(&format!("{}.", host)))?;
-    }
-
-    Ok(parsed_url.to_string())
 }
 
 /// Fetches the response from a URL.
@@ -71,21 +55,13 @@ async fn do_request(
     client: &Client,
     check_config: &CheckConfig,
     sentry_trace: &str,
-    append_host_dot: bool,
 ) -> Result<Response, reqwest::Error> {
     let timeout = check_config
         .timeout
         .to_std()
         .expect("Timeout duration could not be converted to std::time::Duration");
 
-    let url = if append_host_dot {
-        add_dot_to_host(&check_config.url).unwrap_or_else(|err| {
-            tracing::error!(?err, "http_checker.do_request.parse_url_failed");
-            check_config.url.clone()
-        })
-    } else {
-        check_config.url.clone()
-    };
+    let url = check_config.url.as_str();
 
     let headers: HeaderMap = check_config
         .request_headers
@@ -209,24 +185,18 @@ impl HttpChecker {
         .build()
         .expect("Failed to build checker client");
 
-        let append_host_dot = options.append_host_dot;
-        Self {
-            client,
-            append_host_dot,
-        }
+        Self { client }
     }
 
     pub fn new(
         validate_url: bool,
         disable_connection_reuse: bool,
         pool_idle_timeout: Duration,
-        append_host_dot: bool,
     ) -> Self {
         Self::new_internal(Options {
             validate_url,
             disable_connection_reuse,
             pool_idle_timeout,
-            append_host_dot,
         })
     }
 }
@@ -259,7 +229,7 @@ impl Checker for HttpChecker {
         let trace_header = make_trace_header(config, &guid, span_id);
 
         let start = Instant::now();
-        let response = do_request(&self.client, config, &trace_header, self.append_host_dot).await;
+        let response = do_request(&self.client, config, &trace_header).await;
         let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
@@ -388,7 +358,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -417,48 +386,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_default_get_append_host_dot() {
-        let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
-            validate_url: false,
-            disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: true,
-        });
-
-        let get_mock = server.mock(|when, then| {
-            when.method(Method::GET)
-                .path("/no-head")
-                .header_exists("sentry-trace")
-                .header("User-Agent", UPTIME_USER_AGENT.to_string());
-            then.status(200);
-        });
-        let config = CheckConfig {
-            // We explicitly use localhost here so that the dot can be appended to the hostname
-            url: format!("http://localhost:{}/no-head", server.port()),
-            ..Default::default()
-        };
-
-        let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
-
-        assert_eq!(result.status, CheckStatus::Success);
-        assert_eq!(
-            result.request_info.as_ref().map(|i| i.request_type),
-            Some(RequestMethod::Get)
-        );
-
-        get_mock.assert();
-    }
-
-    #[tokio::test]
     async fn test_configured_post() {
         let server = MockServer::start();
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -505,7 +438,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -547,7 +479,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
 
         let head_mock = server.mock(|when, then| {
@@ -588,7 +519,6 @@ mod tests {
             validate_url: true,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
 
         let localhost_config = CheckConfig {
@@ -618,7 +548,6 @@ mod tests {
             validate_url: true,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
 
         // Private address space
@@ -665,7 +594,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -789,7 +717,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
         let tick = make_tick();
 
@@ -843,7 +770,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -870,7 +796,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: true,
         });
 
         // Create a redirect loop where each request redirects back to itself
@@ -926,7 +851,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             pool_idle_timeout: Duration::from_secs(90),
-            append_host_dot: false,
         });
         let tick = make_tick();
         let config = CheckConfig {

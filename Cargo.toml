@@ -47,7 +47,6 @@ time = "0.3"
 ctor = "0.2"
 hostname = "0.4.0"
 tokio-metrics = "0.4.0"
-url = "2.5.4"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
 reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "012bc30a15cead582fc770a1a2ff76bc8c800ae5" }
