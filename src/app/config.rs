@@ -112,7 +112,7 @@ pub struct Config {
     /// Sets the maximum time in seconds to keep idle sockets alive in the http checker.
     pub pool_idle_timeout_secs: u64,
 
-    /// The unioque index of this checker out of the total nuimber of checkers. Should be
+    /// The unique index of this checker out of the total nuimber of checkers. Should be
     /// zero-indexed.
     pub checker_number: u16,
 
