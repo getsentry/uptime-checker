@@ -55,6 +55,9 @@ pub struct Config {
     /// The number of HTTP checks that will be executed at once.
     pub checker_concurrency: usize,
 
+    /// The network interface to bind the uptime checker HTTP client to if set.
+    pub interface: Option<String>,
+
     /// Metric configurations
     #[serde(flatten)]
     pub metrics: MetricsConfig,
@@ -131,6 +134,7 @@ impl Default for Config {
             checker_concurrency: 200,
             log_level: logging::Level::Warn,
             log_format: logging::LogFormat::Auto,
+            interface: None,
             metrics: MetricsConfig {
                 statsd_addr: "127.0.0.1:8126".parse().unwrap(),
                 default_tags: BTreeMap::new(),
@@ -245,6 +249,7 @@ mod tests {
                         checker_concurrency: 100,
                         log_level: logging::Level::Warn,
                         log_format: logging::LogFormat::Auto,
+                        interface: None,
                         metrics: MetricsConfig {
                             statsd_addr: "10.0.0.1:8126".parse().unwrap(),
                             default_tags: BTreeMap::from([(
@@ -314,6 +319,7 @@ mod tests {
                 ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
                 ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
                 ("UPTIME_CHECKER_FAILURE_RETRIES", "2"),
+                ("UPTIME_CHECKER_INTERFACE", "eth0"),
             ],
             |config| {
                 assert_eq!(
@@ -324,6 +330,7 @@ mod tests {
                         checker_concurrency: 200,
                         log_level: logging::Level::Warn,
                         log_format: logging::LogFormat::Json,
+                        interface: Some("eth0".to_owned()),
                         metrics: MetricsConfig {
                             statsd_addr: "10.0.0.1:1234".parse().unwrap(),
                             default_tags: BTreeMap::new(),
