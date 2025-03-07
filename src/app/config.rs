@@ -5,9 +5,10 @@ use figment::{
     Figment,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::formats::CommaSeparator;
 use serde_with::serde_as;
+use std::str::FromStr;
 
 use crate::{app::cli, logging};
 
@@ -123,7 +124,7 @@ pub struct Config {
     pub failure_retries: u16,
 
     /// DNS name servers to use when making checks in the http checker
-    #[serde_as(as = "Option<serde_with::StringWithSeparator::<CommaSeparator, std::net::IpAddr>>")]
+    #[serde(default, deserialize_with = "deserialize_nameservers")]
     pub http_checker_dns_nameservers: Option<Vec<IpAddr>>,
 }
 
@@ -186,6 +187,23 @@ impl Config {
         let config: Config = builder.extract()?;
         Ok(config)
     }
+}
+
+fn deserialize_nameservers<'de, D>(deserializer: D) -> Result<Option<Vec<IpAddr>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    
+    Ok(match s {
+        None => None,
+        Some(s) if s.is_empty() => None,
+        Some(s) => Some(s
+            .split(',')
+            .map(|s| IpAddr::from_str(s.trim()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(serde::de::Error::custom)?)
+    })
 }
 
 #[cfg(test)]
@@ -374,6 +392,20 @@ mod tests {
             &[],
             |config| {
                 assert_eq!(config.checker_number, 0);
+            },
+        )
+    }
+
+    #[test]
+    fn test_config_empty_http_checker_dns_nameservers() {
+        test_with_config(
+            r#"
+            sentry_dsn: my_dsn
+            sentry_env: my_env
+            "#,
+            &[("UPTIME_CHECKER_HTTP_CHECKER_DNS_NAMESERVERS", "")],
+            |config| {
+                assert_eq!(config.http_checker_dns_nameservers, None);
             },
         )
     }
