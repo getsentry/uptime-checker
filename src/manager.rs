@@ -113,6 +113,7 @@ impl Manager {
             !config.allow_internal_ips,
             config.disable_connection_reuse,
             Duration::from_secs(config.pool_idle_timeout_secs),
+            config.http_checker_dns_nameservers.clone(),
         ));
 
         let executor_conf = ExecutorConfig {

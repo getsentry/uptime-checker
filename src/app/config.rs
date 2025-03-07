@@ -1,13 +1,14 @@
-use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
-
 use figment::{
     providers::{Env, Format, Serialized, Yaml},
     Figment,
 };
+use std::net::IpAddr;
+use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::formats::CommaSeparator;
 use serde_with::serde_as;
+use std::str::FromStr;
 
 use crate::{app::cli, logging};
 
@@ -121,6 +122,10 @@ pub struct Config {
 
     /// The number of times to retry failed checks before reporting them as failed
     pub failure_retries: u16,
+
+    /// DNS name servers to use when making checks in the http checker
+    #[serde(default, deserialize_with = "deserialize_nameservers")]
+    pub http_checker_dns_nameservers: Option<Vec<IpAddr>>,
 }
 
 impl Default for Config {
@@ -154,6 +159,7 @@ impl Default for Config {
             checker_number: 0,
             total_checkers: 1,
             failure_retries: 0,
+            http_checker_dns_nameservers: None,
         }
     }
 }
@@ -183,12 +189,30 @@ impl Config {
     }
 }
 
+fn deserialize_nameservers<'de, D>(deserializer: D) -> Result<Option<Vec<IpAddr>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+
+    Ok(match s {
+        None => None,
+        Some(s) if s.is_empty() => None,
+        Some(s) => Some(
+            s.split(',')
+                .map(|s| IpAddr::from_str(s.trim()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(serde::de::Error::custom)?,
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
-
     use figment::Jail;
     use similar_asserts::assert_eq;
+    use std::net::IpAddr;
+    use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
     use crate::{
         app::{cli, config::ProducerMode},
@@ -274,6 +298,7 @@ mod tests {
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         failure_retries: 0,
+                        http_checker_dns_nameservers: None,
                     }
                 );
             },
@@ -314,6 +339,10 @@ mod tests {
                 ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
                 ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
                 ("UPTIME_CHECKER_FAILURE_RETRIES", "2"),
+                (
+                    "UPTIME_CHECKER_HTTP_CHECKER_DNS_NAMESERVERS",
+                    "8.8.8.8,8.8.4.4",
+                ),
             ],
             |config| {
                 assert_eq!(
@@ -350,6 +379,10 @@ mod tests {
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         failure_retries: 2,
+                        http_checker_dns_nameservers: Some(vec![
+                            IpAddr::from([8, 8, 8, 8]),
+                            IpAddr::from([8, 8, 4, 4])
+                        ]),
                     }
                 );
             },
@@ -366,6 +399,20 @@ mod tests {
             &[],
             |config| {
                 assert_eq!(config.checker_number, 0);
+            },
+        )
+    }
+
+    #[test]
+    fn test_config_empty_http_checker_dns_nameservers() {
+        test_with_config(
+            r#"
+            sentry_dsn: my_dsn
+            sentry_env: my_env
+            "#,
+            &[("UPTIME_CHECKER_HTTP_CHECKER_DNS_NAMESERVERS", "")],
+            |config| {
+                assert_eq!(config.http_checker_dns_nameservers, None);
             },
         )
     }

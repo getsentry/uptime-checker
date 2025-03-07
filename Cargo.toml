@@ -49,8 +49,8 @@ hostname = "0.4.0"
 tokio-metrics = "0.4.0"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
-reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "012bc30a15cead582fc770a1a2ff76bc8c800ae5" }
-# we're using the jferg/log-dns-timing branch on the reqwest-uptime fork
+reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "be34e1e20c88190dfd46dd609f43aeb15e9ede1b" }
+# we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
 
 [profile.release]
 lto = true
