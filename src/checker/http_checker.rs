@@ -11,6 +11,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::SpanId;
 use std::error::Error;
+use std::net::IpAddr;
 use std::time::Duration;
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -36,6 +37,7 @@ struct Options {
     /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
     pool_idle_timeout: Duration,
+    dns_nameservers: Option<Vec<IpAddr>>,
 }
 
 impl Default for Options {
@@ -44,6 +46,7 @@ impl Default for Options {
             validate_url: true,
             disable_connection_reuse: false,
             pool_idle_timeout: Duration::from_secs(90),
+            dns_nameservers: None,
         }
     }
 }
@@ -176,6 +179,9 @@ impl HttpChecker {
         if options.validate_url {
             builder = builder.ip_filter(is_external_ip);
         }
+        if let Some(dns_nameservers) = options.dns_nameservers {
+            builder = builder.dns_nameservers(dns_nameservers)
+        }
 
         let client = if options.disable_connection_reuse {
             builder.pool_max_idle_per_host(0)
@@ -192,11 +198,13 @@ impl HttpChecker {
         validate_url: bool,
         disable_connection_reuse: bool,
         pool_idle_timeout: Duration,
+        dns_nameservers: Option<Vec<IpAddr>>,
     ) -> Self {
         Self::new_internal(Options {
             validate_url,
             disable_connection_reuse,
             pool_idle_timeout,
+            dns_nameservers,
         })
     }
 }
@@ -321,13 +329,13 @@ impl Checker for HttpChecker {
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
     use crate::checker::http_checker::make_trace_header;
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
-    use std::time::Duration;
 
     use super::{HttpChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
@@ -357,7 +365,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
         });
 
         let get_mock = server.mock(|when, then| {
@@ -391,7 +399,8 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
+
         });
 
         let get_mock = server.mock(|when, then| {
@@ -437,7 +446,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -478,7 +487,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
         });
 
         let head_mock = server.mock(|when, then| {
@@ -516,9 +525,8 @@ mod tests {
     #[tokio::test]
     async fn test_restricted_resolution() {
         let checker = HttpChecker::new_internal(Options {
-            validate_url: true,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
         });
 
         let localhost_config = CheckConfig {
@@ -545,9 +553,8 @@ mod tests {
     #[tokio::test]
     async fn test_validate_url() {
         let checker = HttpChecker::new_internal(Options {
-            validate_url: true,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
         });
 
         // Private address space
@@ -593,7 +600,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
         });
 
         let get_mock = server.mock(|when, then| {
@@ -769,7 +776,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -795,7 +802,7 @@ mod tests {
         let checker = HttpChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            pool_idle_timeout: Duration::from_secs(90),
+            ..Default::default()
         });
 
         // Create a redirect loop where each request redirects back to itself
@@ -872,4 +879,41 @@ mod tests {
             result_description
         );
     }
+
+    #[tokio::test]
+    async fn test_dns_nameservers() {
+        let server = MockServer::start();
+        let checker = HttpChecker::new_internal(Options {
+            dns_nameservers: Some(vec![IpAddr::from([42, 55, 6, 8])]),
+            validate_url: false,
+            ..Default::default()
+        });
+
+        let get_mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/no-head")
+                .header_exists("sentry-trace")
+                .header("User-Agent", UPTIME_USER_AGENT.to_string());
+            then.status(200);
+        });
+
+        let config = CheckConfig {
+            // We explicitly use localhost to trigger dns resolution
+            url: format!("http://localhost:{}/no-head", server.port()),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Success);
+        assert_eq!(
+            result.request_info.as_ref().map(|i| i.request_type),
+            Some(RequestMethod::Get)
+        );
+
+        get_mock.assert();
+    }
+
+
 }

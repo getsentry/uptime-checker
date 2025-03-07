@@ -1,5 +1,5 @@
 use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
-
+use std::net::IpAddr;
 use figment::{
     providers::{Env, Format, Serialized, Yaml},
     Figment,
@@ -121,6 +121,10 @@ pub struct Config {
 
     /// The number of times to retry failed checks before reporting them as failed
     pub failure_retries: u16,
+
+    /// DNS name servers to use when making checks in the http checker
+    #[serde_as(as = "Option<serde_with::StringWithSeparator::<CommaSeparator, std::net::IpAddr>>")]
+    pub http_checker_dns_nameservers: Option<Vec<IpAddr>>,
 }
 
 impl Default for Config {
@@ -154,6 +158,7 @@ impl Default for Config {
             checker_number: 0,
             total_checkers: 1,
             failure_retries: 0,
+            http_checker_dns_nameservers: None,
         }
     }
 }
@@ -186,7 +191,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
-
+    use std::net::IpAddr;
     use figment::Jail;
     use similar_asserts::assert_eq;
 
@@ -274,6 +279,7 @@ mod tests {
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         failure_retries: 0,
+                        http_checker_dns_nameservers: None,
                     }
                 );
             },
@@ -314,6 +320,7 @@ mod tests {
                 ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
                 ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
                 ("UPTIME_CHECKER_FAILURE_RETRIES", "2"),
+                ("UPTIME_CHECKER_HTTP_CHECKER_DNS_NAMESERVERS", "8.8.8.8,8.8.4.4")
             ],
             |config| {
                 assert_eq!(
@@ -350,6 +357,7 @@ mod tests {
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         failure_retries: 2,
+                        http_checker_dns_nameservers: Some(vec![IpAddr::from([8,8,8,8]), IpAddr::from([8,8,4,4])]),
                     }
                 );
             },
