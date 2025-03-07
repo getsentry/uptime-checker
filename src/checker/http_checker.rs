@@ -329,13 +329,13 @@ impl Checker for HttpChecker {
 
 #[cfg(test)]
 mod tests {
-    use std::net::IpAddr;
     use crate::checker::http_checker::make_trace_header;
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
+    use std::net::IpAddr;
 
     use super::{HttpChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
@@ -400,7 +400,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             ..Default::default()
-
         });
 
         let get_mock = server.mock(|when, then| {
@@ -724,7 +723,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             ..Default::default()
-
         });
         let tick = make_tick();
 
@@ -859,7 +857,6 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             ..Default::default()
-
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -916,6 +913,4 @@ mod tests {
 
         get_mock.assert();
     }
-
-
 }

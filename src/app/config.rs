@@ -1,9 +1,9 @@
-use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
-use std::net::IpAddr;
 use figment::{
     providers::{Env, Format, Serialized, Yaml},
     Figment,
 };
+use std::net::IpAddr;
+use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::formats::CommaSeparator;
@@ -194,24 +194,25 @@ where
     D: Deserializer<'de>,
 {
     let s: Option<String> = Option::deserialize(deserializer)?;
-    
+
     Ok(match s {
         None => None,
         Some(s) if s.is_empty() => None,
-        Some(s) => Some(s
-            .split(',')
-            .map(|s| IpAddr::from_str(s.trim()))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(serde::de::Error::custom)?)
+        Some(s) => Some(
+            s.split(',')
+                .map(|s| IpAddr::from_str(s.trim()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(serde::de::Error::custom)?,
+        ),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
-    use std::net::IpAddr;
     use figment::Jail;
     use similar_asserts::assert_eq;
+    use std::net::IpAddr;
+    use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
     use crate::{
         app::{cli, config::ProducerMode},
@@ -338,7 +339,10 @@ mod tests {
                 ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
                 ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
                 ("UPTIME_CHECKER_FAILURE_RETRIES", "2"),
-                ("UPTIME_CHECKER_HTTP_CHECKER_DNS_NAMESERVERS", "8.8.8.8,8.8.4.4")
+                (
+                    "UPTIME_CHECKER_HTTP_CHECKER_DNS_NAMESERVERS",
+                    "8.8.8.8,8.8.4.4",
+                ),
             ],
             |config| {
                 assert_eq!(
@@ -375,7 +379,10 @@ mod tests {
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         failure_retries: 2,
-                        http_checker_dns_nameservers: Some(vec![IpAddr::from([8,8,8,8]), IpAddr::from([8,8,4,4])]),
+                        http_checker_dns_nameservers: Some(vec![
+                            IpAddr::from([8, 8, 8, 8]),
+                            IpAddr::from([8, 8, 4, 4])
+                        ]),
                     }
                 );
             },
