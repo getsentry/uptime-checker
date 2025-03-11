@@ -20,7 +20,7 @@ const UPTIME_USER_AGENT: &str =
 
 /// Responsible for making HTTP requests to check if a domain is up.
 #[derive(Clone, Debug)]
-pub struct HttpChecker {
+pub struct ReqwestChecker {
     client: Client,
 }
 
@@ -166,7 +166,7 @@ fn hyper_util_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, Stri
     None
 }
 
-impl HttpChecker {
+impl ReqwestChecker {
     fn new_internal(options: Options) -> Self {
         let mut default_headers = HeaderMap::new();
         default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
@@ -216,7 +216,7 @@ impl HttpChecker {
     }
 }
 
-impl Checker for HttpChecker {
+impl Checker for ReqwestChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     #[tracing::instrument]
@@ -320,7 +320,6 @@ impl Checker for HttpChecker {
 
 #[cfg(test)]
 mod tests {
-    use crate::checker::http_checker::make_trace_header;
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
@@ -329,7 +328,7 @@ mod tests {
     use std::net::IpAddr;
     use std::time::Duration;
 
-    use super::{HttpChecker, Options, UPTIME_USER_AGENT};
+    use super::{make_trace_header, Options, ReqwestChecker, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
@@ -354,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn test_default_get() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -390,7 +389,7 @@ mod tests {
     #[tokio::test]
     async fn test_configured_post() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -438,7 +437,7 @@ mod tests {
         let server = MockServer::start();
 
         let timeout = TimeDelta::milliseconds(TIMEOUT);
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -481,7 +480,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_400() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -523,7 +522,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_restricted_resolution() {
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -554,7 +553,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_url() {
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -602,7 +601,7 @@ mod tests {
     #[tokio::test]
     async fn test_same_check_same_id() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -727,7 +726,7 @@ mod tests {
             format!("https://localhost:{}", addr.port())
         }
 
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -782,7 +781,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connection_refused() {
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -810,7 +809,7 @@ mod tests {
     #[tokio::test]
     async fn test_too_many_redirects() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -867,7 +866,7 @@ mod tests {
             }
         });
 
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
             dns_nameservers: None,
@@ -898,7 +897,7 @@ mod tests {
     #[tokio::test]
     async fn test_dns_nameservers() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             dns_nameservers: Some(vec![IpAddr::from([42, 55, 6, 8])]),
             validate_url: false,
             ..Default::default()

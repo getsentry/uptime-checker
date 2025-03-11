@@ -25,6 +25,13 @@ pub enum ProducerMode {
     Vector,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckerMode {
+    Reqwest,
+    Isahc,
+}
+
 #[serde_as]
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct MetricsConfig {
@@ -77,6 +84,9 @@ pub struct Config {
 
     /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
+
+    /// Which checker implementation to use to run the HTTP checks.
+    pub checker_mode: CheckerMode,
 
     /// which producer to use to send results
     pub producer_mode: ProducerMode,
@@ -151,6 +161,7 @@ impl Default for Config {
             results_kafka_cluster: vec![],
             results_kafka_topic: "uptime-results".to_owned(),
             config_provider_mode: ConfigProviderMode::Redis,
+            checker_mode: CheckerMode::Reqwest,
             vector_batch_size: 10,
             vector_endpoint: "http://localhost:8020".to_owned(),
             producer_mode: ProducerMode::Kafka,
@@ -222,12 +233,9 @@ mod tests {
     use std::net::IpAddr;
     use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
-    use crate::{
-        app::{cli, config::ProducerMode},
-        logging,
-    };
+    use crate::{app::cli, logging};
 
-    use super::{Config, ConfigProviderMode, MetricsConfig};
+    use super::{CheckerMode, Config, ConfigProviderMode, MetricsConfig, ProducerMode};
 
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where
@@ -292,6 +300,7 @@ mod tests {
                         ],
                         results_kafka_topic: "uptime-results".to_owned(),
                         config_provider_mode: ConfigProviderMode::Redis,
+                        checker_mode: CheckerMode::Reqwest,
                         config_provider_redis_update_ms: 1000,
                         config_provider_redis_total_partitions: 128,
                         redis_enable_cluster: false,
@@ -377,6 +386,7 @@ mod tests {
                         ],
                         results_kafka_topic: "uptime-results".to_owned(),
                         config_provider_mode: ConfigProviderMode::Redis,
+                        checker_mode: CheckerMode::Reqwest,
                         config_provider_redis_update_ms: 2000,
                         config_provider_redis_total_partitions: 32,
                         redis_enable_cluster: true,

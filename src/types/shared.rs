@@ -25,16 +25,16 @@ impl Default for RequestMethod {
     }
 }
 
-impl From<RequestMethod> for reqwest::Method {
+impl From<RequestMethod> for http::Method {
     fn from(value: RequestMethod) -> Self {
         match value {
-            RequestMethod::Get => reqwest::Method::GET,
-            RequestMethod::Post => reqwest::Method::POST,
-            RequestMethod::Head => reqwest::Method::HEAD,
-            RequestMethod::Put => reqwest::Method::PUT,
-            RequestMethod::Delete => reqwest::Method::DELETE,
-            RequestMethod::Patch => reqwest::Method::PATCH,
-            RequestMethod::Options => reqwest::Method::OPTIONS,
+            RequestMethod::Get => http::Method::GET,
+            RequestMethod::Post => http::Method::POST,
+            RequestMethod::Head => http::Method::HEAD,
+            RequestMethod::Put => http::Method::PUT,
+            RequestMethod::Delete => http::Method::DELETE,
+            RequestMethod::Patch => http::Method::PATCH,
+            RequestMethod::Options => http::Method::OPTIONS,
         }
     }
 }
