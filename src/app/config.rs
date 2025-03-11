@@ -123,6 +123,9 @@ pub struct Config {
     /// The number of times to retry failed checks before reporting them as failed
     pub failure_retries: u16,
 
+    /// How many threads we should create per cpu core
+    pub thread_cpu_scale_factor: usize,
+
     /// DNS name servers to use when making checks in the http checker
     #[serde(default, deserialize_with = "deserialize_nameservers")]
     pub http_checker_dns_nameservers: Option<Vec<IpAddr>>,
@@ -160,6 +163,7 @@ impl Default for Config {
             total_checkers: 1,
             failure_retries: 0,
             http_checker_dns_nameservers: None,
+            thread_cpu_scale_factor: 1,
         }
     }
 }
@@ -299,6 +303,7 @@ mod tests {
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         failure_retries: 0,
                         http_checker_dns_nameservers: None,
+                        thread_cpu_scale_factor: 1,
                     }
                 );
             },
@@ -339,6 +344,7 @@ mod tests {
                 ("UPTIME_CHECKER_CHECKER_NUMBER", "2"),
                 ("UPTIME_CHECKER_TOTAL_CHECKERS", "5"),
                 ("UPTIME_CHECKER_FAILURE_RETRIES", "2"),
+                ("UPTIME_CHECKER_THREAD_CPU_SCALE_FACTOR", "3"),
                 (
                     "UPTIME_CHECKER_HTTP_CHECKER_DNS_NAMESERVERS",
                     "8.8.8.8,8.8.4.4",
@@ -383,6 +389,7 @@ mod tests {
                             IpAddr::from([8, 8, 8, 8]),
                             IpAddr::from([8, 8, 4, 4])
                         ]),
+                        thread_cpu_scale_factor: 3,
                     }
                 );
             },
