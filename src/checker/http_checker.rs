@@ -1,5 +1,5 @@
 use super::ip_filter::is_external_ip;
-use super::Checker;
+use super::{make_trace_header, make_trace_id, Checker};
 use crate::config_store::Tick;
 use crate::types::{
     check_config::CheckConfig,
@@ -14,9 +14,6 @@ use std::error::Error;
 use std::net::IpAddr;
 use std::time::Duration;
 use tokio::time::Instant;
-use uuid::Uuid;
-
-pub const CHECKER_RESULT_NAMESPACE: Uuid = Uuid::from_u128(0x67f0b2d5_e476_4f00_9b99_9e6b95c3b7e3);
 
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
@@ -221,21 +218,6 @@ impl HttpChecker {
     }
 }
 
-fn make_trace_header(config: &CheckConfig, trace_id: &Uuid, span_id: SpanId) -> String {
-    // Format the 'sentry-trace' header. if we append a 0 to the header,
-    // we're indicating the trace spans will not be sampled.
-    // if we don't append a 0, then the default behavior is to sample the trace spans
-    // according to the service's sampling policy. see
-    // https://develop.sentry.dev/sdk/telemetry/traces/#header-sentry-trace
-    // for more information.
-
-    if config.trace_sampling {
-        format!("{}-{}", trace_id.simple(), span_id)
-    } else {
-        format!("{}-{}-{}", trace_id.simple(), span_id, '0')
-    }
-}
-
 impl Checker for HttpChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
@@ -244,9 +226,8 @@ impl Checker for HttpChecker {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
         let span_id = SpanId::default();
-        let unique_key = format!("{}-{}", config.subscription_id, scheduled_check_time);
-        let guid = Uuid::new_v5(&CHECKER_RESULT_NAMESPACE, unique_key.as_bytes());
-        let trace_header = make_trace_header(config, &guid, span_id);
+        let trace_id = make_trace_id(config, tick);
+        let trace_header = make_trace_header(config, &trace_id, span_id);
 
         let start = Instant::now();
         let response = do_request(&self.client, config, &trace_header).await;
@@ -324,11 +305,11 @@ impl Checker for HttpChecker {
         };
 
         CheckResult {
-            guid,
+            guid: trace_id,
             subscription_id: config.subscription_id,
             status,
             status_reason,
-            trace_id: guid,
+            trace_id,
             span_id,
             scheduled_check_time,
             actual_check_time,
