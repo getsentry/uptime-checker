@@ -54,8 +54,6 @@ impl Default for Options {
 }
 
 /// Fetches the response from a URL.
-///
-/// First attempts to fetch just the head, and if not supported falls back to fetching the entire body.
 async fn do_request(
     client: &Client,
     check_config: &CheckConfig,
