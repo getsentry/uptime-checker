@@ -1,9 +1,12 @@
 pub mod dummy_checker;
-pub mod http_checker;
 pub mod ip_filter;
+pub mod isahc_checker;
+pub mod reqwest_checker;
 
 use std::future::Future;
 
+use isahc_checker::IsahcChecker;
+use reqwest_checker::ReqwestChecker;
 use sentry::protocol::SpanId;
 use uuid::Uuid;
 
@@ -49,4 +52,31 @@ pub trait Checker: Send + Sync {
         tick: &Tick,
         region: &str,
     ) -> impl Future<Output = CheckResult> + Send;
+}
+
+#[derive(Debug)]
+pub enum HttpChecker {
+    ReqwestChecker(ReqwestChecker),
+    IsahcChecker(IsahcChecker),
+}
+
+impl Checker for HttpChecker {
+    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
+        match self {
+            Self::IsahcChecker(c) => c.check_url(config, tick, region).await,
+            Self::ReqwestChecker(c) => c.check_url(config, tick, region).await,
+        }
+    }
+}
+
+impl From<ReqwestChecker> for HttpChecker {
+    fn from(checker: ReqwestChecker) -> Self {
+        HttpChecker::ReqwestChecker(checker)
+    }
+}
+
+impl From<IsahcChecker> for HttpChecker {
+    fn from(checker: IsahcChecker) -> Self {
+        HttpChecker::IsahcChecker(checker)
+    }
 }
