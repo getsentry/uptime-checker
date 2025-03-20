@@ -8,6 +8,7 @@ RUN apk add --no-cache \
     g++ \
     pkgconfig \
     openssl-dev \
+    curl \
     protoc
 
 # Configure cargo
