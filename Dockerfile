@@ -8,7 +8,6 @@ RUN apk add --no-cache \
     g++ \
     pkgconfig \
     openssl-dev \
-    curl \
     protoc
 
 # Configure cargo
@@ -45,7 +44,7 @@ FROM alpine:3.20
 
 COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
 
-RUN apk add --no-cache tini libgcc && \
+RUN apk add --no-cache tini libgcc curl && \
     addgroup -S app && \
     adduser -S app -G app
 
