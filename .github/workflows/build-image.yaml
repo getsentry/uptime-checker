@@ -36,8 +36,8 @@ jobs:
               --platform linux/arm64,linux/amd64 \
                $( [[ "${GITHUB_REF}" == "refs/heads/main" ]] && printf %s "--tag ${NIGHTLY_IMAGE}" ) \
               --tag "${VERSIONED_IMAGE}" \
-              --file Dockerfile
-              --push
+              --file Dockerfile \
+              --push \
               .
 
   publish-to-dockerhub:
