@@ -31,13 +31,13 @@ jobs:
         run: docker login --username '${{ github.actor }}' --password '${{ secrets.GITHUB_TOKEN }}' ghcr.io
 
       - name: Build and push to GHCR
-        run: |
-          docker buildx build \
-              --platform linux/arm64,linux/amd64 \
-               $( [[ "${GITHUB_REF}" == "refs/heads/main" ]] && printf %s "--tag ${NIGHTLY_IMAGE}" ) \
-              --tag "${VERSIONED_IMAGE}" \
-              --file Dockerfile \
-              --push \
+        run: >-
+          docker buildx build
+              --platform linux/arm64,linux/amd64
+               $( [[ "${GITHUB_REF}" == "refs/heads/main" ]] && printf %s "--tag ${NIGHTLY_IMAGE}" )
+              --tag "${VERSIONED_IMAGE}"
+              --file Dockerfile
+              --push
               .
 
   publish-to-dockerhub:
