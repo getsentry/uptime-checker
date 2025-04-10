@@ -17,12 +17,15 @@ We have lots of tests that run quickly and will therefore provide you with a qui
 # Running with local Sentry
 - Prepare your local development environment by following the guide [here](https://develop.sentry.dev/development-infrastructure/environment/)
 - (For now), ensure the following settings are in your `~/.sentry/sentry.conf.py` file:
-```    
+```sh    
     SENTRY_FEATURES['organizations:insights-uptime'] = True
     SENTRY_EVENTSTREAM = "sentry.eventstream.kafka.KafkaEventStream"
     SENTRY_USE_UPTIME = True
 ```
 
-- Ensure Sentry is started with `ingest` and `workers` flags:  
-```sentry devserver --workers --ingest```
+- Ensure Sentry is started with `ingest` and `workers` flags: 
+
+```
+    sentry devserver --workers --ingest
+```
 - The Makefile defines a few targets: `run` and `run-verbose` run the server (with additional logging), and `test` for running all tests.
