@@ -136,7 +136,7 @@ impl Manager {
         };
 
         let cancel_token = CancellationToken::new();
-        
+
         let (executor_sender, executor_join_handle, results_worker) = match &config.producer_mode {
             ProducerMode::Vector => {
                 let (results_producer, results_worker) = VectorResultsProducer::new(
@@ -147,8 +147,12 @@ impl Manager {
                 let producer = Arc::new(results_producer);
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
                 // referneces of the Sender (executor_sender) are dropped.
-                let (sender, handle) =
-                    run_executor(checker.clone(), producer, executor_conf, cancel_token.clone());
+                let (sender, handle) = run_executor(
+                    checker.clone(),
+                    producer,
+                    executor_conf,
+                    cancel_token.clone(),
+                );
                 (sender, handle, results_worker)
             }
             ProducerMode::Kafka => {
@@ -164,8 +168,12 @@ impl Manager {
                 ));
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
                 // referneces of the Sender (executor_sender) are dropped.
-                let (sender, handle) =
-                    run_executor(checker.clone(), producer, executor_conf, cancel_token.clone());
+                let (sender, handle) = run_executor(
+                    checker.clone(),
+                    producer,
+                    executor_conf,
+                    cancel_token.clone(),
+                );
                 let dummy_worker = tokio::spawn(async {});
                 (sender, handle, dummy_worker)
             }
