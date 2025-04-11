@@ -158,7 +158,7 @@ impl Default for Config {
                 default_tags: BTreeMap::new(),
                 hostname_tag: None,
             },
-            results_kafka_cluster: vec![],
+            results_kafka_cluster: vec!["127.0.0.1:9092".to_owned()],
             results_kafka_topic: "uptime-results".to_owned(),
             config_provider_mode: ConfigProviderMode::Redis,
             checker_mode: CheckerMode::Reqwest,
