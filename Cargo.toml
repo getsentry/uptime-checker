@@ -62,3 +62,4 @@ strip = "debuginfo"
 
 [dev-dependencies]
 redis-test-macro = { path = "./redis-test-macro" }
+ntest = "0.9.3"

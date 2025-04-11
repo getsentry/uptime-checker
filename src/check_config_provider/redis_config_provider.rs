@@ -322,15 +322,19 @@ pub fn run_config_provider(
     let region = config.region.clone();
     tokio::spawn(async move {
         let monitor_shutdown = shutdown.clone();
+        let monitor_manager = manager.clone();
         let monitor_task = tokio::spawn(async move {
             provider
-                .monitor_configs(manager, monitor_shutdown, region)
+                .monitor_configs(monitor_manager, monitor_shutdown, region)
                 .await
         });
 
         tokio::select! {
             _ = shutdown.cancelled() => {
                 tracing::info!("redis_config_provider.shutdown_requested");
+
+                // Inform the manager that there are no longer any partitions
+                manager.update_partitions(&HashSet::default());
             }
             _ = monitor_task => {
                 tracing::error!("redis_config_provider.monitor_task_ended");

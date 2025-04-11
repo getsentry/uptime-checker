@@ -8,6 +8,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::checker::Checker;
@@ -136,6 +137,7 @@ pub fn run_executor(
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
     conf: ExecutorConfig,
+    cancel_token: CancellationToken,
 ) -> (Arc<CheckSender>, JoinHandle<()>) {
     tracing::info!("executor.starting");
 
@@ -155,6 +157,7 @@ pub fn run_executor(
             producer,
             executor_check_sender,
             reciever,
+            cancel_token,
         )
         .await
     });
@@ -162,6 +165,7 @@ pub fn run_executor(
     (check_sender, executor_handle)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn executor_loop(
     conf: ExecutorConfig,
     queue_size: Arc<AtomicU64>,
@@ -170,6 +174,7 @@ async fn executor_loop(
     producer: Arc<impl ResultsProducer + 'static>,
     check_sender: Arc<CheckSender>,
     check_receiver: UnboundedReceiver<ScheduledCheck>,
+    cancel_token: CancellationToken,
 ) {
     let schedule_check_stream: UnboundedReceiverStream<_> = check_receiver.into();
 
@@ -193,6 +198,7 @@ async fn executor_loop(
     }
 
     schedule_check_stream
+        .take_until(cancel_token.cancelled())
         .for_each_concurrent(conf.concurrency, |scheduled_check| {
             let job_checker = checker.clone();
             let job_producer = producer.clone();
@@ -392,8 +398,10 @@ mod tests {
 
     use chrono::Utc;
     use futures::poll;
+    use ntest::timeout;
     use similar_asserts::assert_eq;
     use tokio::{sync::oneshot::Receiver, time};
+    use tokio_util::sync::CancellationToken;
     use uuid::Uuid;
 
     use super::*;
@@ -422,7 +430,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -465,7 +473,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         // Send 4 configs into the executor
         let mut configs: Vec<Receiver<CheckResult>> = (0..4)
@@ -549,7 +557,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         let tick = Tick::from_time(Utc::now() - TimeDelta::minutes(2));
         let config = Arc::new(CheckConfig {
@@ -590,7 +598,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -636,7 +644,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -651,5 +659,27 @@ mod tests {
         let result = resolve_rx.await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Failure);
+    }
+
+    // We include a timeout here as we don't want a failing shutdown to block the test indefinitely.
+    #[tokio::test(start_paused = true)]
+    #[timeout(5000)]
+    async fn test_executor_shutdown() {
+        let cancel_token = CancellationToken::new();
+
+        let dummy_checker = DummyChecker::new();
+        let checker = Arc::new(dummy_checker);
+        let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
+
+        let conf = ExecutorConfig {
+            concurrency: 1,
+            failure_retries: 2,
+            region: "us-west".to_string(),
+            record_task_metrics: false,
+        };
+        let (_, join_handle) = run_executor(checker, producer, conf, cancel_token.clone());
+
+        cancel_token.cancel();
+        join_handle.await.unwrap();
     }
 }
