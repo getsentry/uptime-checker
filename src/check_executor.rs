@@ -397,8 +397,10 @@ mod tests {
 
     use chrono::Utc;
     use futures::poll;
+    use ntest::timeout;
     use similar_asserts::assert_eq;
     use tokio::{sync::oneshot::Receiver, time};
+    use tokio_util::sync::CancellationToken;
     use uuid::Uuid;
 
     use super::*;
@@ -415,6 +417,9 @@ mod tests {
             status: CheckStatus::Success,
         };
 
+        let cancel_token = CancellationToken::new();
+        let cancel_future = cancel_token.cancelled_owned();
+
         let dummy_checker = DummyChecker::new();
         dummy_checker.queue_result(delayed_result);
 
@@ -427,7 +432,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -454,6 +459,9 @@ mod tests {
             status: CheckStatus::Success,
         };
 
+        let cancel_token = CancellationToken::new();
+        let cancel_future = cancel_token.cancelled_owned();
+
         let dummy_checker = DummyChecker::new();
         dummy_checker.queue_result(delayed_result.clone());
         dummy_checker.queue_result(delayed_result.clone());
@@ -470,7 +478,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
 
         // Send 4 configs into the executor
         let mut configs: Vec<Receiver<CheckResult>> = (0..4)
@@ -542,6 +550,9 @@ mod tests {
             status: CheckStatus::Success,
         };
 
+        let cancel_token = CancellationToken::new();
+        let cancel_future = cancel_token.cancelled_owned();
+
         let dummy_checker = DummyChecker::new();
         dummy_checker.queue_result(delayed_result);
 
@@ -554,7 +565,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
 
         let tick = Tick::from_time(Utc::now() - TimeDelta::minutes(2));
         let config = Arc::new(CheckConfig {
@@ -580,6 +591,9 @@ mod tests {
             status: CheckStatus::Success,
         };
 
+        let cancel_token = CancellationToken::new();
+        let cancel_future = cancel_token.cancelled_owned();
+
         // One failure then one success
         let dummy_checker = DummyChecker::new();
         dummy_checker.queue_result(failed_result);
@@ -595,7 +609,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -623,6 +637,9 @@ mod tests {
             status: CheckStatus::Success,
         };
 
+        let cancel_token = CancellationToken::new();
+        let cancel_future = cancel_token.cancelled_owned();
+
         // Three failure then one success, we won't get the success since our retry limit is 2, so
         // we'll fail once, retry twice, and report the last failure
         let dummy_checker = DummyChecker::new();
@@ -641,7 +658,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf);
+        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -656,5 +673,28 @@ mod tests {
         let result = resolve_rx.await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Failure);
+    }
+
+    // We include a timeout here as we don't want a failing shutdown to block the test indefinitely.
+    #[tokio::test(start_paused = true)]
+    #[timeout(5000)]
+    async fn test_executor_shutdown() {
+        let cancel_token = CancellationToken::new();
+        let cancel_future = cancel_token.clone().cancelled_owned();
+
+        let dummy_checker = DummyChecker::new();
+        let checker = Arc::new(dummy_checker);
+        let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
+
+        let conf = ExecutorConfig {
+            concurrency: 1,
+            failure_retries: 2,
+            region: "us-west".to_string(),
+            record_task_metrics: false,
+        };
+        let (_, join_handle) = run_executor(checker, producer, conf, cancel_future);
+
+        cancel_token.cancel();
+        join_handle.await.unwrap();
     }
 }
