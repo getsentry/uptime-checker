@@ -165,6 +165,7 @@ pub fn run_executor(
     (check_sender, executor_handle)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn executor_loop(
     conf: ExecutorConfig,
     queue_size: Arc<AtomicU64>,
