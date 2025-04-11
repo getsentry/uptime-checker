@@ -8,6 +8,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_util::sync::WaitForCancellationFutureOwned;
 use uuid::Uuid;
 
 use crate::checker::Checker;
@@ -136,6 +137,7 @@ pub fn run_executor(
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
     conf: ExecutorConfig,
+    cancel_future: WaitForCancellationFutureOwned,
 ) -> (Arc<CheckSender>, JoinHandle<()>) {
     tracing::info!("executor.starting");
 
@@ -155,6 +157,7 @@ pub fn run_executor(
             producer,
             executor_check_sender,
             reciever,
+            cancel_future,
         )
         .await
     });
@@ -170,6 +173,7 @@ async fn executor_loop(
     producer: Arc<impl ResultsProducer + 'static>,
     check_sender: Arc<CheckSender>,
     check_receiver: UnboundedReceiver<ScheduledCheck>,
+    cancel_future: WaitForCancellationFutureOwned,
 ) {
     let schedule_check_stream: UnboundedReceiverStream<_> = check_receiver.into();
 
@@ -193,6 +197,7 @@ async fn executor_loop(
     }
 
     schedule_check_stream
+        .take_until(cancel_future)
         .for_each_concurrent(conf.concurrency, |scheduled_check| {
             let job_checker = checker.clone();
             let job_producer = producer.clone();
