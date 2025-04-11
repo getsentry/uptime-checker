@@ -8,7 +8,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_util::sync::WaitForCancellationFutureOwned;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::checker::Checker;
@@ -137,7 +137,7 @@ pub fn run_executor(
     checker: Arc<impl Checker + 'static>,
     producer: Arc<impl ResultsProducer + 'static>,
     conf: ExecutorConfig,
-    cancel_future: WaitForCancellationFutureOwned,
+    cancel_token: CancellationToken,
 ) -> (Arc<CheckSender>, JoinHandle<()>) {
     tracing::info!("executor.starting");
 
@@ -157,7 +157,7 @@ pub fn run_executor(
             producer,
             executor_check_sender,
             reciever,
-            cancel_future,
+            cancel_token,
         )
         .await
     });
@@ -174,7 +174,7 @@ async fn executor_loop(
     producer: Arc<impl ResultsProducer + 'static>,
     check_sender: Arc<CheckSender>,
     check_receiver: UnboundedReceiver<ScheduledCheck>,
-    cancel_future: WaitForCancellationFutureOwned,
+    cancel_token: CancellationToken,
 ) {
     let schedule_check_stream: UnboundedReceiverStream<_> = check_receiver.into();
 
@@ -198,7 +198,7 @@ async fn executor_loop(
     }
 
     schedule_check_stream
-        .take_until(cancel_future)
+        .take_until(cancel_token.cancelled())
         .for_each_concurrent(conf.concurrency, |scheduled_check| {
             let job_checker = checker.clone();
             let job_producer = producer.clone();
@@ -418,9 +418,6 @@ mod tests {
             status: CheckStatus::Success,
         };
 
-        let cancel_token = CancellationToken::new();
-        let cancel_future = cancel_token.cancelled_owned();
-
         let dummy_checker = DummyChecker::new();
         dummy_checker.queue_result(delayed_result);
 
@@ -433,7 +430,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -460,9 +457,6 @@ mod tests {
             status: CheckStatus::Success,
         };
 
-        let cancel_token = CancellationToken::new();
-        let cancel_future = cancel_token.cancelled_owned();
-
         let dummy_checker = DummyChecker::new();
         dummy_checker.queue_result(delayed_result.clone());
         dummy_checker.queue_result(delayed_result.clone());
@@ -479,7 +473,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         // Send 4 configs into the executor
         let mut configs: Vec<Receiver<CheckResult>> = (0..4)
@@ -551,9 +545,6 @@ mod tests {
             status: CheckStatus::Success,
         };
 
-        let cancel_token = CancellationToken::new();
-        let cancel_future = cancel_token.cancelled_owned();
-
         let dummy_checker = DummyChecker::new();
         dummy_checker.queue_result(delayed_result);
 
@@ -566,7 +557,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         let tick = Tick::from_time(Utc::now() - TimeDelta::minutes(2));
         let config = Arc::new(CheckConfig {
@@ -592,9 +583,6 @@ mod tests {
             status: CheckStatus::Success,
         };
 
-        let cancel_token = CancellationToken::new();
-        let cancel_future = cancel_token.cancelled_owned();
-
         // One failure then one success
         let dummy_checker = DummyChecker::new();
         dummy_checker.queue_result(failed_result);
@@ -610,7 +598,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -638,9 +626,6 @@ mod tests {
             status: CheckStatus::Success,
         };
 
-        let cancel_token = CancellationToken::new();
-        let cancel_future = cancel_token.cancelled_owned();
-
         // Three failure then one success, we won't get the success since our retry limit is 2, so
         // we'll fail once, retry twice, and report the last failure
         let dummy_checker = DummyChecker::new();
@@ -659,7 +644,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (sender, _) = run_executor(checker, producer, conf, cancel_future);
+        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
@@ -681,7 +666,6 @@ mod tests {
     #[timeout(5000)]
     async fn test_executor_shutdown() {
         let cancel_token = CancellationToken::new();
-        let cancel_future = cancel_token.clone().cancelled_owned();
 
         let dummy_checker = DummyChecker::new();
         let checker = Arc::new(dummy_checker);
@@ -693,7 +677,7 @@ mod tests {
             region: "us-west".to_string(),
             record_task_metrics: false,
         };
-        let (_, join_handle) = run_executor(checker, producer, conf, cancel_future);
+        let (_, join_handle) = run_executor(checker, producer, conf, cancel_token.clone());
 
         cancel_token.cancel();
         join_handle.await.unwrap();
