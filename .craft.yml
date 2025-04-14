@@ -17,7 +17,7 @@ targets:
     target: getsentry/uptime-checker
   - id: latest
     name: docker
-    source: ghcr.io/getsentry/uptime-checker
+    source: us-central1-docker.pkg.dev/sentryio/uptime-checker/image
     target: getsentry/uptime-checker
     targetFormat: '{{{target}}}:latest'
 preReleaseCommand: ""
