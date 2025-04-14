@@ -8,14 +8,15 @@ rust-version = "1.80"
 
 [dependencies]
 hyper = "1.4.1"
+hyper-util = "0.1.10"
 anyhow = "1.0.66"
 clap = { version = "4.4.6", features = ["derive"] }
 chrono = { version = "0.4.31", default-features = false, features = ["std", "serde"] }
 httpmock = "0.7.0-rc.1"
 reqwest = { version = "0.12.2", features = ["hickory-dns"] }
-openssl = "0.10.70"
+openssl = "0.10.72"
 rust_arroyo = { version = "*", git = "https://github.com/getsentry/arroyo", rev = "0b84afc07131d8b8d48abcb7c8de8cfa2a98e526" }
-tokio = { version = "1.28.0", features = ["macros", "sync", "tracing", "signal", "rt-multi-thread", "test-util"] }
+tokio = { version = "1.43.1", features = ["macros", "sync", "tracing", "signal", "rt-multi-thread", "test-util"] }
 uuid = { version = "1.8.0", features = ["serde", "v4", "v5"] }
 serde = { version = "1.0.159", features = ["derive", "rc"] }
 serde_json = "1.0.93"
@@ -46,10 +47,12 @@ time = "0.3"
 ctor = "0.2"
 hostname = "0.4.0"
 tokio-metrics = "0.4.0"
+isahc = "1.7.2"
+http = "1.2.0"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
-reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "012bc30a15cead582fc770a1a2ff76bc8c800ae5" }
-# we're using the jferg/log-dns-timing branch on the reqwest-uptime fork
+reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "be34e1e20c88190dfd46dd609f43aeb15e9ede1b" }
+# we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
 
 [profile.release]
 lto = true

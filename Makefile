@@ -15,3 +15,20 @@ gocd: ## Build GoCD pipelines
   # Convert JSON to yaml
 	cd ./gocd/generated-pipelines && find . -type f \( -name '*.yaml' \) -print0 | xargs -n 1 -0 yq -p json -o yaml -i
 .PHONY: gocd
+
+
+# As of this commit date, we might encounter a compilation error within rdkafka due to them using an
+# outdated CMake version.  Setting CMAKE_POLICY_VERSION_MINIMUM gets around the issue for now; once
+# they're up to date, we can remove this env.
+
+run:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo run -- run
+.PHONY: run
+
+run-verbose:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 UPTIME_CHECKER_LOG_LEVEL=info cargo run -- run
+.PHONY: run-verbose
+
+test:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo test
+.PHONY: test

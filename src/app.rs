@@ -1,4 +1,4 @@
-use std::{io, sync::Arc};
+use std::{io, sync::Arc, thread};
 
 pub mod cli;
 pub mod config;
@@ -21,9 +21,14 @@ pub fn execute() -> io::Result<()> {
 
     tracing::info!(config = ?config);
 
+    let num_cpus = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+
     match app.command {
         cli::Commands::Run => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
+            .worker_threads(num_cpus * config.thread_cpu_scale_factor)
             .build()
             .unwrap()
             .block_on(async {

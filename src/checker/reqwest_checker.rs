@@ -1,5 +1,5 @@
 use super::ip_filter::is_external_ip;
-use super::Checker;
+use super::{make_trace_header, make_trace_id, Checker};
 use crate::config_store::Tick;
 use crate::types::{
     check_config::CheckConfig,
@@ -11,18 +11,16 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response};
 use sentry::protocol::SpanId;
 use std::error::Error;
+use std::net::IpAddr;
 use std::time::Duration;
 use tokio::time::Instant;
-use uuid::Uuid;
-
-pub const CHECKER_RESULT_NAMESPACE: Uuid = Uuid::from_u128(0x67f0b2d5_e476_4f00_9b99_9e6b95c3b7e3);
 
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
 
 /// Responsible for making HTTP requests to check if a domain is up.
 #[derive(Clone, Debug)]
-pub struct HttpChecker {
+pub struct ReqwestChecker {
     client: Client,
 }
 
@@ -35,7 +33,12 @@ struct Options {
     /// pooling and forcing a new connection for each new request. This may help reduce connection
     /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
+
     pool_idle_timeout: Duration,
+    dns_nameservers: Option<Vec<IpAddr>>,
+
+    /// Specifies the network interface to bind the client to.
+    interface: Option<String>,
 }
 
 impl Default for Options {
@@ -44,13 +47,13 @@ impl Default for Options {
             validate_url: true,
             disable_connection_reuse: false,
             pool_idle_timeout: Duration::from_secs(90),
+            dns_nameservers: None,
+            interface: None,
         }
     }
 }
 
 /// Fetches the response from a URL.
-///
-/// First attempts to fetch just the head, and if not supported falls back to fetching the entire body.
 async fn do_request(
     client: &Client,
     check_config: &CheckConfig,
@@ -146,8 +149,24 @@ fn hyper_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, String)> 
     }
     None
 }
+fn hyper_util_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, String)> {
+    let mut inner = &err as &dyn Error;
+    while let Some(source) = inner.source() {
+        if let Some(hyper_util_error) = source.downcast_ref::<hyper_util::client::legacy::Error>() {
+            if hyper_util_error.is_connect() {
+                return Some((
+                    CheckStatusReasonType::ConnectionError,
+                    hyper_util_error.to_string(),
+                ));
+            }
+            return Some((CheckStatusReasonType::Failure, hyper_util_error.to_string()));
+        }
+        inner = source;
+    }
+    None
+}
 
-impl HttpChecker {
+impl ReqwestChecker {
     fn new_internal(options: Options) -> Self {
         let mut default_headers = HeaderMap::new();
         default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
@@ -160,14 +179,22 @@ impl HttpChecker {
         if options.validate_url {
             builder = builder.ip_filter(is_external_ip);
         }
-
-        let client = if options.disable_connection_reuse {
-            builder.pool_max_idle_per_host(0)
-        } else {
-            builder
+        if let Some(dns_nameservers) = options.dns_nameservers {
+            builder = builder.dns_nameservers(dns_nameservers)
         }
-        .build()
-        .expect("Failed to build checker client");
+        if options.disable_connection_reuse {
+            builder = builder.pool_max_idle_per_host(0);
+        }
+        #[cfg(not(target_os = "linux"))]
+        if options.interface.is_some() {
+            tracing::info!("HTTP Client interface can only be configured for the linux platform");
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(nic) = options.interface {
+            builder = builder.interface(&nic);
+        }
+
+        let client = builder.build().expect("Failed to build checker client");
 
         Self { client }
     }
@@ -176,31 +203,20 @@ impl HttpChecker {
         validate_url: bool,
         disable_connection_reuse: bool,
         pool_idle_timeout: Duration,
+        dns_nameservers: Option<Vec<IpAddr>>,
+        interface: Option<String>,
     ) -> Self {
         Self::new_internal(Options {
             validate_url,
             disable_connection_reuse,
             pool_idle_timeout,
+            dns_nameservers,
+            interface,
         })
     }
 }
 
-fn make_trace_header(config: &CheckConfig, trace_id: &Uuid, span_id: SpanId) -> String {
-    // Format the 'sentry-trace' header. if we append a 0 to the header,
-    // we're indicating the trace spans will not be sampled.
-    // if we don't append a 0, then the default behavior is to sample the trace spans
-    // according to the service's sampling policy. see
-    // https://develop.sentry.dev/sdk/telemetry/traces/#header-sentry-trace
-    // for more information.
-
-    if config.trace_sampling {
-        format!("{}-{}", trace_id.simple(), span_id)
-    } else {
-        format!("{}-{}-{}", trace_id.simple(), span_id, '0')
-    }
-}
-
-impl Checker for HttpChecker {
+impl Checker for ReqwestChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     #[tracing::instrument]
@@ -208,9 +224,8 @@ impl Checker for HttpChecker {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
         let span_id = SpanId::default();
-        let unique_key = format!("{}-{}", config.subscription_id, scheduled_check_time);
-        let guid = Uuid::new_v5(&CHECKER_RESULT_NAMESPACE, unique_key.as_bytes());
-        let trace_header = make_trace_header(config, &guid, span_id);
+        let trace_id = make_trace_id(config, tick);
+        let trace_header = make_trace_header(config, &trace_id, span_id);
 
         let start = Instant::now();
         let response = do_request(&self.client, config, &trace_header).await;
@@ -269,6 +284,11 @@ impl Checker for HttpChecker {
                         status_type,
                         description: message,
                     }
+                } else if let Some((status_type, message)) = hyper_util_error(&e) {
+                    CheckStatusReason {
+                        status_type,
+                        description: message,
+                    }
                 } else {
                     // if any error falls through we should log it,
                     // none should fall through.
@@ -283,11 +303,11 @@ impl Checker for HttpChecker {
         };
 
         CheckResult {
-            guid,
+            guid: trace_id,
             subscription_id: config.subscription_id,
             status,
             status_reason,
-            trace_id: guid,
+            trace_id,
             span_id,
             scheduled_check_time,
             actual_check_time,
@@ -300,15 +320,15 @@ impl Checker for HttpChecker {
 
 #[cfg(test)]
 mod tests {
-    use crate::checker::http_checker::make_trace_header;
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
+    use std::net::IpAddr;
     use std::time::Duration;
 
-    use super::{HttpChecker, Options, UPTIME_USER_AGENT};
+    use super::{make_trace_header, Options, ReqwestChecker, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
@@ -333,10 +353,12 @@ mod tests {
     #[tokio::test]
     async fn test_default_get() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -367,10 +389,12 @@ mod tests {
     #[tokio::test]
     async fn test_configured_post() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -413,10 +437,12 @@ mod tests {
         let server = MockServer::start();
 
         let timeout = TimeDelta::milliseconds(TIMEOUT);
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -454,10 +480,12 @@ mod tests {
     #[tokio::test]
     async fn test_simple_400() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let head_mock = server.mock(|when, then| {
@@ -494,10 +522,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_restricted_resolution() {
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let localhost_config = CheckConfig {
@@ -523,10 +553,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_url() {
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         // Private address space
@@ -569,10 +601,12 @@ mod tests {
     #[tokio::test]
     async fn test_same_check_same_id() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -692,10 +726,12 @@ mod tests {
             format!("https://localhost:{}", addr.port())
         }
 
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
         let tick = make_tick();
 
@@ -745,10 +781,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_connection_refused() {
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -771,10 +809,12 @@ mod tests {
     #[tokio::test]
     async fn test_too_many_redirects() {
         let server = MockServer::start();
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
 
         // Create a redirect loop where each request redirects back to itself
@@ -826,10 +866,12 @@ mod tests {
             }
         });
 
-        let checker = HttpChecker::new_internal(Options {
+        let checker = ReqwestChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
+            dns_nameservers: None,
             pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -850,5 +892,40 @@ mod tests {
             "Expected error message about closed connection: {}",
             result_description
         );
+    }
+
+    #[tokio::test]
+    async fn test_dns_nameservers() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(Options {
+            dns_nameservers: Some(vec![IpAddr::from([42, 55, 6, 8])]),
+            validate_url: false,
+            ..Default::default()
+        });
+
+        let get_mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/no-head")
+                .header_exists("sentry-trace")
+                .header("User-Agent", UPTIME_USER_AGENT.to_string());
+            then.status(200);
+        });
+
+        let config = CheckConfig {
+            // We explicitly use localhost to trigger dns resolution
+            url: format!("http://localhost:{}/no-head", server.port()),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let result = checker.check_url(&config, &tick, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Success);
+        assert_eq!(
+            result.request_info.as_ref().map(|i| i.request_type),
+            Some(RequestMethod::Get)
+        );
+
+        get_mock.assert();
     }
 }
