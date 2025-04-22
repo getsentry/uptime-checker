@@ -14,6 +14,8 @@ jobs:
         name: files-changed
         runs-on: ubuntu-latest
         # Map a step output to a job output
+        permissions:
+          contents: read
         outputs:
             gocd: ${{ steps.changes.outputs.gocd }}
         steps:

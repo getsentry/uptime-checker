@@ -15,6 +15,9 @@ on:
     # We also want it to be 1 hour before the self-hosted release
     - cron: "0 17 15 * *"
 
+permissions:
+  contents: write # required to create a release
+
 jobs:
   release:
     runs-on: ubuntu-latest

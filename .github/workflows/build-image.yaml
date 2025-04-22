@@ -7,6 +7,7 @@ on:
       - main
       - release/**
 
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -16,7 +17,9 @@ jobs:
     name: Build and publish uptime-checker to GHCR
     if: ${{ !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      packages: write
     env:
       VERSIONED_IMAGE: ghcr.io/getsentry/uptime-checker:${{ github.sha }}
       NIGHTLY_IMAGE: ghcr.io/getsentry/uptime-checker:nightly
@@ -44,6 +47,8 @@ jobs:
     name: Publish uptime-checker to DockerHub
     runs-on: ubuntu-latest
     if: github.ref_name == 'main'
+    permissions:
+      contents: read
     needs:
       - build-image
     env:
