@@ -68,7 +68,7 @@ jobs:
       REVISION: "${{ github.event.pull_request.head.sha || github.sha }}"
       GHCR_IMAGE_URL: "ghcr.io/getsentry/uptime-checker"
       DOCKERHUB_IMAGE_URL: "getsentry/uptime-checker"
-      SHORT_SHA: ${{ github.sha[0,8] }}
+      SHORT_SHA: ${{ github.sha[0:8] }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
