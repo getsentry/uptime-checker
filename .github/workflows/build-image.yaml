@@ -68,7 +68,6 @@ jobs:
       REVISION: "${{ github.event.pull_request.head.sha || github.sha }}"
       GHCR_IMAGE_URL: "ghcr.io/getsentry/uptime-checker"
       DOCKERHUB_IMAGE_URL: "getsentry/uptime-checker"
-      SHORT_SHA: ${{ github.sha[0:8] }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
@@ -77,6 +76,10 @@ jobs:
       - name: Login to Docker Hub
         shell: bash
         run: docker login --username=sentrybuilder --password ${{ secrets.DOCKER_HUB_RW_TOKEN }}
+        
+      - name: Get short sha
+        id: short_sha
+        run: echo "SHORT_SHA=$(echo ${REVISION} | cut -c1-8)" >> $GITHUB_OUTPUT
       
       - name: Copy GHCR image to DockerHub
         shell: bash
