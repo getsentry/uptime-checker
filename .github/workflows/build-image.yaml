@@ -7,89 +7,86 @@ on:
       - main
       - release/**
 
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   build-image:
-    name: Build and publish uptime-checker to GHCR
-    if: ${{ !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]' }}
+    name: Build uptime-checker image
+    if: |
+      (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]') ||
+      (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSIONED_IMAGE: ghcr.io/getsentry/uptime-checker:${{ github.sha }}
+      DOCKERFILE_PATH: Dockerfile
+      PLATFORMS: linux/arm64,linux/amd64
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3
+      - name: Build image
+        run: |
+          docker buildx build \
+            --platform "${PLATFORMS}" \
+            --tag "${VERSIONED_IMAGE}" \
+            --file "${DOCKERFILE_PATH}" \
+            --load \
+            .
+
+  publish-to-ghcr:
+    name: Publish uptime-checker to GHCR
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    needs: build-image
     permissions:
       contents: read
       packages: write
     env:
       VERSIONED_IMAGE: ghcr.io/getsentry/uptime-checker:${{ github.sha }}
       NIGHTLY_IMAGE: ghcr.io/getsentry/uptime-checker:nightly
-      DOCKERFILE_PATH: Dockerfile
-      PLATFORMS: linux/arm64,linux/amd64
-      IS_MAIN_BRANCH: ${{ github.ref == 'refs/heads/main' }}
-
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-
-      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3
-
       - name: Login to GHCR
         run: docker login --username '${{ github.actor }}' --password '${{ secrets.GITHUB_TOKEN }}' ghcr.io
-
-      - name: Build and push to GHCR
-        shell: bash
+      - name: Tag and push to GHCR
         run: |
-          if [[ "${IS_MAIN_BRANCH}" == "true" ]]; then
-            docker buildx build \
-              --platform "${PLATFORMS}" \
-              --tag "${NIGHTLY_IMAGE}" \
-              --tag "${VERSIONED_IMAGE}" \
-              --file "${DOCKERFILE_PATH}" \
-              --push \
-              .
-          else
-            docker buildx build \
-              --platform "${PLATFORMS}" \
-              --tag "${VERSIONED_IMAGE}" \
-              --file "${DOCKERFILE_PATH}" \
-              --push \
-              .
-          fi
+          # Tag the existing image with nightly
+          docker tag "${VERSIONED_IMAGE}" "${NIGHTLY_IMAGE}"
+          # Push both tags
+          docker push "${VERSIONED_IMAGE}"
+          docker push "${NIGHTLY_IMAGE}"
 
   publish-to-dockerhub:
     name: Publish uptime-checker to DockerHub
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    if: github.ref_name == 'main'
+    needs: publish-to-ghcr
     permissions:
       contents: read
-    needs:
-      - build-image
+      packages: read
     env:
-      REVISION: "${{ github.event.pull_request.head.sha || github.sha }}"
+      REVISION: "${{ github.sha }}"
       GHCR_IMAGE_URL: "ghcr.io/getsentry/uptime-checker"
       DOCKERHUB_IMAGE_URL: "getsentry/uptime-checker"
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-
       - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
-
       - name: Login to Docker Hub
         shell: bash
         run: docker login --username=sentrybuilder --password ${{ secrets.DOCKER_HUB_RW_TOKEN }}
-        
       - name: Get short sha
         id: short_sha
         run: echo "SHORT_SHA=$(echo ${REVISION} | cut -c1-8)" >> $GITHUB_OUTPUT
-      
       - name: Copy GHCR image to DockerHub
         shell: bash
         run: |
           # We push 3 tags to Dockerhub:
           # 1) the full sha of the commit
           docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:${REVISION}" "${GHCR_IMAGE_URL}:${REVISION}"
-
           # 2) the short sha
-          docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:${SHORT_SHA}" "${GHCR_IMAGE_URL}:${REVISION}"
-
+          docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:${{ steps.short_sha.outputs.SHORT_SHA }}" "${GHCR_IMAGE_URL}:${REVISION}"
           # 3) nightly
           docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:nightly" "${GHCR_IMAGE_URL}:${REVISION}"
