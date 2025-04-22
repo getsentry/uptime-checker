@@ -23,6 +23,9 @@ jobs:
     env:
       VERSIONED_IMAGE: ghcr.io/getsentry/uptime-checker:${{ github.sha }}
       NIGHTLY_IMAGE: ghcr.io/getsentry/uptime-checker:nightly
+      DOCKERFILE_PATH: Dockerfile
+      PLATFORMS: linux/arm64,linux/amd64
+      IS_MAIN_BRANCH: ${{ github.ref == 'refs/heads/main' }}
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -34,14 +37,24 @@ jobs:
         run: docker login --username '${{ github.actor }}' --password '${{ secrets.GITHUB_TOKEN }}' ghcr.io
 
       - name: Build and push to GHCR
-        run: >-
-          docker buildx build
-              --platform linux/arm64,linux/amd64
-               $( [[ "${GITHUB_REF}" == "refs/heads/main" ]] && printf %s "--tag ${NIGHTLY_IMAGE}" )
-              --tag "${VERSIONED_IMAGE}"
-              --file Dockerfile
-              --push
+        shell: bash
+        run: |
+          if [[ "${IS_MAIN_BRANCH}" == "true" ]]; then
+            docker buildx build \
+              --platform "${PLATFORMS}" \
+              --tag "${NIGHTLY_IMAGE}" \
+              --tag "${VERSIONED_IMAGE}" \
+              --file "${DOCKERFILE_PATH}" \
+              --push \
               .
+          else
+            docker buildx build \
+              --platform "${PLATFORMS}" \
+              --tag "${VERSIONED_IMAGE}" \
+              --file "${DOCKERFILE_PATH}" \
+              --push \
+              .
+          fi
 
   publish-to-dockerhub:
     name: Publish uptime-checker to DockerHub
@@ -55,6 +68,7 @@ jobs:
       REVISION: "${{ github.event.pull_request.head.sha || github.sha }}"
       GHCR_IMAGE_URL: "ghcr.io/getsentry/uptime-checker"
       DOCKERHUB_IMAGE_URL: "getsentry/uptime-checker"
+      SHORT_SHA: ${{ github.sha[0,8] }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
@@ -72,7 +86,6 @@ jobs:
           docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:${REVISION}" "${GHCR_IMAGE_URL}:${REVISION}"
 
           # 2) the short sha
-          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-8)
           docker buildx imagetools create --tag "${DOCKERHUB_IMAGE_URL}:${SHORT_SHA}" "${GHCR_IMAGE_URL}:${REVISION}"
 
           # 3) nightly
