@@ -104,6 +104,11 @@ async fn scheduler_loop(
             )
             .increment(1);
             if config.should_run(tick, &region) {
+                metrics::counter!(
+                    "scheduler.bucket_size",
+                    "uptime_region" => region.clone(),
+                )
+                .increment(1);
                 results.push(executor_sender.queue_check(tick, config));
                 bucket_size += 1;
             } else {
@@ -121,8 +126,6 @@ async fn scheduler_loop(
             total_configs=total_configs, skipped_configs=total_configs - bucket_size,
             "scheduler.tick_scheduled"
         );
-        metrics::gauge!("scheduler.bucket_size", "uptime_region" => region.clone(), "partition" => partition.to_string())
-        .set(bucket_size as f64);
 
         // Spawn a task to wait for checks to complete.
         //
