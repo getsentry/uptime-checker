@@ -57,13 +57,20 @@ async fn scheduler_loop(
 ) {
     let client = build_redis_client(&redis_host, redis_enable_cluster);
     let mut connection = client.get_async_connection().await;
-    let result: Option<String> = connection
+    let last_progress: Option<String> = connection
         .get(&progress_key)
         .await
         .expect("Unable to get last tick key");
     let tick_frequency = Duration::from_secs(1);
-    tracing::debug!(progress_key, result, "scheduler.redis_stored_tick_value");
-    let start = match result {
+    tracing::debug!(
+        progress_key,
+        last_progress,
+        "scheduler.redis_stored_tick_value"
+    );
+
+    // Determine when to start the ticker from when we last made progress. This may be a number of
+    // seconds ago when the checker is restarting
+    let start = match last_progress {
         Some(result) => {
             let last_completed_check_nanos: i64 = result.parse().unwrap_or(Utc::now().timestamp());
             let next_check = Utc.timestamp_nanos(last_completed_check_nanos) + tick_frequency;
@@ -78,11 +85,11 @@ async fn scheduler_loop(
     };
     tracing::info!(%start, "scheduler.starting_at");
 
-    let instant = Instant::now()
+    let start_at = Instant::now()
         .checked_sub((Utc::now() - start).to_std().unwrap())
         .unwrap();
     let mut interval = interval(tick_frequency);
-    interval.reset_at(instant);
+    interval.reset_at(start_at);
 
     let (tick_complete_tx, mut tick_complete_rx) = mpsc::unbounded_channel();
 
@@ -174,7 +181,7 @@ async fn scheduler_loop(
 
     while !shutdown.is_cancelled() {
         let interval_tick = interval.tick().await;
-        let tick = Tick::from_time(start + interval_tick.duration_since(instant));
+        let tick = Tick::from_time(start + interval_tick.duration_since(start_at));
         schedule_checks(tick);
     }
     tracing::info!("scheduler.begin_shutdown");
