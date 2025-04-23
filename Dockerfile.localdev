@@ -5,8 +5,8 @@
 # error messages.
 
 # HOW TO USE:
-# 1. Build the binary: `docker build -f Dockerfile.localdev -t my-uptime-checker`
-# 2. Run the container with a mounted volume for src: ```
+# 1. Build the binary: `docker build -f Dockerfile.localdev -t my-uptime-checker .`
+# 2. Run the container with a mounted volume for src: `docker run -it -v $(pwd)/src:/app/src --entrypoint /bin/sh my-uptime-checker`
 # e. in the container you can do `cargo test`, etc. and updating the src directory on your host will reflect in the container,
 # so you can test your changes without having to rebuild the container.
 ##
@@ -21,7 +21,7 @@ RUN mkdir -p ~/.cargo && \
     echo 'protocol = "sparse"' >> ~/.cargo/config
 
 RUN apk add --no-cache libc-dev cmake make g++
-RUN apk add --no-cache pkgconfig openssl-dev protoc`
+RUN apk add --no-cache pkgconfig openssl-dev protoc
 
 RUN cargo new --bin /app
 WORKDIR /app
