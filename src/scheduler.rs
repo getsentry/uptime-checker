@@ -139,7 +139,7 @@ async fn scheduler_loop(
             let checks_scheduled = results.len();
             while let Some(result) = results.pop() {
                 // TODO(epurkhiser): Do we want to do something with the CheckResult here?
-                let _check_result = result.await.expect("Failed to recieve CheckResult");
+                let _check_result = result.await.expect("Failed to receive CheckResult");
             }
 
             let execution_duration = tick_start.elapsed();
@@ -165,7 +165,7 @@ async fn scheduler_loop(
             tracing::debug!("scheduler.tick_awaiting_join_handle");
             let tick = tick_complete_join_handle
                 .await
-                .expect("Failed to recieve completed tick");
+                .expect("Failed to receive completed tick");
 
             let progress = tick.time().timestamp_nanos_opt().unwrap();
             tracing::debug!(tick = %tick, progress, "scheduler.tick_complete_join_handle");
