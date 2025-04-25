@@ -71,6 +71,7 @@ impl RedisKey for CheckConfig {
 
 pub struct RedisConfigProvider {
     redis: RedisClient,
+    redis_timeouts_ms: u64,
     partitions: HashSet<u16>,
     check_interval: Duration,
 }
@@ -81,12 +82,14 @@ impl RedisConfigProvider {
         partitions: HashSet<u16>,
         check_interval: Duration,
         enable_cluster: bool,
+        redis_timeouts_ms: u64,
     ) -> Result<Self, redis::RedisError> {
         let client = crate::redis::build_redis_client(redis_url, enable_cluster);
         Ok(Self {
             redis: client,
             partitions,
             check_interval,
+            redis_timeouts_ms,
         })
     }
 
@@ -124,7 +127,11 @@ impl RedisConfigProvider {
         // Fetch configs for all partitions from Redis and register them with the manager
         manager.update_partitions(&self.partitions);
 
-        let mut conn = self.redis.get_async_connection().await;
+        let mut conn = self
+            .redis
+            .get_async_connection(self.redis_timeouts_ms)
+            .await
+            .expect("Unable to connect to redis");
         metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region.clone())
             .set(partitions.len() as f64);
 
@@ -188,7 +195,11 @@ impl RedisConfigProvider {
         shutdown: CancellationToken,
         region: String,
     ) {
-        let mut conn = self.redis.get_async_connection().await;
+        let mut conn = self
+            .redis
+            .get_async_connection(self.redis_timeouts_ms)
+            .await
+            .expect("Unable to connect to redis");
         let mut interval = interval(self.check_interval);
 
         while !shutdown.is_cancelled() {
@@ -262,7 +273,10 @@ impl RedisConfigProvider {
                             .collect::<Vec<_>>(),
                     )
                     .await
-                    .unwrap();
+                    .unwrap_or_else(|err| {
+                        tracing::error!(?err, "redis_config_provider.config_key_get_failed");
+                        vec![]
+                    });
 
                 for config_payload in config_payloads {
                     let config: CheckConfig = rmp_serde::from_slice(&config_payload)
@@ -316,6 +330,7 @@ pub fn run_config_provider(
         determine_owned_partitions(config),
         Duration::from_millis(config.config_provider_redis_update_ms),
         config.redis_enable_cluster,
+        config.redis_timeouts_ms,
     )
     .expect("Failed to create Redis config provider");
 
@@ -389,6 +404,7 @@ mod tests {
             test_partitions.clone(),
             Duration::from_millis(10),
             false,
+            config.redis_timeouts_ms,
         )
         .unwrap()
         .get_partition_keys();

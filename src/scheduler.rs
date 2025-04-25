@@ -26,6 +26,7 @@ pub fn run_scheduler(
     config_loaded_receiver: Receiver<BootResult>,
     region: String,
     redis_enable_cluster: bool,
+    redis_timeouts_ms: u64,
 ) -> JoinHandle<()> {
     tracing::info!(partition, "scheduler.starting");
     tokio::spawn(async move {
@@ -39,6 +40,7 @@ pub fn run_scheduler(
             redis_host,
             region,
             redis_enable_cluster,
+            redis_timeouts_ms,
         )
         .await
     })
@@ -54,9 +56,13 @@ async fn scheduler_loop(
     redis_host: String,
     region: String,
     redis_enable_cluster: bool,
+    redis_timeouts_ms: u64,
 ) {
     let client = build_redis_client(&redis_host, redis_enable_cluster);
-    let mut connection = client.get_async_connection().await;
+    let mut connection = client
+        .get_async_connection(redis_timeouts_ms)
+        .await
+        .expect("Unable to connect to redis");
     let last_progress: Option<String> = connection
         .get(&progress_key)
         .await
@@ -123,7 +129,7 @@ async fn scheduler_loop(
                 .increment(1);
             }
         }
-        tracing::info!(
+        tracing::debug!(
             %tick, bucket_size = bucket_size, uptime_region = region, partition=partition.to_string(),
             total_configs=total_configs, skipped_configs=total_configs - bucket_size,
             "scheduler.tick_scheduled"
@@ -159,21 +165,56 @@ async fn scheduler_loop(
     };
 
     let in_order_tick_processor_join_handle = tokio::spawn(async move {
-        while let Some(tick_complete_join_handle) = tick_complete_rx.recv().await {
+        const HANDLE_QUEUE_SIZE: usize = 1000;
+        let mut tick_handles = Vec::with_capacity(HANDLE_QUEUE_SIZE);
+
+        while tick_complete_rx
+            .recv_many(&mut tick_handles, HANDLE_QUEUE_SIZE)
+            .await
+            > 0
+        {
             // XXX: This task guarantees that we can process ticks IN ORDER upon tick execution.
             // This waits for the tick to complete before waiting on the next tick to complete.
             tracing::debug!("scheduler.tick_awaiting_join_handle");
-            let tick = tick_complete_join_handle
+            let num_read = tick_handles.len();
+
+            // Only read the very last update's tick, since that will be the latest one we've successfully
+            // processed.
+            let tick = tick_handles.pop();
+            tick_handles.clear();
+
+            let tick = tick
+                .unwrap()
                 .await
                 .expect("Failed to receive completed tick");
 
             let progress = tick.time().timestamp_nanos_opt().unwrap();
-            tracing::debug!(tick = %tick, progress, "scheduler.tick_complete_join_handle");
+            tracing::info!(tick = %tick, progress, num_read, "scheduler.tick_complete_join_handle");
 
-            let _: () = connection
-                .set(&progress_key, progress.to_string())
-                .await
-                .expect("Couldn't save progress of scheduler");
+            let result: Result<(), redis::RedisError> =
+                connection.set(&progress_key, progress.to_string()).await;
+
+            // Right now (April 25th,) we're seeing the occasional hang here, seemingly due to a
+            // stale connection.  Let's be more explicit with the error handling and logging here,
+            // instead of just swallowing and reporting the error like we do elsewhere.
+            if let Err(e) = result {
+                if e.is_timeout() {
+                    // Log it, but let it through.
+                    tracing::error!(progress_key, "scheduler.progress_saving_timeout");
+                } else if e.is_connection_dropped() {
+                    // Log and try reconnecting.
+                    tracing::error!(progress_key, "scheduler.progress_saving_connection_dropped");
+
+                    connection = client
+                        .get_async_connection(redis_timeouts_ms)
+                        .await
+                        .expect("Unable to connect to redis");
+                } else {
+                    tracing::error!(progress_key, error = %e, "scheduler.progress_fatal_error");
+
+                    panic!("Could not save scheduler progress: {:?}", e);
+                }
+            }
             tracing::debug!(tick = %tick, "scheduler.tick_execution_complete_in_order");
         }
         tracing::debug!("scheduler.tick_complete_join_handle_finished")
@@ -264,6 +305,7 @@ mod tests {
             boot_rx,
             config.region.clone(),
             false,
+            0,
         );
         let _ = boot_tx.send(BootResult::Started);
 
@@ -319,7 +361,7 @@ mod tests {
         let progress: u64 = connection
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
-        assert_eq!(progress, 60000000000);
+        assert_eq!(progress, 128000000000);
     }
 
     #[traced_test]
@@ -380,6 +422,7 @@ mod tests {
             boot_rx,
             config.region.clone(),
             false,
+            0,
         );
         let _ = boot_tx.send(BootResult::Started);
 
@@ -435,7 +478,7 @@ mod tests {
         let progress: u64 = connection
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
-        assert_eq!(progress, 120000000000);
+        assert_eq!(progress, 128000000000);
     }
 
     #[traced_test]
@@ -486,6 +529,7 @@ mod tests {
             boot_rx,
             config.region.clone(),
             false,
+            0,
         );
 
         let _ = boot_tx.send(BootResult::Started);
@@ -542,7 +586,7 @@ mod tests {
         let progress: u64 = connection
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
-        assert_eq!(progress, 62000000000);
+        assert_eq!(progress, 130000000000);
     }
 
     #[traced_test]
@@ -590,6 +634,7 @@ mod tests {
             boot_rx,
             config.region.clone(),
             false,
+            0,
         );
 
         let _ = boot_tx.send(BootResult::Started);

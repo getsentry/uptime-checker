@@ -68,6 +68,7 @@ impl PartitionedService {
             config_loaded,
             config.region.clone(),
             config.redis_enable_cluster,
+            config.redis_timeouts_ms,
         );
 
         Self {

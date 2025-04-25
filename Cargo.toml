@@ -11,12 +11,22 @@ hyper = "1.4.1"
 hyper-util = "0.1.10"
 anyhow = "1.0.66"
 clap = { version = "4.4.6", features = ["derive"] }
-chrono = { version = "0.4.31", default-features = false, features = ["std", "serde"] }
+chrono = { version = "0.4.31", default-features = false, features = [
+    "std",
+    "serde",
+] }
 httpmock = "0.7.0-rc.1"
 reqwest = { version = "0.12.2", features = ["hickory-dns"] }
 openssl = "0.10.72"
 rust_arroyo = { version = "*", git = "https://github.com/getsentry/arroyo", rev = "0b84afc07131d8b8d48abcb7c8de8cfa2a98e526" }
-tokio = { version = "1.43.1", features = ["macros", "sync", "tracing", "signal", "rt-multi-thread", "test-util"] }
+tokio = { version = "1.43.1", features = [
+    "macros",
+    "sync",
+    "tracing",
+    "signal",
+    "rt-multi-thread",
+    "test-util",
+] }
 uuid = { version = "1.8.0", features = ["serde", "v4", "v5"] }
 serde = { version = "1.0.159", features = ["derive", "rc"] }
 serde_json = "1.0.93"
@@ -37,7 +47,7 @@ metrics-exporter-statsd = "0.8.0"
 metrics = "0.23.0"
 futures = "0.3.30"
 tokio-stream = "0.1.15"
-redis = { version = "0.28.2", features = ["cluster-async", "tokio-comp"] }
+redis = { version = "0.30.0", features = ["cluster-async", "tokio-comp"] }
 ipnet = "2.10.0"
 hickory-resolver = "0.24.1"
 tokio-rustls = "0.26.1"
