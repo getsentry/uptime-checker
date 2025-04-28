@@ -165,11 +165,11 @@ async fn scheduler_loop(
     };
 
     let in_order_tick_processor_join_handle = tokio::spawn(async move {
-        const HANDLE_QUEUE_SIZE: usize = 1000;
-        let mut tick_handles = Vec::with_capacity(HANDLE_QUEUE_SIZE);
+        const HANDLE_BATCH_SIZE: usize = 1000;
+        let mut tick_handles = Vec::with_capacity(HANDLE_BATCH_SIZE);
 
         while tick_complete_rx
-            .recv_many(&mut tick_handles, HANDLE_QUEUE_SIZE)
+            .recv_many(&mut tick_handles, HANDLE_BATCH_SIZE)
             .await
             > 0
         {
