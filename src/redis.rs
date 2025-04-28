@@ -63,6 +63,9 @@ impl RedisClient {
         &self,
         redis_timeouts_ms: u64,
     ) -> Result<RedisAsyncConnection, RedisError> {
+        // If timeout is set to 0, we create a connection with no timeout; this is a testing-related
+        // feature, as any timer-related future (when a test is paused) will immediately succeed,
+        // which will instantly trigger the connection timeout, causing the test to fail.
         let timeout = Duration::from_millis(redis_timeouts_ms);
         match self {
             RedisClient::Cluster(client) => {
