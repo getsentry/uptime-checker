@@ -1,31 +1,53 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args:
-      [
-        'build',
-        '-t',
-        'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest',
-        '-t',
-        'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA',
-        '--build-arg',
-        'UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA',
-        '--cache-from',
-        'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest',
-        '.',
-      ]
+    id: 'create-builder'
+    waitFor: ['-']
+    args: ['buildx', 'create', '--driver', 'docker-container', '--name', 'container', '--use']
 
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-image'
+    waitFor: ['create-builder']
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        # Only push "latest" tag when building on "main"
-        [ "$BRANCH_NAME" != "main" ] && exit 0
-        docker push us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest
-
-images: [
-  'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA',
-]
+        set -euxo pipefail
+        if [[ "$BRANCH_NAME" == "main" ]]; then
+            docker buildx build \
+                --push \
+                --platform linux/amd64,linux/arm64 \
+                -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA \
+                -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$SHORT_SHA \
+                -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest \
+                --label org.opencontainers.image.revision=$COMMIT_SHA \
+                --label org.opencontainers.image.version=$COMMIT_SHA \
+                --label org.opencontainers.image.title=uptime-checker \
+                --label org.opencontainers.vendor="Sentry" \
+                --label org.opencontainers.image.title="Sentry Uptime Checker Service" \
+                --label org.opencontainers.image.source=$REPO_FULL_NAME \
+                --label org.opencontainers.image.url=$REPO_FULL_NAME \
+                --cache-from $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest \
+                --sbom true \
+                --provenance="mode=max" \
+                --build-arg UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA \
+                .
+        else
+            docker buildx build \
+                --platform linux/amd64,linux/arm64 \
+                -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA \
+                -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$SHORT_SHA \
+                --label org.opencontainers.image.revision=$COMMIT_SHA \
+                --label org.opencontainers.image.version=$COMMIT_SHA \
+                --label org.opencontainers.image.title=uptime-checker \
+                --label org.opencontainers.image.title="Sentry Uptime Checker Service" \
+                --label org.opencontainers.vendor="Sentry" \
+                --label org.opencontainers.image.source=$REPO_FULL_NAME \
+                --label org.opencontainers.image.url=$REPO_FULL_NAME \
+                --cache-from $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest \
+                --build-arg UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA \
+                .
+        fi
 
 options:
-  machineType: 'E2_HIGHCPU_8'
+  machineType: 'E2_HIGHCPU_32'
+  diskSizeGb: 100
