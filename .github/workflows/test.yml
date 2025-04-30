@@ -10,12 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-      - uses: shogo82148/actions-setup-redis@428a144f11914412a8f52902296e134dd2e0f925
+      - uses: shogo82148/actions-setup-redis@428a144f11914412a8f52902296e134dd2e0f925 # v1.35.0
         with:
           redis-version: "7.x"
       - name: Install Rust Toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
       - name: Run Cargo Tests
         run: cargo test
