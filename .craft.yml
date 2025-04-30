@@ -1,0 +1,22 @@
+minVersion: 1.0.0
+changelogPolicy: auto
+
+artifactProvider:
+  name: none
+statusProvider:
+  name: github
+  config:
+    contexts:
+      - 'build-uptime-checker (sentryio)'
+
+targets:
+  - name: github
+  - id: release
+    name: docker
+    source: us-central1-docker.pkg.dev/sentryio/uptime-checker/image
+    target: getsentry/uptime-checker
+  - id: latest
+    name: docker
+    source: us-central1-docker.pkg.dev/sentryio/uptime-checker/image
+    target: getsentry/uptime-checker
+    targetFormat: '{{{target}}}:latest'
