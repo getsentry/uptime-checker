@@ -20,4 +20,3 @@ targets:
     source: us-central1-docker.pkg.dev/sentryio/uptime-checker/image
     target: getsentry/uptime-checker
     targetFormat: '{{{target}}}:latest'
-preReleaseCommand: ""
