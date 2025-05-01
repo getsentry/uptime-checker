@@ -354,14 +354,84 @@ mod tests {
         });
 
         shutdown_token.cancel();
-        // XXX: Without this loop we end up stuck forever, we should try to understand that better
-        while executor_rx.recv().await.is_some() {}
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
         let progress: u64 = connection
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
         assert_eq!(progress, 128000000000);
+    }
+
+    #[traced_test]
+    #[redis_test(start_paused = false)]
+    async fn test_redis_timeout() {
+        // We start this test unpaused because we are supplying a non-zero timeout to our redis client;
+        // a paused test will instantly timeout the connections.  We need to get through the initialization
+        // first, and then pause so that we can see some timeouts in the redis-writing loop
+        let config = Config::default();
+        let partition = 0;
+
+        let progress_key = build_progress_key(partition);
+        let client = Client::open(config.redis_host.clone()).unwrap();
+
+        let config_store = Arc::new(ConfigStore::new_rw());
+
+        let config_check = Arc::new(CheckConfig {
+            subscription_id: Uuid::from_u128(0 as u128),
+            ..Default::default()
+        });
+
+        {
+            let mut rw_store = config_store.write().unwrap();
+            rw_store.add_config(config_check.clone());
+        }
+        let (executor_tx, mut executor_rx) = CheckSender::new();
+        let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
+        let shutdown_token = CancellationToken::new();
+
+        let join_handle = run_scheduler(
+            partition,
+            config_store,
+            Arc::new(executor_tx),
+            shutdown_token.clone(),
+            build_progress_key(0),
+            config.redis_host.clone(),
+            boot_rx,
+            config.region.clone(),
+            false,
+            10_000,
+        );
+        let _ = boot_tx.send(BootResult::Started);
+
+        // Give the scheduler a chance to run and get set up
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // Now, pause time so that we don't have to wait for real-time checks to happen
+        tokio::time::pause();
+        let scheduled_check = executor_rx.recv().await.unwrap();
+
+        let scheduled_check_time = scheduled_check.get_tick().time();
+        assert_eq!(scheduled_check.get_config().clone(), config_check);
+
+        scheduled_check.record_result(CheckResult {
+            guid: Uuid::new_v4(),
+            subscription_id: config_check.subscription_id,
+            status: CheckStatus::Success,
+            status_reason: None,
+            trace_id: Default::default(),
+            span_id: Default::default(),
+            scheduled_check_time: scheduled_check_time,
+            actual_check_time: Utc::now(),
+            duration: Some(Duration::seconds(1)),
+            request_info: None,
+            region: config.region.clone(),
+        });
+
+        shutdown_token.cancel();
+        join_handle.await.unwrap();
+
+        // Ensure there was a timeout logged
+        assert!(logs_contain("scheduler.progress_saving_timeout"));
     }
 
     #[traced_test]
@@ -471,8 +541,6 @@ mod tests {
         });
 
         shutdown_token.cancel();
-        // XXX: Without this loop we end up stuck forever, we should try to understand that better
-        while executor_rx.recv().await.is_some() {}
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
         let progress: u64 = connection
@@ -579,8 +647,6 @@ mod tests {
         });
 
         shutdown_token.cancel();
-        // XXX: Without this loop we end up stuck forever, we should try to understand that better
-        while executor_rx.recv().await.is_some() {}
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
         let progress: u64 = connection
@@ -660,8 +726,6 @@ mod tests {
         });
 
         shutdown_token.cancel();
-        // XXX: Without this loop we end up stuck forever, we should try to understand that better
-        while executor_rx.recv().await.is_some() {}
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
     }
