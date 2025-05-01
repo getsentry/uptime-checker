@@ -371,13 +371,10 @@ mod tests {
         let config = Config::default();
         let partition = 0;
 
-        let progress_key = build_progress_key(partition);
-        let client = Client::open(config.redis_host.clone()).unwrap();
-
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let config_check = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(0 as u128),
+            subscription_id: Uuid::from_u128(0),
             ..Default::default()
         });
 
@@ -420,7 +417,7 @@ mod tests {
             status_reason: None,
             trace_id: Default::default(),
             span_id: Default::default(),
-            scheduled_check_time: scheduled_check_time,
+            scheduled_check_time,
             actual_check_time: Utc::now(),
             duration: Some(Duration::seconds(1)),
             request_info: None,
