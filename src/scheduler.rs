@@ -424,6 +424,9 @@ mod tests {
             region: config.region.clone(),
         });
 
+        // Make sure the redis-writing loop gets more of a chance to run
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
         shutdown_token.cancel();
         join_handle.await.unwrap();
 
