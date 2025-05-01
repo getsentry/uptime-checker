@@ -129,7 +129,7 @@ async fn scheduler_loop(
                 .increment(1);
             }
         }
-        tracing::debug!(
+        tracing::info!(
             %tick, bucket_size = bucket_size, uptime_region = region, partition=partition.to_string(),
             total_configs=total_configs, skipped_configs=total_configs - bucket_size,
             "scheduler.tick_scheduled"
