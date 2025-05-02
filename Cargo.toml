@@ -73,3 +73,4 @@ strip = "debuginfo"
 [dev-dependencies]
 redis-test-macro = { path = "./redis-test-macro" }
 ntest = "0.9.3"
+socket-server-mocker = "0.5.0"
