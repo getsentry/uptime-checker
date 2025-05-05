@@ -16,7 +16,8 @@ impl VectorResultsProducer {
         endpoint: String,
         vector_batch_size: usize,
     ) -> (Self, JoinHandle<()>) {
-        let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
+        let schema =
+            sentry_kafka_schemas::get_schema(topic_name, None).expect("Schema should exist");
         let client = Client::new();
 
         let (sender, receiver) = mpsc::unbounded_channel();

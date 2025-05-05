@@ -52,7 +52,10 @@ pub static PRIVATE_RANGES: LazyLock<Vec<IpNet>> = LazyLock::new(|| {
         "ff00::/8",
     ];
 
-    addresses.iter().map(|addr| addr.parse().unwrap()).collect()
+    addresses
+        .iter()
+        .map(|addr| addr.parse().expect("Addresses parse by construction"))
+        .collect()
 });
 
 pub fn is_external_ip(ip: IpAddr) -> bool {
