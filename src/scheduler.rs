@@ -58,15 +58,16 @@ async fn scheduler_loop(
     redis_enable_cluster: bool,
     redis_timeouts_ms: u64,
 ) {
-    let client = build_redis_client(&redis_host, redis_enable_cluster);
+    let client = build_redis_client(&redis_host, redis_enable_cluster)
+        .expect("Redis client should be buildable");
     let mut connection = client
         .get_async_connection(redis_timeouts_ms)
         .await
-        .expect("Unable to connect to redis");
+        .expect("Redis should be available");
     let last_progress: Option<String> = connection
         .get(&progress_key)
         .await
-        .expect("Unable to get last tick key");
+        .expect("Last tick key should exist");
     let tick_frequency = Duration::from_secs(1);
     tracing::debug!(
         progress_key,
@@ -123,8 +124,12 @@ async fn scheduler_loop(
             )
             .increment(1);
             if config.should_run(tick, &region) {
-                results.push(executor_sender.queue_check(tick, config));
-                bucket_size += 1;
+                if let Ok(check) = executor_sender.queue_check(tick, config) {
+                    results.push(check);
+                    bucket_size += 1;
+                } else {
+                    tracing::error!("scheduler.executor_send_error");
+                }
             } else {
                 tracing::debug!(%config.subscription_id, %tick, "scheduler.skipped_config");
 
@@ -152,7 +157,7 @@ async fn scheduler_loop(
             while let Some(result) = results.pop() {
                 // TODO(epurkhiser): Do we want to do something with the CheckResult here?
                 if let Err(err) = result.await {
-                    tracing::error!("Error receiving check result {}", err);
+                    tracing::error!(error = ?err, "scheduler.tick_complete_join_await_error");
                 }
             }
 
@@ -168,7 +173,7 @@ async fn scheduler_loop(
         });
 
         if let Err(err) = tick_complete_tx.send(tick_complete_join_handle) {
-            tracing::error!("Error sending tick_complete: {}", err);
+            tracing::error!(error = ?err, "scheduler.tick_complete_send_error");
         }
     };
 
@@ -181,22 +186,40 @@ async fn scheduler_loop(
             .await
             > 0
         {
-            // XXX: This task guarantees that we can process ticks IN ORDER upon tick execution.
-            // This waits for the tick to complete before waiting on the next tick to complete.
+            // The handles arriving in the receiver are received in-order; look for the very latest tick that completed.
             tracing::debug!("scheduler.tick_awaiting_join_handle");
             let num_read = tick_handles.len();
 
-            // Only read the very last update's tick, since that will be the latest one we've successfully
-            // processed.
-            let tick = tick_handles.pop();
+            let tick_result = loop {
+                if tick_handles.is_empty() {
+                    break None;
+                }
+                let tick = tick_handles
+                    .pop()
+                    .expect("Must have a value in the loop body");
+
+                match tick.await {
+                    Ok(tick) => break Some(tick),
+                    Err(err) => {
+                        tracing::warn!(progress_key, error = ?err, "scheduler.tick_processor_handle_await_error");
+                    }
+                }
+            };
             tick_handles.clear();
 
-            let tick = tick
-                .unwrap()
-                .await
-                .expect("Failed to receive completed tick");
+            let Some(tick) = tick_result else {
+                tracing::warn!(
+                    progress_key,
+                    num_read,
+                    "scheduler.tick_processor_no_results"
+                );
+                continue;
+            };
 
-            let progress = tick.time().timestamp_nanos_opt().unwrap();
+            let Some(progress) = tick.time().timestamp_nanos_opt() else {
+                tracing::warn!(progress_key, tick = %tick, "scheduler.tick_processor_bad_timestamp");
+                continue;
+            };
             tracing::info!(tick = %tick, progress, num_read, "scheduler.tick_complete_join_handle");
 
             let result: Result<(), redis::RedisError> =
@@ -213,14 +236,19 @@ async fn scheduler_loop(
                     // Log and try reconnecting.
                     tracing::error!(progress_key, "scheduler.progress_saving_connection_dropped");
 
-                    connection = client
-                        .get_async_connection(redis_timeouts_ms)
-                        .await
-                        .expect("Unable to connect to redis");
+                    let new_connection = client.get_async_connection(redis_timeouts_ms).await;
+
+                    match new_connection {
+                        Ok(new_connection) => connection = new_connection,
+                        Err(err) => {
+                            tracing::error!(progress_key, error = %err, "scheduler.progress_saving_reconnect_failure");
+
+                            // Maybe it's coming back online--don't keep hammering something that isn't there.
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
                 } else {
                     tracing::error!(progress_key, error = %e, "scheduler.progress_fatal_error");
-
-                    panic!("Could not save scheduler progress: {:?}", e);
                 }
             }
             tracing::debug!(tick = %tick, "scheduler.tick_execution_complete_in_order");
@@ -336,32 +364,36 @@ mod tests {
         );
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
-        scheduled_check2.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config2.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check2_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
+        scheduled_check2
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config2.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check2_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
@@ -442,19 +474,21 @@ mod tests {
         assert_eq!(scheduled_check1.get_config().clone(), config1);
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
@@ -540,32 +574,36 @@ mod tests {
         );
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
-        scheduled_check2.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config2.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check2_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
+        scheduled_check2
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config2.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check2_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
@@ -646,32 +684,36 @@ mod tests {
         );
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config2.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
-        scheduled_check2.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check2_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config2.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
+        scheduled_check2
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check2_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
@@ -738,19 +780,21 @@ mod tests {
         assert_eq!(scheduled_check1.get_config().clone(), config1);
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();

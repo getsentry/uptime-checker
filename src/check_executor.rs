@@ -1,9 +1,9 @@
+use anyhow::Result;
+use chrono::{TimeDelta, Utc};
+use futures::StreamExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-
-use chrono::{TimeDelta, Utc};
-use futures::StreamExt;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
@@ -41,10 +41,10 @@ impl ScheduledCheck {
     }
 
     /// Report the completion of the scheduled check.
-    pub fn record_result(self, result: CheckResult) {
+    pub fn record_result(self, result: CheckResult) -> Result<()> {
         self.resolve_tx
             .send(result)
-            .expect("Failed to resolve completed check");
+            .map_err(|_| anyhow::anyhow!("Scheduled check send error"))
     }
 }
 
@@ -71,7 +71,11 @@ impl CheckSender {
 
     /// Queues a check for execution, returning a oneshot receiver that will be fired once the check
     /// has resolved to a CheckResult.
-    pub fn queue_check(&self, tick: Tick, config: Arc<CheckConfig>) -> Receiver<CheckResult> {
+    pub fn queue_check(
+        &self,
+        tick: Tick,
+        config: Arc<CheckConfig>,
+    ) -> Result<Receiver<CheckResult>> {
         let (resolve_tx, resolve_rx) = oneshot::channel();
 
         let scheduled_check = ScheduledCheck {
@@ -82,20 +86,22 @@ impl CheckSender {
         };
 
         self.queue_size.fetch_add(1, Ordering::SeqCst);
+
+        // SendError doesn't give us anything useful (except the scheduled check object itself,) so
+        // just map to empty.
         self.sender
             .send(scheduled_check)
-            .expect("Failed to queue ScheduledCheck");
+            .map_err(|_| anyhow::anyhow!("queue_check sender error"))?;
 
-        resolve_rx
+        Ok(resolve_rx)
     }
 
     /// Requeues the check to be executed again, increasing the number of retries by 1
-    fn queue_check_for_retry(&self, mut check: ScheduledCheck) {
+    fn queue_check_for_retry(&self, mut check: ScheduledCheck) -> Result<()> {
         check.retry_count += 1;
         self.queue_size.fetch_add(1, Ordering::SeqCst);
-        self.sender
-            .send(check)
-            .expect("Failed to queue ScheduledCheck");
+        self.sender.send(check)?;
+        Ok(())
     }
 }
 
@@ -442,7 +448,7 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = sender.queue_check(tick, config.clone());
+        let resolve_rx = sender.queue_check(tick, config.clone()).unwrap();
         tokio::pin!(resolve_rx);
 
         // Will not be resolved yet
@@ -487,7 +493,7 @@ mod tests {
                     subscription_id: Uuid::from_u128(i),
                     ..Default::default()
                 });
-                sender.queue_check(tick, config)
+                sender.queue_check(tick, config).unwrap()
             })
             .collect();
 
@@ -570,7 +576,11 @@ mod tests {
             ..Default::default()
         });
 
-        let result = sender.queue_check(tick, config.clone()).await.unwrap();
+        let result = sender
+            .queue_check(tick, config.clone())
+            .unwrap()
+            .await
+            .unwrap();
 
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::MissedWindow);
@@ -610,8 +620,7 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = sender.queue_check(tick, config.clone());
-        tokio::pin!(resolve_rx);
+        let resolve_rx = sender.queue_check(tick, config.clone()).unwrap();
 
         // Resolves as success since we will retry
         let result = resolve_rx.await.unwrap();
@@ -656,8 +665,7 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = sender.queue_check(tick, config.clone());
-        tokio::pin!(resolve_rx);
+        let resolve_rx = sender.queue_check(tick, config.clone()).unwrap();
 
         // Resolves as failure after the two retries
         let result = resolve_rx.await.unwrap();
