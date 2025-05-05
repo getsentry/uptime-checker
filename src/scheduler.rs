@@ -83,17 +83,23 @@ async fn scheduler_loop(
             // There's a race where a checker is running for a given progress_key, and another is starting.
             // Since we add `tick_frequency` to the date here, the date can end up in the future, which causes
             // a panic when we subtract it from `Utc::now()`. We avoid this by clamping to Utc::now().
-            next_check.min(Utc::now().duration_trunc(TimeDelta::seconds(1)).unwrap())
+            next_check.min(
+                Utc::now()
+                    .duration_trunc(TimeDelta::seconds(1))
+                    .expect("Utc::now should be sane"),
+            )
         }
         // We truncate the initial date to the nearest second so that we're aligned to the second
         // boundary here
-        None => Utc::now().duration_trunc(TimeDelta::seconds(1)).unwrap(),
+        None => Utc::now()
+            .duration_trunc(TimeDelta::seconds(1))
+            .expect("Utc::now should be sane"),
     };
     tracing::info!(%start, "scheduler.starting_at");
 
     let start_at = Instant::now()
-        .checked_sub((Utc::now() - start).to_std().unwrap())
-        .unwrap();
+        .checked_sub((Utc::now() - start).to_std().unwrap_or_default())
+        .expect("Instant should be representable");
     let mut interval = interval(tick_frequency);
     interval.reset_at(start_at);
 
@@ -103,7 +109,7 @@ async fn scheduler_loop(
         let tick_start = Instant::now();
         let configs = config_store
             .read()
-            .expect("Lock poisoned")
+            .expect("Lock should not be poisoned")
             .get_configs(tick);
         let mut results = vec![];
         let mut bucket_size: usize = 0;
@@ -145,7 +151,9 @@ async fn scheduler_loop(
             let checks_scheduled = results.len();
             while let Some(result) = results.pop() {
                 // TODO(epurkhiser): Do we want to do something with the CheckResult here?
-                let _check_result = result.await.expect("Failed to receive CheckResult");
+                if let Err(err) = result.await {
+                    tracing::error!("Error receiving check result {}", err);
+                }
             }
 
             let execution_duration = tick_start.elapsed();
@@ -159,9 +167,9 @@ async fn scheduler_loop(
             tick
         });
 
-        tick_complete_tx
-            .send(tick_complete_join_handle)
-            .expect("Failed to queue join handle for tick completion");
+        if let Err(err) = tick_complete_tx.send(tick_complete_join_handle) {
+            tracing::error!("Error sending tick_complete: {}", err);
+        }
     };
 
     let in_order_tick_processor_join_handle = tokio::spawn(async move {

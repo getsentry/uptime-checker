@@ -101,7 +101,7 @@ impl CheckConfig {
         )
         .as_u128()
         .checked_rem(self.interval as u128)
-        .unwrap() as usize;
+        .expect("Interval cannot be zero") as usize;
 
         let pattern_count = MAX_CHECK_INTERVAL_SECS / interval_secs;
 
@@ -126,6 +126,11 @@ impl CheckConfig {
             return true;
         };
 
+        if active_regions.is_empty() {
+            // No active regions means we just run
+            return true;
+        }
+
         // We deterministically produce a new uuid here based on the subscription id and use it to
         // help distribute when we run each check in a region. Without this, we end up running all
         // checks for each region at the same time, and then idling.
@@ -140,7 +145,7 @@ impl CheckConfig {
         let running_region_idx = (((tick.time().timestamp() / self.interval as i64) as u128)
             + subscription_seed_id.as_u128())
         .checked_rem(active_regions.len() as u128)
-        .unwrap();
+        .expect("Active regions is non-zero");
         active_regions[running_region_idx as usize] == current_region
     }
 }

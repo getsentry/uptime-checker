@@ -80,7 +80,7 @@ impl LoggingConfig {
 
 pub fn init(config: LoggingConfig) {
     if let Some(dsn) = &config.sentry_dsn {
-        let dsn = Some(Dsn::from_str(dsn).expect("Invalid Sentry DSN"));
+        let dsn = Some(Dsn::from_str(dsn).expect("DSN should be valid"));
 
         let guard = sentry::init(sentry::ClientOptions {
             dsn,

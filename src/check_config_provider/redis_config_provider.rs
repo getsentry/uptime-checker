@@ -131,19 +131,19 @@ impl RedisConfigProvider {
             .redis
             .get_async_connection(self.redis_timeouts_ms)
             .await
-            .expect("Unable to connect to redis");
+            .expect("Redis should be available");
         metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region.clone())
             .set(partitions.len() as f64);
 
-        let start_loading = Utc::now();
+        let start_loading = std::time::Instant::now();
 
         // Initial load of all configs for all partitions
         for partition in partitions {
-            let partition_start_loading = Utc::now();
+            let partition_start_loading = std::time::Instant::now();
             let config_payloads: Vec<Vec<u8>> = conn
                 .hvals(&partition.config_key)
                 .await
-                .expect("Unable to get configs");
+                .expect("Config key should exist");
             tracing::info!(
                 partition = partition.number,
                 config_count = config_payloads.len(),
@@ -153,39 +153,35 @@ impl RedisConfigProvider {
                 .set(config_payloads.len() as f64);
 
             for config_payload in config_payloads {
-                let config: CheckConfig = rmp_serde::from_slice(&config_payload)
-                    .map_err(|err| {
-                        tracing::error!(?err, "config_consumer.invalid_config_message");
-                    })
-                    .unwrap();
-                manager
-                    .get_service(partition.number)
-                    .get_config_store()
-                    .write()
-                    .unwrap()
-                    .add_config(Arc::new(config));
+                let config: Result<CheckConfig, _> = rmp_serde::from_slice(&config_payload);
+
+                match config {
+                    Ok(config) => {
+                        manager
+                            .get_service(partition.number)
+                            .get_config_store()
+                            .write()
+                            .expect("Lock should not be poisoned")
+                            .add_config(Arc::new(config));
+                    }
+                    Err(err) => tracing::error!(?err, "config_consumer.invalid_config_message"),
+                }
             }
-            let partition_loading_time = (Utc::now() - partition_start_loading)
-                .to_std()
-                .unwrap()
-                .as_secs_f64();
             metrics::histogram!(
                 "config_provider.initial_load.partition.duration",
                 "histogram" => "timer",
                 "uptime_region" => region.clone(),
                 "partition" => partition.number.to_string(),
             )
-            .record(partition_loading_time);
+            .record(partition_start_loading.elapsed().as_secs_f64());
         }
-
-        let loading_time = (Utc::now() - start_loading).to_std().unwrap().as_secs_f64();
 
         metrics::histogram!(
             "config_provider.initial_load.duration",
             "histogram" => "timer",
             "uptime_region" => region.clone(),
         )
-        .record(loading_time);
+        .record(start_loading.elapsed().as_secs_f64());
     }
 
     async fn monitor_updates(
@@ -199,19 +195,19 @@ impl RedisConfigProvider {
             .redis
             .get_async_connection(self.redis_timeouts_ms)
             .await
-            .expect("Unable to connect to redis");
+            .expect("Redis should be available");
         let mut interval = interval(self.check_interval);
 
         while !shutdown.is_cancelled() {
             let _ = interval.tick().await;
 
-            let update_start = Utc::now();
+            let update_start = std::time::Instant::now();
 
             metrics::gauge!("config_provider.updater.partitions", "uptime_region" => region.clone())
                 .set(partitions.len() as f64);
 
             for partition in partitions.iter() {
-                let partition_update_start = Utc::now();
+                let partition_update_start = std::time::Instant::now();
                 let mut pipe = redis::pipe();
                 // We fetch all updates from the list and then delete the key. We do this
                 // atomically so that there isn't any chance of a race
@@ -252,7 +248,7 @@ impl RedisConfigProvider {
                         .get_service(partition.number)
                         .get_config_store()
                         .write()
-                        .unwrap()
+                        .expect("Lock should not be poisoned")
                         .remove_config(config_delete.subscription_id);
                     tracing::debug!(
                         %config_delete.subscription_id,
@@ -279,42 +275,43 @@ impl RedisConfigProvider {
                     });
 
                 for config_payload in config_payloads {
-                    let config: CheckConfig = rmp_serde::from_slice(&config_payload)
-                        .map_err(|err| {
+                    let config_result: Result<CheckConfig, _> =
+                        rmp_serde::from_slice(&config_payload);
+                    match config_result {
+                        Ok(config) => {
+                            tracing::debug!(
+                                partition = partition.number,
+                                subscription_id = %config.subscription_id,
+                                "redis_config_provider.upserting_config"
+                            );
+                            manager
+                                .get_service(partition.number)
+                                .get_config_store()
+                                .write()
+                                .expect("Lock should not be poisoned")
+                                .add_config(Arc::new(config));
+                        }
+                        Err(err) => {
                             tracing::error!(?err, "config_consumer.invalid_config_message");
-                        })
-                        .unwrap();
-                    tracing::debug!(
-                        partition = partition.number,
-                        subscription_id = %config.subscription_id,
-                        "redis_config_provider.upserting_config"
-                    );
-                    manager
-                        .get_service(partition.number)
-                        .get_config_store()
-                        .write()
-                        .unwrap()
-                        .add_config(Arc::new(config));
+                        }
+                    }
                 }
-                let partition_update_duration = (Utc::now() - partition_update_start)
-                    .to_std()
-                    .unwrap()
-                    .as_secs_f64();
+
                 metrics::histogram!(
                     "config_provider.updater.partition.duration",
                     "histogram" => "timer",
                     "uptime_region" => region.clone(),
                     "partition" => partition.number.to_string(),
                 )
-                .record(partition_update_duration);
+                .record(partition_update_start.elapsed().as_secs_f64());
             }
-            let update_duration = (Utc::now() - update_start).to_std().unwrap().as_secs_f64();
+
             metrics::histogram!(
                 "config_provider.updater.duration",
                 "histogram" => "timer",
                 "uptime_region" => region.clone(),
             )
-            .record(update_duration);
+            .record(update_start.elapsed().as_secs_f64());
         }
     }
 }
@@ -332,7 +329,7 @@ pub fn run_config_provider(
         config.redis_enable_cluster,
         config.redis_timeouts_ms,
     )
-    .expect("Failed to create Redis config provider");
+    .expect("Config provider should be initializable");
 
     let region = config.region.clone();
     tokio::spawn(async move {

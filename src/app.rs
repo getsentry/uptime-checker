@@ -14,7 +14,7 @@ use crate::{
 
 pub fn execute() -> io::Result<()> {
     let app = cli::CliApp::parse();
-    let config = Arc::new(config::Config::extract(&app).expect("Configuration invalid"));
+    let config = Arc::new(config::Config::extract(&app).expect("Config should be valid"));
 
     logging::init(LoggingConfig::from_config(&config));
     metrics::init(&config.metrics);
@@ -30,12 +30,14 @@ pub fn execute() -> io::Result<()> {
             .enable_all()
             .worker_threads(num_cpus * config.thread_cpu_scale_factor)
             .build()
-            .unwrap()
+            .expect("Tokio runtime should be able to start up")
             .block_on(async {
                 let shutdown = Manager::start(config);
                 tracing::info!("system.manager_started");
 
-                ctrl_c().await.expect("Failed to listen for SIGINT signal");
+                ctrl_c()
+                    .await
+                    .expect("Signal handlers should be installable");
 
                 tracing::info!("system.got_sigint");
                 shutdown().await;

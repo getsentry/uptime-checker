@@ -90,6 +90,8 @@ impl PartitionedService {
 
     pub async fn stop(self) {
         self.shutdown_signal.cancel();
+
+        // Okay to unwrap here, since we're just shutting down.
         self.scheduler_join_handle.await.unwrap();
         tracing::info!(partition = self.partition, "partitioned_service.shutdown");
     }
@@ -215,15 +217,15 @@ impl Manager {
         move || {
             Box::pin(async move {
                 shutdown_signal.cancel();
-                consumer_join_handle.await.expect("Failed to stop consumer");
+                // Unwrapping here because we're just shutting down; it's okay to fail badly
+                // at this point.
+                consumer_join_handle.await.unwrap();
 
-                results_worker.await.expect("Failed to stop vector worker");
+                results_worker.await.unwrap();
 
-                services_join_handle
-                    .await
-                    .expect("Failed to stop partitioned services");
+                services_join_handle.await.unwrap();
 
-                executor_join_handle.await.expect("Failed to stop executor");
+                executor_join_handle.await.unwrap();
             })
         }
     }
@@ -231,14 +233,17 @@ impl Manager {
     pub fn get_service(&self, partition: u16) -> Arc<PartitionedService> {
         self.services
             .read()
-            .unwrap()
+            .expect("Lock should not be poisoned")
             .get(&partition)
-            .expect("Cannot access unregistered partition")
+            .expect("Parition should have been registered")
             .clone()
     }
 
     pub fn has_service(&self, partition: u16) -> bool {
-        self.services.read().unwrap().contains_key(&partition)
+        self.services
+            .read()
+            .expect("Lock should not be poisoned")
+            .contains_key(&partition)
     }
 
     /// Notify the manager for which parititions it is responsible for.
@@ -246,7 +251,13 @@ impl Manager {
     /// Partitions that were previously known will have their services dropped. New partitions will
     /// register a new PartitionedService.
     pub fn update_partitions(&self, new_partitions: &HashSet<u16>) {
-        let known_partitions: HashSet<_> = self.services.read().unwrap().keys().cloned().collect();
+        let known_partitions: HashSet<_> = self
+            .services
+            .read()
+            .expect("Lock should not be poisoned")
+            .keys()
+            .cloned()
+            .collect();
 
         // Drop partitions that we are no longer responsible for
         for removed_part in known_partitions.difference(new_partitions) {
@@ -261,7 +272,7 @@ impl Manager {
 
     fn register_partition(&self, partition: u16) {
         tracing::info!(partition, "partition_update.registered_new");
-        let mut services = self.services.write().unwrap();
+        let mut services = self.services.write().expect("Lock should not be poisoned");
 
         let Vacant(entry) = services.entry(partition) else {
             tracing::error!(partition, "partition_update.already_registered");
@@ -275,7 +286,7 @@ impl Manager {
 
     fn unregister_partition(&self, partition: u16) {
         tracing::info!(partition, "partition_update.unregistering");
-        let mut services = self.services.write().unwrap();
+        let mut services = self.services.write().expect("Lock should not be poisoned");
 
         let Some(service) = services.remove(&partition) else {
             tracing::error!(partition, "partition_update.not_registered");
@@ -283,8 +294,8 @@ impl Manager {
         };
 
         self.shutdown_sender
-            .send(Arc::into_inner(service).expect("Cannot take ownership of service"))
-            .expect("Cannot queue service for shutdown");
+            .send(Arc::into_inner(service).expect("Should be no outstanding references to arc"))
+            .expect("Shutdown sender should still be open");
     }
 }
 
@@ -357,7 +368,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "Cannot access unregistered partition")]
+    #[should_panic(expected = "Parition should have been registered")]
     async fn test_manager_get_service_fail() {
         let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         manager.register_partition(0);
@@ -383,7 +394,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "Cannot access unregistered partition")]
+    #[should_panic(expected = "Parition should have been registered")]
     async fn test_manager_unregister_partition() {
         let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         manager.register_partition(0);

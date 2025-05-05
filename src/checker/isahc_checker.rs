@@ -119,7 +119,7 @@ impl Checker for IsahcChecker {
 
         let start = Instant::now();
         let response = do_request(&self.client, config, &trace_header).await;
-        let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
+        let duration = Some(TimeDelta::from_std(start.elapsed()).expect("Duration should be sane"));
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
             CheckStatus::Success

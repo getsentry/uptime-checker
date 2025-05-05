@@ -243,8 +243,9 @@ async fn executor_loop(
                     // re-queue for execution again
                     if will_retry {
                         tracing::debug!(result = ?check_result, "executor.check_will_retry");
-                        job_check_sender.queue_check_for_retry(scheduled_check);
-                        job_num_running.fetch_sub(1, Ordering::SeqCst);
+                        if job_check_sender.queue_check_for_retry(scheduled_check).is_ok() {
+                            job_num_running.fetch_sub(1, Ordering::SeqCst);
+                        }
                         return;
                     }
 
@@ -254,7 +255,10 @@ async fn executor_loop(
 
                     tracing::debug!(result = ?check_result, "executor.check_complete");
 
-                    scheduled_check.record_result(check_result);
+                    if let Err(check_result) = scheduled_check.record_result(check_result) {
+                        tracing::error!(result = ?check_result, "executor.failed_to_record_scheduled_check");
+                    }
+
                     job_num_running.fetch_sub(1, Ordering::SeqCst);
                 };
 
@@ -315,13 +319,13 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
             "is_retry" => retry_label,
             "will_retry" => will_retry_label,
         )
-        .record(duration.to_std().unwrap().as_secs_f64());
+        .record(duration.to_std().unwrap_or_default().as_secs_f64());
     }
 
     // Record time between scheduled and actual check
     let delay = (*actual_check_time - *scheduled_check_time)
         .to_std()
-        .unwrap()
+        .unwrap_or_default()
         .as_secs_f64();
 
     metrics::histogram!(

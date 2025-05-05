@@ -62,7 +62,7 @@ async fn do_request(
     let timeout = check_config
         .timeout
         .to_std()
-        .expect("Timeout duration could not be converted to std::time::Duration");
+        .unwrap_or(Duration::from_secs(10));
 
     let url = check_config.url.as_str();
 
@@ -169,7 +169,13 @@ fn hyper_util_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, Stri
 impl ReqwestChecker {
     fn new_internal(options: Options) -> Self {
         let mut default_headers = HeaderMap::new();
-        default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
+        default_headers.insert(
+            "User-Agent",
+            UPTIME_USER_AGENT
+                .to_string()
+                .parse()
+                .expect("Valid by construction"),
+        );
 
         let mut builder = ClientBuilder::new()
             .hickory_dns(true)
@@ -229,7 +235,7 @@ impl Checker for ReqwestChecker {
 
         let start = Instant::now();
         let response = do_request(&self.client, config, &trace_header).await;
-        let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
+        let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap_or_default());
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
             CheckStatus::Success
