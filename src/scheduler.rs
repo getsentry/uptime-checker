@@ -98,7 +98,7 @@ async fn scheduler_loop(
     tracing::info!(%start, "scheduler.starting_at");
 
     let start_at = Instant::now()
-        .checked_sub((Utc::now() - start).to_std().unwrap())
+        .checked_sub((Utc::now() - start).to_std().unwrap_or_default())
         .expect("Instant should be representable");
     let mut interval = interval(tick_frequency);
     interval.reset_at(start_at);
