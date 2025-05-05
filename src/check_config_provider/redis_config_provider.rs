@@ -1,12 +1,11 @@
 use redis::AsyncCommands;
-use std::collections::HashSet;
 use std::sync::Arc;
+use std::{collections::HashSet, time::Instant};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::{app::config::Config, manager::Manager, types::check_config::CheckConfig};
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::time::Duration;
@@ -135,11 +134,11 @@ impl RedisConfigProvider {
         metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region.clone())
             .set(partitions.len() as f64);
 
-        let start_loading = Utc::now();
+        let start_loading = Instant::now();
 
         // Initial load of all configs for all partitions
         for partition in partitions {
-            let partition_start_loading = Utc::now();
+            let partition_start_loading = Instant::now();
             let config_payloads: Vec<Vec<u8>> = conn
                 .hvals(&partition.config_key)
                 .await
@@ -165,10 +164,7 @@ impl RedisConfigProvider {
                     .unwrap()
                     .add_config(Arc::new(config));
             }
-            let partition_loading_time = (Utc::now() - partition_start_loading)
-                .to_std()
-                .unwrap()
-                .as_secs_f64();
+            let partition_loading_time = partition_start_loading.elapsed().as_secs_f64();
             metrics::histogram!(
                 "config_provider.initial_load.partition.duration",
                 "histogram" => "timer",
@@ -178,7 +174,7 @@ impl RedisConfigProvider {
             .record(partition_loading_time);
         }
 
-        let loading_time = (Utc::now() - start_loading).to_std().unwrap().as_secs_f64();
+        let loading_time = start_loading.elapsed().as_secs_f64();
 
         metrics::histogram!(
             "config_provider.initial_load.duration",
@@ -205,13 +201,13 @@ impl RedisConfigProvider {
         while !shutdown.is_cancelled() {
             let _ = interval.tick().await;
 
-            let update_start = Utc::now();
+            let update_start = Instant::now();
 
             metrics::gauge!("config_provider.updater.partitions", "uptime_region" => region.clone())
                 .set(partitions.len() as f64);
 
             for partition in partitions.iter() {
-                let partition_update_start = Utc::now();
+                let partition_update_start = Instant::now();
                 let mut pipe = redis::pipe();
                 // We fetch all updates from the list and then delete the key. We do this
                 // atomically so that there isn't any chance of a race
@@ -296,10 +292,7 @@ impl RedisConfigProvider {
                         .unwrap()
                         .add_config(Arc::new(config));
                 }
-                let partition_update_duration = (Utc::now() - partition_update_start)
-                    .to_std()
-                    .unwrap()
-                    .as_secs_f64();
+                let partition_update_duration = partition_update_start.elapsed().as_secs_f64();
                 metrics::histogram!(
                     "config_provider.updater.partition.duration",
                     "histogram" => "timer",
@@ -308,7 +301,7 @@ impl RedisConfigProvider {
                 )
                 .record(partition_update_duration);
             }
-            let update_duration = (Utc::now() - update_start).to_std().unwrap().as_secs_f64();
+            let update_duration = update_start.elapsed().as_secs_f64();
             metrics::histogram!(
                 "config_provider.updater.duration",
                 "histogram" => "timer",
