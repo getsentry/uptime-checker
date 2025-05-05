@@ -142,6 +142,9 @@ pub struct Config {
     /// DNS name servers to use when making checks in the http checker
     #[serde(default, deserialize_with = "deserialize_nameservers")]
     pub http_checker_dns_nameservers: Option<Vec<IpAddr>>,
+
+    /// Redis connection/response timeouts, in milliseconds.
+    pub redis_timeouts_ms: u64,
 }
 
 impl Default for Config {
@@ -179,6 +182,7 @@ impl Default for Config {
             failure_retries: 0,
             http_checker_dns_nameservers: None,
             thread_cpu_scale_factor: 1,
+            redis_timeouts_ms: 30_000,
         }
     }
 }
@@ -318,6 +322,7 @@ mod tests {
                         failure_retries: 0,
                         http_checker_dns_nameservers: None,
                         thread_cpu_scale_factor: 1,
+                        redis_timeouts_ms: 30_000,
                     }
                 );
             },
@@ -407,6 +412,7 @@ mod tests {
                             IpAddr::from([8, 8, 4, 4])
                         ]),
                         thread_cpu_scale_factor: 3,
+                        redis_timeouts_ms: 30_000,
                     }
                 );
             },
