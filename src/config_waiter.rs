@@ -53,7 +53,7 @@ pub fn wait_for_partition_boot(
 
             let last_update = config_store
                 .read()
-                .expect("Lock poisoned")
+                .expect("Lock should not be poisoned")
                 .get_last_update();
 
             // If it's been longer than the BOOT_MAX_IDLE and we haven't updated the config store
@@ -70,7 +70,7 @@ pub fn wait_for_partition_boot(
         let boot_time_ms = start.elapsed().as_millis();
         let total_configs = config_store
             .read()
-            .expect("Lock poisoned")
+            .expect("Lock should not be poisoned")
             .all_configs()
             .len();
 
@@ -87,7 +87,7 @@ pub fn wait_for_partition_boot(
         if shutdown.is_cancelled() {
             boot_finished
                 .send(BootResult::Cancelled)
-                .expect("Failed to report boot cancellation");
+                .expect("Receiver should still exist");
             return;
         }
 
@@ -105,7 +105,7 @@ pub fn wait_for_partition_boot(
 
         boot_finished
             .send(BootResult::Started)
-            .expect("Failed to report boot");
+            .expect("Receiver should still exist");
     });
 
     boot_finished_rx

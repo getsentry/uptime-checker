@@ -157,7 +157,7 @@ impl Default for Config {
             log_format: logging::LogFormat::Auto,
             interface: None,
             metrics: MetricsConfig {
-                statsd_addr: "127.0.0.1:8126".parse().unwrap(),
+                statsd_addr: "127.0.0.1:8126".parse().expect("Parsable by construction"),
                 default_tags: BTreeMap::new(),
                 hostname_tag: None,
             },

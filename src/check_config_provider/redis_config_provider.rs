@@ -131,7 +131,7 @@ impl RedisConfigProvider {
             .redis
             .get_async_connection(self.redis_timeouts_ms)
             .await
-            .expect("Unable to connect to redis");
+            .expect("Redis should be available");
         metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region.clone())
             .set(partitions.len() as f64);
 
@@ -143,7 +143,7 @@ impl RedisConfigProvider {
             let config_payloads: Vec<Vec<u8>> = conn
                 .hvals(&partition.config_key)
                 .await
-                .expect("Unable to get configs");
+                .expect("Config key should exist");
             tracing::info!(
                 partition = partition.number,
                 config_count = config_payloads.len(),
@@ -199,7 +199,7 @@ impl RedisConfigProvider {
             .redis
             .get_async_connection(self.redis_timeouts_ms)
             .await
-            .expect("Unable to connect to redis");
+            .expect("Redis should be available");
         let mut interval = interval(self.check_interval);
 
         while !shutdown.is_cancelled() {
@@ -252,7 +252,7 @@ impl RedisConfigProvider {
                         .get_service(partition.number)
                         .get_config_store()
                         .write()
-                        .unwrap()
+                        .expect("Lock should not be poisoned")
                         .remove_config(config_delete.subscription_id);
                     tracing::debug!(
                         %config_delete.subscription_id,
@@ -332,7 +332,7 @@ pub fn run_config_provider(
         config.redis_enable_cluster,
         config.redis_timeouts_ms,
     )
-    .expect("Failed to create Redis config provider");
+    .expect("Config provider should be initializable");
 
     let region = config.region.clone();
     tokio::spawn(async move {

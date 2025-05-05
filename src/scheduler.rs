@@ -83,17 +83,23 @@ async fn scheduler_loop(
             // There's a race where a checker is running for a given progress_key, and another is starting.
             // Since we add `tick_frequency` to the date here, the date can end up in the future, which causes
             // a panic when we subtract it from `Utc::now()`. We avoid this by clamping to Utc::now().
-            next_check.min(Utc::now().duration_trunc(TimeDelta::seconds(1)).unwrap())
+            next_check.min(
+                Utc::now()
+                    .duration_trunc(TimeDelta::seconds(1))
+                    .expect("Utc::now should be sane"),
+            )
         }
         // We truncate the initial date to the nearest second so that we're aligned to the second
         // boundary here
-        None => Utc::now().duration_trunc(TimeDelta::seconds(1)).unwrap(),
+        None => Utc::now()
+            .duration_trunc(TimeDelta::seconds(1))
+            .expect("Utc::now should be sane"),
     };
     tracing::info!(%start, "scheduler.starting_at");
 
     let start_at = Instant::now()
         .checked_sub((Utc::now() - start).to_std().unwrap())
-        .unwrap();
+        .expect("Instant should be representable");
     let mut interval = interval(tick_frequency);
     interval.reset_at(start_at);
 
@@ -103,7 +109,7 @@ async fn scheduler_loop(
         let tick_start = Instant::now();
         let configs = config_store
             .read()
-            .expect("Lock poisoned")
+            .expect("Lock should not be poisoned")
             .get_configs(tick);
         let mut results = vec![];
         let mut bucket_size: usize = 0;

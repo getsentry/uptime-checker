@@ -169,7 +169,13 @@ fn hyper_util_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, Stri
 impl ReqwestChecker {
     fn new_internal(options: Options) -> Self {
         let mut default_headers = HeaderMap::new();
-        default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
+        default_headers.insert(
+            "User-Agent",
+            UPTIME_USER_AGENT
+                .to_string()
+                .parse()
+                .expect("Valid by construction"),
+        );
 
         let mut builder = ClientBuilder::new()
             .hickory_dns(true)
