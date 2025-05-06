@@ -54,7 +54,7 @@ async fn do_request(
     let timeout = check_config
         .timeout
         .to_std()
-        .expect("Timeout duration could not be converted to std::time::Duration");
+        .expect("Timeout duration should be representable as a duration");
 
     let url = check_config.url.as_str();
 
