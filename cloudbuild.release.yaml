@@ -12,20 +12,23 @@ steps:
       - '-c'
       - |
         set -euxo pipefail
+        # Extract version from tag 
+        VERSION=${TAG_NAME}
+        
+        # Build and push with version tags
         docker buildx build \
             --push \
             --platform linux/amd64,linux/arm64 \
-            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA \
-            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$SHORT_SHA \
-            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:nightly \
+            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$VERSION \
+            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest \
             --label org.opencontainers.image.revision=$COMMIT_SHA \
-            --label org.opencontainers.image.version=$COMMIT_SHA \
+            --label org.opencontainers.image.version=$VERSION \
             --label org.opencontainers.image.title=uptime-checker \
             --label org.opencontainers.vendor="Sentry" \
             --label org.opencontainers.image.title="Sentry Uptime Checker Service" \
             --label org.opencontainers.image.source=$REPO_FULL_NAME \
             --label org.opencontainers.image.url=$REPO_FULL_NAME \
-            --cache-from $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest \
+            --cache-from $LOCATION-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA \
             --sbom true \
             --provenance="mode=max" \
             --build-arg UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA \
