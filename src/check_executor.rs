@@ -315,13 +315,13 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
             "is_retry" => retry_label,
             "will_retry" => will_retry_label,
         )
-        .record(duration.to_std().unwrap().as_secs_f64());
+        .record(duration.to_std().unwrap_or_default().as_secs_f64());
     }
 
     // Record time between scheduled and actual check
     let delay = (*actual_check_time - *scheduled_check_time)
         .to_std()
-        .unwrap()
+        .unwrap_or_default()
         .as_secs_f64();
 
     metrics::histogram!(
