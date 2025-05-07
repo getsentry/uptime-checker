@@ -4,7 +4,7 @@ pub mod cli;
 pub mod config;
 
 use clap::Parser;
-use tokio::signal::ctrl_c;
+use tokio::{select, signal::ctrl_c};
 
 use crate::{
     logging::{self, LoggingConfig},
@@ -32,17 +32,26 @@ pub fn execute() -> io::Result<()> {
             .build()
             .expect("Tokio runtime should be able to start up")
             .block_on(async {
-                let shutdown = Manager::start(config);
+                let mut shutdown = Manager::start(config);
                 tracing::info!("system.manager_started");
 
-                ctrl_c()
-                    .await
-                    .expect("Signal handlers should be installable");
-
-                tracing::info!("system.got_sigint");
-                shutdown().await;
+                let sigint = ctrl_c();
+                select! {
+                    _ = sigint => {
+                        tracing::info!("system.got_sigint");
+                    }
+                    result = shutdown.recv_task_finished() => {
+                        match result {
+                            None => panic!("tasks_finished channel unexpectedly closed"),
+                            Some(Err(err)) => {
+                                panic!("Error in partition: {:?}", err);
+                            },
+                            _ => panic!("Unexpected end of task"),
+                        }
+                    }
+                }
+                shutdown.stop().await;
                 tracing::info!("system.shutdown");
-
                 Ok(())
             }),
     }

@@ -1,7 +1,6 @@
-use futures::{Future, StreamExt};
+use futures::StreamExt;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::Vacant;
-use std::pin::Pin;
 use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
@@ -42,7 +41,12 @@ pub fn build_progress_key(partition: u16) -> String {
 }
 
 impl PartitionedService {
-    pub fn start(config: Arc<Config>, executor_sender: Arc<CheckSender>, partition: u16) -> Self {
+    pub fn start(
+        config: Arc<Config>,
+        executor_sender: Arc<CheckSender>,
+        partition: u16,
+        tasks_finished_tx: mpsc::UnboundedSender<Result<(), anyhow::Error>>,
+    ) -> Self {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let waiter_config_store = config_store.clone();
@@ -69,6 +73,7 @@ impl PartitionedService {
             config.region.clone(),
             config.redis_enable_cluster,
             config.redis_timeouts_ms,
+            tasks_finished_tx,
         );
 
         Self {
@@ -103,7 +108,35 @@ pub struct Manager {
     services: RwLock<HashMap<u16, Arc<PartitionedService>>>,
     executor_sender: Arc<CheckSender>,
     shutdown_sender: UnboundedSender<PartitionedService>,
+    tasks_finished_tx: tokio::sync::mpsc::UnboundedSender<Result<(), anyhow::Error>>,
+}
+
+pub struct ManagerShutdown {
+    tasks_finished_rx: mpsc::UnboundedReceiver<Result<(), anyhow::Error>>,
     shutdown_signal: CancellationToken,
+    consumer_join_handle: JoinHandle<()>,
+    results_worker: JoinHandle<()>,
+    services_join_handle: JoinHandle<()>,
+    executor_join_handle: JoinHandle<()>,
+}
+
+impl ManagerShutdown {
+    pub async fn stop(self) {
+        self.shutdown_signal.cancel();
+        // Unwrapping here because we're just shutting down; it's okay to fail badly
+        // at this point.
+        self.consumer_join_handle.await.unwrap();
+
+        self.results_worker.await.unwrap();
+
+        self.services_join_handle.await.unwrap();
+
+        self.executor_join_handle.await.unwrap();
+    }
+
+    pub async fn recv_task_finished(&mut self) -> Option<anyhow::Result<()>> {
+        self.tasks_finished_rx.recv().await
+    }
 }
 
 impl Manager {
@@ -113,7 +146,7 @@ impl Manager {
     ///
     /// The returned shutdown function may be called to stop the consumer and thus shutdown all
     /// PartitionedService's, stopping check execution.
-    pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
+    pub fn start(config: Arc<Config>) -> ManagerShutdown {
         let checker: Arc<HttpChecker> = Arc::new(match config.checker_mode {
             CheckerMode::Reqwest => ReqwestChecker::new(
                 !config.allow_internal_ips,
@@ -183,24 +216,23 @@ impl Manager {
         };
 
         let (shutdown_sender, shutdown_service_rx) = mpsc::unbounded_channel();
+        let (tasks_finished_tx, tasks_finished_rx) = mpsc::unbounded_channel();
 
         let manager = Arc::new(Self {
             config,
             services: RwLock::new(HashMap::new()),
             executor_sender,
             shutdown_sender,
-            shutdown_signal: cancel_token,
+            tasks_finished_tx,
         });
 
         let consumer_join_handle = match &manager.config.config_provider_mode {
-            ConfigProviderMode::Redis => run_config_provider(
-                &manager.config,
-                manager.clone(),
-                manager.shutdown_signal.clone(),
-            ),
+            ConfigProviderMode::Redis => {
+                run_config_provider(&manager.config, manager.clone(), cancel_token.clone())
+            }
         };
 
-        let shutdown_signal = manager.shutdown_signal.clone();
+        let shutdown_signal = cancel_token.clone();
 
         // process shutdown services as they are shutdown. All services must be shutdown before
         // the manager is completely stopped
@@ -214,19 +246,13 @@ impl Manager {
                 .await
         });
 
-        move || {
-            Box::pin(async move {
-                shutdown_signal.cancel();
-                // Unwrapping here because we're just shutting down; it's okay to fail badly
-                // at this point.
-                consumer_join_handle.await.unwrap();
-
-                results_worker.await.unwrap();
-
-                services_join_handle.await.unwrap();
-
-                executor_join_handle.await.unwrap();
-            })
+        ManagerShutdown {
+            tasks_finished_rx,
+            shutdown_signal,
+            consumer_join_handle,
+            results_worker,
+            services_join_handle,
+            executor_join_handle,
         }
     }
 
@@ -279,8 +305,12 @@ impl Manager {
             return;
         };
 
-        let service =
-            PartitionedService::start(self.config.clone(), self.executor_sender.clone(), partition);
+        let service = PartitionedService::start(
+            self.config.clone(),
+            self.executor_sender.clone(),
+            partition,
+            self.tasks_finished_tx.clone(),
+        );
         entry.insert(Arc::new(service));
     }
 
@@ -307,20 +337,20 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
     use tokio::sync::mpsc::{self};
-    use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
 
     impl Manager {
         pub fn start_without_consumer(config: Arc<Config>) -> Arc<Self> {
             let (executor_sender, _) = CheckSender::new();
             let (shutdown_sender, mut shutdown_service_rx) = mpsc::unbounded_channel();
+            let (partition_finished_tx, _) = mpsc::unbounded_channel();
 
             let manager = Arc::new(Self {
                 config,
                 services: RwLock::new(HashMap::new()),
                 executor_sender: Arc::new(executor_sender),
                 shutdown_sender,
-                shutdown_signal: CancellationToken::new(),
+                tasks_finished_tx: partition_finished_tx,
             });
 
             // For mocking purposes just recieve shutdowns, no need to do anything with them
@@ -335,8 +365,14 @@ mod tests {
     #[tokio::test]
     async fn test_partitioned_service_get_config_store() {
         let (executor_sender, _) = CheckSender::new();
-        let service =
-            PartitionedService::start(Arc::new(Config::default()), Arc::new(executor_sender), 0);
+        let (partition_finished_tx, _) = mpsc::unbounded_channel();
+
+        let service = PartitionedService::start(
+            Arc::new(Config::default()),
+            Arc::new(executor_sender),
+            0,
+            partition_finished_tx,
+        );
         service.get_config_store();
         service.stop().await;
     }
@@ -344,19 +380,31 @@ mod tests {
     #[tokio::test]
     async fn test_start_stop() {
         let (executor_sender, _) = CheckSender::new();
-        let service =
-            PartitionedService::start(Arc::new(Config::default()), Arc::new(executor_sender), 0);
+        let (partition_finished_tx, _) = mpsc::unbounded_channel();
+
+        let service = PartitionedService::start(
+            Arc::new(Config::default()),
+            Arc::new(executor_sender),
+            0,
+            partition_finished_tx,
+        );
         service.stop().await;
     }
 
     #[tokio::test]
     async fn test_start_stop_redis() {
         let (executor_sender, _) = CheckSender::new();
+        let (partition_finished_tx, _) = mpsc::unbounded_channel();
         let config = Config {
             config_provider_mode: ConfigProviderMode::Redis,
             ..Default::default()
         };
-        let service = PartitionedService::start(Arc::new(config), Arc::new(executor_sender), 0);
+        let service = PartitionedService::start(
+            Arc::new(config),
+            Arc::new(executor_sender),
+            0,
+            partition_finished_tx,
+        );
         service.stop().await;
     }
 
