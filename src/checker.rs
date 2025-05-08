@@ -11,6 +11,7 @@ use sentry::protocol::SpanId;
 use uuid::Uuid;
 
 use crate::{
+    check_executor::ScheduledCheck,
     config_store::Tick,
     types::{check_config::CheckConfig, result::CheckResult},
 };
@@ -48,10 +49,8 @@ pub trait Checker: Send + Sync {
     /// Up is defined as returning a 2xx within a specific timeframe.
     fn check_url(
         &self,
-        config: &CheckConfig,
-        tick: &Tick,
-        region: &str,
-        retry_num: u16,
+        check: &ScheduledCheck,
+        region: String,
     ) -> impl Future<Output = CheckResult> + Send;
 }
 
@@ -62,16 +61,10 @@ pub enum HttpChecker {
 }
 
 impl Checker for HttpChecker {
-    async fn check_url(
-        &self,
-        config: &CheckConfig,
-        tick: &Tick,
-        region: &str,
-        retry_num: u16,
-    ) -> CheckResult {
+    async fn check_url(&self, check: &ScheduledCheck, region: String) -> CheckResult {
         match self {
-            Self::IsahcChecker(c) => c.check_url(config, tick, region, retry_num).await,
-            Self::ReqwestChecker(c) => c.check_url(config, tick, region, retry_num).await,
+            Self::IsahcChecker(c) => c.check_url(check, region).await,
+            Self::ReqwestChecker(c) => c.check_url(check, region).await,
         }
     }
 }
