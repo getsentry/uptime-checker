@@ -52,7 +52,13 @@ impl DummyChecker {
 }
 
 impl Checker for DummyChecker {
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
+    async fn check_url(
+        &self,
+        config: &CheckConfig,
+        tick: &Tick,
+        region: &str,
+        _retry_num: u16,
+    ) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
         let trace_id = Uuid::new_v4();

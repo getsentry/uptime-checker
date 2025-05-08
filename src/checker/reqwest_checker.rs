@@ -226,11 +226,17 @@ impl Checker for ReqwestChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     #[tracing::instrument]
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
+    async fn check_url(
+        &self,
+        config: &CheckConfig,
+        tick: &Tick,
+        region: &str,
+        retry_num: u16,
+    ) -> CheckResult {
         let scheduled_check_time = tick.time();
         let actual_check_time = Utc::now();
         let span_id = SpanId::default();
-        let trace_id = make_trace_id(config, tick);
+        let trace_id = make_trace_id(config, tick, retry_num);
         let trace_header = make_trace_header(config, &trace_id, span_id);
 
         let start = Instant::now();
@@ -381,7 +387,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let result = checker.check_url(&config, &tick, "us-west", 0).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -426,7 +432,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let result = checker.check_url(&config, &tick, "us-west", 0).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -466,7 +472,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let result = checker.check_url(&config, &tick, "us-west", 0).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
@@ -507,7 +513,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let result = checker.check_url(&config, &tick, "us-west", 0).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(
@@ -542,7 +548,9 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&localhost_config, &tick, "us-west").await;
+        let result = checker
+            .check_url(&localhost_config, &tick, "us-west", 0)
+            .await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -574,7 +582,7 @@ mod tests {
         };
         let tick = make_tick();
         let result = checker
-            .check_url(&restricted_ip_config, &tick, "us-west")
+            .check_url(&restricted_ip_config, &tick, "us-west", 0)
             .await;
 
         assert_eq!(result.status, CheckStatus::Failure);
@@ -596,7 +604,7 @@ mod tests {
         };
         let tick = make_tick();
         let result = checker
-            .check_url(&restricted_ipv6_config, &tick, "us-west")
+            .check_url(&restricted_ipv6_config, &tick, "us-west", 0)
             .await;
         assert_eq!(
             result.status_reason.map(|r| r.description),
@@ -629,8 +637,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
-        let result_2 = checker.check_url(&config, &tick, "us-west").await;
+        let result = checker.check_url(&config, &tick, "us-west", 0).await;
+        let result_2 = checker.check_url(&config, &tick, "us-west", 0).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(result_2.status, CheckStatus::Success);
@@ -799,7 +807,7 @@ mod tests {
             url: "http://localhost:12345/".to_string(),
             ..Default::default()
         };
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let result = checker.check_url(&config, &tick, "us-west", 0).await;
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
@@ -838,7 +846,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let result = checker.check_url(&config, &tick, "us-west", 0).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -924,7 +932,7 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let result = checker.check_url(&config, &tick, "us-west", 0).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(

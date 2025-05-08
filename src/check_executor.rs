@@ -228,7 +228,9 @@ async fn executor_loop(
                     let check_result = if late_by > interval {
                         CheckResult::missed_from(config, tick, &job_region)
                     } else {
-                        job_checker.check_url(config, tick, &job_region).await
+                        job_checker
+                            .check_url(config, tick, &job_region, scheduled_check.retry_count)
+                            .await
                     };
 
                     let will_retry = check_result.status == CheckStatus::Failure
