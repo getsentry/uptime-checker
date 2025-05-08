@@ -629,7 +629,8 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = checker.check_url(&config, &tick, "us-west").await;
+            let check = ScheduledCheck::new_for_test(tick, config);
+            let result = checker.check_url(&check, "us-west".into()).await;
 
             assert_eq!(
                 result.status,
@@ -752,7 +753,8 @@ mod tests {
             url: format!("http://localhost:{}", addr.port()),
             ..Default::default()
         };
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west".into()).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
