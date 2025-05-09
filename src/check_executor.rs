@@ -30,6 +30,17 @@ pub struct ScheduledCheck {
 }
 
 impl ScheduledCheck {
+    #[cfg(test)]
+    pub fn new_for_test(tick: Tick, config: CheckConfig) -> Self {
+        let (resolve_tx, _) = tokio::sync::oneshot::channel();
+        ScheduledCheck {
+            tick,
+            config: config.into(),
+            resolve_tx,
+            retry_count: 0,
+        }
+    }
+
     /// Get the scheduled CheckConfig.
     pub fn get_config(&self) -> &Arc<CheckConfig> {
         &self.config
@@ -38,6 +49,10 @@ impl ScheduledCheck {
     /// Get the tick this check was scheduled at.
     pub fn get_tick(&self) -> &Tick {
         &self.tick
+    }
+
+    pub fn get_retry(&self) -> u16 {
+        self.retry_count
     }
 
     /// Report the completion of the scheduled check.
@@ -101,19 +116,19 @@ impl CheckSender {
 
 impl CheckResult {
     /// Produce a missed check result from a scheduled check.
-    pub fn missed_from(config: &CheckConfig, tick: &Tick, region: &str) -> Self {
+    pub fn missed_from(check: &ScheduledCheck, region: String) -> Self {
         Self {
             guid: Uuid::new_v4(),
-            subscription_id: config.subscription_id,
+            subscription_id: check.get_config().subscription_id,
             status: CheckStatus::MissedWindow,
             status_reason: None,
             trace_id: Default::default(),
             span_id: Default::default(),
-            scheduled_check_time: tick.time(),
+            scheduled_check_time: check.get_tick().time(),
             actual_check_time: Utc::now(),
             duration: None,
             request_info: None,
-            region: region.to_string(),
+            region,
         }
     }
 }
@@ -226,9 +241,9 @@ async fn executor_loop(
                     let interval = TimeDelta::seconds(config.interval as i64);
 
                     let check_result = if late_by > interval {
-                        CheckResult::missed_from(config, tick, &job_region)
+                        CheckResult::missed_from(&scheduled_check, job_region)
                     } else {
-                        job_checker.check_url(config, tick, &job_region).await
+                        job_checker.check_url(&scheduled_check, job_region).await
                     };
 
                     let will_retry = check_result.status == CheckStatus::Failure

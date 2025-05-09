@@ -11,6 +11,7 @@ use sentry::protocol::SpanId;
 use uuid::Uuid;
 
 use crate::{
+    check_executor::ScheduledCheck,
     config_store::Tick,
     types::{check_config::CheckConfig, result::CheckResult},
 };
@@ -20,8 +21,8 @@ const CHECKER_RESULT_NAMESPACE: Uuid = Uuid::from_u128(0x67f0b2d5_e476_4f00_9b99
 /// Generate the Trace ID (uuid) for a check at a specific tick. This ensures the ID is consistent
 /// for the same tick, allowing us to deduplicate check results that are produced at the same
 /// scheduled time.
-pub fn make_trace_id(config: &CheckConfig, tick: &Tick) -> Uuid {
-    let unique_key = format!("{}-{}", config.subscription_id, tick.time());
+pub fn make_trace_id(config: &CheckConfig, tick: &Tick, retry_num: u16) -> Uuid {
+    let unique_key = format!("{}-{}-{}", config.subscription_id, tick.time(), retry_num);
     Uuid::new_v5(&CHECKER_RESULT_NAMESPACE, unique_key.as_bytes())
 }
 
@@ -48,9 +49,8 @@ pub trait Checker: Send + Sync {
     /// Up is defined as returning a 2xx within a specific timeframe.
     fn check_url(
         &self,
-        config: &CheckConfig,
-        tick: &Tick,
-        region: &str,
+        check: &ScheduledCheck,
+        region: String,
     ) -> impl Future<Output = CheckResult> + Send;
 }
 
@@ -61,10 +61,10 @@ pub enum HttpChecker {
 }
 
 impl Checker for HttpChecker {
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
+    async fn check_url(&self, check: &ScheduledCheck, region: String) -> CheckResult {
         match self {
-            Self::IsahcChecker(c) => c.check_url(config, tick, region).await,
-            Self::ReqwestChecker(c) => c.check_url(config, tick, region).await,
+            Self::IsahcChecker(c) => c.check_url(check, region).await,
+            Self::ReqwestChecker(c) => c.check_url(check, region).await,
         }
     }
 }
