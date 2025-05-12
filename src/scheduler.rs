@@ -65,9 +65,16 @@ async fn scheduler_loop(
     redis_enable_cluster: bool,
     redis_timeouts_ms: u64,
 ) -> anyhow::Result<()> {
-    let client = build_redis_client(&redis_host, redis_enable_cluster)?;
-    let mut connection = client.get_async_connection(redis_timeouts_ms).await?;
-    let last_progress: Option<String> = connection.get(&progress_key).await?;
+    let client = build_redis_client(&redis_host, redis_enable_cluster)
+        .context("failure building redis client")?;
+    let mut connection = client
+        .get_async_connection(redis_timeouts_ms)
+        .await
+        .context("failure getting async redis connection")?;
+    let last_progress: Option<String> = connection
+        .get(&progress_key)
+        .await
+        .context("failure getting progress key")?;
     let tick_frequency = Duration::from_secs(1);
     tracing::debug!(
         progress_key,
