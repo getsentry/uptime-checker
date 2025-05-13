@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Result;
 use chrono::{TimeDelta, Utc};
 use futures::StreamExt;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -56,10 +57,10 @@ impl ScheduledCheck {
     }
 
     /// Report the completion of the scheduled check.
-    pub fn record_result(self, result: CheckResult) {
+    pub fn record_result(self, result: CheckResult) -> Result<()> {
         self.resolve_tx
             .send(result)
-            .expect("Failed to resolve completed check");
+            .map_err(|_| anyhow::anyhow!("Scheduled check send error"))
     }
 }
 
@@ -86,7 +87,11 @@ impl CheckSender {
 
     /// Queues a check for execution, returning a oneshot receiver that will be fired once the check
     /// has resolved to a CheckResult.
-    pub fn queue_check(&self, tick: Tick, config: Arc<CheckConfig>) -> Receiver<CheckResult> {
+    pub fn queue_check(
+        &self,
+        tick: Tick,
+        config: Arc<CheckConfig>,
+    ) -> anyhow::Result<Receiver<CheckResult>> {
         let (resolve_tx, resolve_rx) = oneshot::channel();
 
         let scheduled_check = ScheduledCheck {
@@ -97,20 +102,19 @@ impl CheckSender {
         };
 
         self.queue_size.fetch_add(1, Ordering::SeqCst);
-        self.sender
-            .send(scheduled_check)
-            .expect("Failed to queue ScheduledCheck");
 
-        resolve_rx
+        // The SendError type from `send` doesn't have any useful context (except the entire
+        // check object!) so just map to empty.
+        self.sender.send(scheduled_check)?;
+        Ok(resolve_rx)
     }
 
     /// Requeues the check to be executed again, increasing the number of retries by 1
-    fn queue_check_for_retry(&self, mut check: ScheduledCheck) {
+    fn queue_check_for_retry(&self, mut check: ScheduledCheck) -> Result<()> {
         check.retry_count += 1;
         self.queue_size.fetch_add(1, Ordering::SeqCst);
-        self.sender
-            .send(check)
-            .expect("Failed to queue ScheduledCheck");
+        self.sender.send(check)?;
+        Ok(())
     }
 }
 
@@ -258,7 +262,11 @@ async fn executor_loop(
                     // re-queue for execution again
                     if will_retry {
                         tracing::debug!(result = ?check_result, "executor.check_will_retry");
-                        job_check_sender.queue_check_for_retry(scheduled_check);
+
+                        // Expect is necessary here--we need to break out of the stream processing loop.
+                        job_check_sender
+                            .queue_check_for_retry(scheduled_check)
+                            .expect("Executor loop channel should exist");
                         job_num_running.fetch_sub(1, Ordering::SeqCst);
                         return;
                     }
@@ -269,14 +277,20 @@ async fn executor_loop(
 
                     tracing::debug!(result = ?check_result, "executor.check_complete");
 
-                    scheduled_check.record_result(check_result);
+                    // Expect is necessary here--we need to break out of the stream processing loop.
+                    scheduled_check
+                        .record_result(check_result)
+                        .expect("Check recording channel should exist");
                     job_num_running.fetch_sub(1, Ordering::SeqCst);
                 };
 
                 if conf.record_task_metrics {
-                    let _ = job_metrics_monitor.instrument(check_task).await;
+                    job_metrics_monitor.instrument(check_task).await;
                 } else {
-                    let _ = tokio::spawn(check_task).await;
+                    // Expect is necessary here--we need to break out of the stream processing loop.
+                    tokio::spawn(check_task)
+                        .await
+                        .expect("The check task should not fail");
                 }
             }
         })
@@ -453,7 +467,7 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = sender.queue_check(tick, config.clone());
+        let resolve_rx = sender.queue_check(tick, config.clone()).unwrap();
         tokio::pin!(resolve_rx);
 
         // Will not be resolved yet
@@ -498,7 +512,7 @@ mod tests {
                     subscription_id: Uuid::from_u128(i),
                     ..Default::default()
                 });
-                sender.queue_check(tick, config)
+                sender.queue_check(tick, config).unwrap()
             })
             .collect();
 
@@ -581,7 +595,11 @@ mod tests {
             ..Default::default()
         });
 
-        let result = sender.queue_check(tick, config.clone()).await.unwrap();
+        let result = sender
+            .queue_check(tick, config.clone())
+            .unwrap()
+            .await
+            .unwrap();
 
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::MissedWindow);
@@ -622,10 +640,9 @@ mod tests {
         });
 
         let resolve_rx = sender.queue_check(tick, config.clone());
-        tokio::pin!(resolve_rx);
 
         // Resolves as success since we will retry
-        let result = resolve_rx.await.unwrap();
+        let result = resolve_rx.unwrap().await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Success);
     }
@@ -668,10 +685,9 @@ mod tests {
         });
 
         let resolve_rx = sender.queue_check(tick, config.clone());
-        tokio::pin!(resolve_rx);
 
         // Resolves as failure after the two retries
-        let result = resolve_rx.await.unwrap();
+        let result = resolve_rx.unwrap().await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Failure);
     }

@@ -1,19 +1,19 @@
+use anyhow::Result;
 use redis::AsyncCommands;
 use std::sync::Arc;
 use std::{collections::HashSet, time::Instant};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::{app::config::Config, manager::Manager, types::check_config::CheckConfig};
+use crate::{
+    app::config::Config, manager::Manager, redis::RedisClient, types::check_config::CheckConfig,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::time::Duration;
 use tokio::time::interval;
 use uuid::Uuid;
-
-#[allow(unused_imports)]
-use crate::redis::{RedisAsyncConnection, RedisClient};
 
 #[derive(Debug)]
 pub struct RedisPartition {
@@ -82,8 +82,8 @@ impl RedisConfigProvider {
         check_interval: Duration,
         enable_cluster: bool,
         redis_timeouts_ms: u64,
-    ) -> Result<Self, redis::RedisError> {
-        let client = crate::redis::build_redis_client(redis_url, enable_cluster);
+    ) -> Result<Self> {
+        let client = crate::redis::build_redis_client(redis_url, enable_cluster)?;
         Ok(Self {
             redis: client,
             partitions,
@@ -368,6 +368,8 @@ pub fn determine_owned_partitions(config: &Config) -> HashSet<u16> {
 
 #[cfg(test)]
 mod tests {
+    use crate::redis::RedisAsyncConnection;
+
     use super::*;
     use redis::AsyncCommands;
     use redis_test_macro::redis_test;

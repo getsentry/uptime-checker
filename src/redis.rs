@@ -1,3 +1,4 @@
+use anyhow::Result;
 use redis::aio::ConnectionLike;
 use redis::cluster::{ClusterClient, ClusterConfig};
 use redis::{Cmd, Pipeline, RedisError, RedisFuture, Value};
@@ -46,16 +47,14 @@ pub enum RedisClient {
     Single(redis::Client),
 }
 
-pub fn build_redis_client(redis_url: &str, enable_cluster: bool) -> RedisClient {
-    if enable_cluster {
-        RedisClient::Cluster(
-            ClusterClient::builder(vec![redis_url.to_string()])
-                .build()
-                .expect("Failed to build cluster client"),
-        )
+pub fn build_redis_client(redis_url: &str, enable_cluster: bool) -> Result<RedisClient> {
+    let client = if enable_cluster {
+        RedisClient::Cluster(ClusterClient::builder(vec![redis_url.to_string()]).build()?)
     } else {
-        RedisClient::Single(redis::Client::open(redis_url).expect("Failed to open redis client"))
-    }
+        RedisClient::Single(redis::Client::open(redis_url)?)
+    };
+
+    Ok(client)
 }
 
 impl RedisClient {

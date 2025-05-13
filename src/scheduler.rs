@@ -1,3 +1,4 @@
+use anyhow::Context;
 use chrono::{DurationRound, TimeDelta, TimeZone, Utc};
 use std::sync::Arc;
 
@@ -27,11 +28,13 @@ pub fn run_scheduler(
     region: String,
     redis_enable_cluster: bool,
     redis_timeouts_ms: u64,
+    tasks_finished_tx: mpsc::UnboundedSender<Result<(), anyhow::Error>>,
 ) -> JoinHandle<()> {
     tracing::info!(partition, "scheduler.starting");
     tokio::spawn(async move {
         let _ = config_loaded_receiver.await;
-        scheduler_loop(
+
+        let result = scheduler_loop(
             partition,
             config_store,
             executor_sender,
@@ -42,7 +45,11 @@ pub fn run_scheduler(
             redis_enable_cluster,
             redis_timeouts_ms,
         )
-        .await
+        .await;
+
+        // No need to check for an error--doesn't matter if this
+        // channel is open or not.
+        let _ = tasks_finished_tx.send(result);
     })
 }
 
@@ -57,16 +64,17 @@ async fn scheduler_loop(
     region: String,
     redis_enable_cluster: bool,
     redis_timeouts_ms: u64,
-) {
-    let client = build_redis_client(&redis_host, redis_enable_cluster);
+) -> anyhow::Result<()> {
+    let client = build_redis_client(&redis_host, redis_enable_cluster)
+        .context("failure building redis client")?;
     let mut connection = client
         .get_async_connection(redis_timeouts_ms)
         .await
-        .expect("Unable to connect to redis");
+        .context("failure getting async redis connection")?;
     let last_progress: Option<String> = connection
         .get(&progress_key)
         .await
-        .expect("Unable to get last tick key");
+        .context("failure getting progress key")?;
     let tick_frequency = Duration::from_secs(1);
     tracing::debug!(
         progress_key,
@@ -83,33 +91,27 @@ async fn scheduler_loop(
             // There's a race where a checker is running for a given progress_key, and another is starting.
             // Since we add `tick_frequency` to the date here, the date can end up in the future, which causes
             // a panic when we subtract it from `Utc::now()`. We avoid this by clamping to Utc::now().
-            next_check.min(
-                Utc::now()
-                    .duration_trunc(TimeDelta::seconds(1))
-                    .expect("Utc::now should be sane"),
-            )
+            next_check.min(Utc::now().duration_trunc(TimeDelta::seconds(1))?)
         }
         // We truncate the initial date to the nearest second so that we're aligned to the second
         // boundary here
-        None => Utc::now()
-            .duration_trunc(TimeDelta::seconds(1))
-            .expect("Utc::now should be sane"),
+        None => Utc::now().duration_trunc(TimeDelta::seconds(1))?,
     };
     tracing::info!(%start, "scheduler.starting_at");
 
     let start_at = Instant::now()
-        .checked_sub((Utc::now() - start).to_std().unwrap_or_default())
-        .expect("Instant should be representable");
+        .checked_sub((Utc::now() - start).to_std()?)
+        .unwrap_or(Instant::now());
     let mut interval = interval(tick_frequency);
     interval.reset_at(start_at);
 
     let (tick_complete_tx, mut tick_complete_rx) = mpsc::unbounded_channel();
 
-    let schedule_checks = |tick| {
+    let schedule_checks = |tick| -> anyhow::Result<()> {
         let tick_start = Instant::now();
         let configs = config_store
             .read()
-            .expect("Lock should not be poisoned")
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?
             .get_configs(tick);
         let mut results = vec![];
         let mut bucket_size: usize = 0;
@@ -123,7 +125,10 @@ async fn scheduler_loop(
             )
             .increment(1);
             if config.should_run(tick, &region) {
-                results.push(executor_sender.queue_check(tick, config));
+                let check = executor_sender
+                    .queue_check(tick, config)
+                    .context("executor_sender.queue_check failed")?;
+                results.push(check);
                 bucket_size += 1;
             } else {
                 tracing::debug!(%config.subscription_id, %tick, "scheduler.skipped_config");
@@ -151,7 +156,12 @@ async fn scheduler_loop(
             let checks_scheduled = results.len();
             while let Some(result) = results.pop() {
                 // TODO(epurkhiser): Do we want to do something with the CheckResult here?
-                let _check_result = result.await.expect("Failed to receive CheckResult");
+                if let Err(err) = result.await {
+                    tracing::error!(error = ?err, "scheduler.tick_complete_join_await_error");
+                    return Err(anyhow::anyhow!(
+                        "Error receiving check result from executor"
+                    ));
+                }
             }
 
             let execution_duration = tick_start.elapsed();
@@ -162,12 +172,13 @@ async fn scheduler_loop(
                 checks_scheduled,
                 "scheduler.tick_execution_complete"
             );
-            tick
+            Ok(tick)
         });
 
         tick_complete_tx
             .send(tick_complete_join_handle)
-            .expect("Failed to queue join handle for tick completion");
+            .context("tick_complete_tx.send failure")?;
+        Ok(())
     };
 
     let in_order_tick_processor_join_handle = tokio::spawn(async move {
@@ -179,22 +190,32 @@ async fn scheduler_loop(
             .await
             > 0
         {
-            // XXX: This task guarantees that we can process ticks IN ORDER upon tick execution.
-            // This waits for the tick to complete before waiting on the next tick to complete.
+            // The handles arriving in the receiver are received in-order; look for the very
+            // latest tick that completed.
             tracing::debug!("scheduler.tick_awaiting_join_handle");
             let num_read = tick_handles.len();
 
-            // Only read the very last update's tick, since that will be the latest one we've successfully
-            // processed.
-            let tick = tick_handles.pop();
+            let Some(tick) = tick_handles.pop() else {
+                unreachable!("We have at least one element in the receive buffer");
+            };
+
+            let tick = match tick.await {
+                Ok(Ok(tick)) => tick,
+                Ok(Err(err)) => {
+                    tracing::error!(progress_key, error = ?err, "scheduler.tick_processor_handle_await_error");
+                    return Err(anyhow::anyhow!("other error"));
+                }
+                Err(err) => {
+                    tracing::error!(progress_key, error = ?err, "scheduler.tick_processor_handle_await_error");
+                    return Err(anyhow::anyhow!("join handle error"));
+                }
+            };
             tick_handles.clear();
 
-            let tick = tick
-                .unwrap()
-                .await
-                .expect("Failed to receive completed tick");
-
-            let progress = tick.time().timestamp_nanos_opt().unwrap();
+            let Some(progress) = tick.time().timestamp_nanos_opt() else {
+                tracing::error!(progress_key, tick = %tick, "scheduler.tick_processor_bad_timestamp");
+                continue;
+            };
             tracing::info!(tick = %tick, progress, num_read, "scheduler.tick_complete_join_handle");
 
             let result: Result<(), redis::RedisError> =
@@ -211,25 +232,32 @@ async fn scheduler_loop(
                     // Log and try reconnecting.
                     tracing::error!(progress_key, "scheduler.progress_saving_connection_dropped");
 
-                    connection = client
-                        .get_async_connection(redis_timeouts_ms)
-                        .await
-                        .expect("Unable to connect to redis");
+                    let new_connection = client.get_async_connection(redis_timeouts_ms).await;
+
+                    match new_connection {
+                        Ok(new_connection) => connection = new_connection,
+                        Err(err) => {
+                            tracing::error!(progress_key, error = %err, "scheduler.progress_saving_reconnect_failure");
+
+                            // Maybe it's coming back online--don't keep hammering something that isn't there.
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
                 } else {
                     tracing::error!(progress_key, error = %e, "scheduler.progress_fatal_error");
-
-                    panic!("Could not save scheduler progress: {:?}", e);
                 }
             }
             tracing::debug!(tick = %tick, "scheduler.tick_execution_complete_in_order");
         }
-        tracing::debug!("scheduler.tick_complete_join_handle_finished")
+        tracing::debug!("scheduler.tick_complete_join_handle_finished");
+
+        Ok(())
     });
 
     while !shutdown.is_cancelled() {
         let interval_tick = interval.tick().await;
         let tick = Tick::from_time(start + interval_tick.duration_since(start_at));
-        schedule_checks(tick);
+        schedule_checks(tick)?;
     }
     tracing::info!("scheduler.begin_shutdown");
 
@@ -237,6 +265,8 @@ async fn scheduler_loop(
     drop(tick_complete_tx);
     let _ = in_order_tick_processor_join_handle.await;
     tracing::info!("scheduler.shutdown");
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -251,7 +281,7 @@ mod tests {
     use socket_server_mocker::*;
     use std::ops::Add;
     use std::sync::Arc;
-    use tokio::sync::oneshot;
+    use tokio::sync::{mpsc, oneshot};
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
     use uuid::Uuid;
@@ -302,6 +332,7 @@ mod tests {
         let (executor_tx, mut executor_rx) = CheckSender::new();
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
+        let (shutdown_signal, _) = mpsc::unbounded_channel();
 
         let join_handle = run_scheduler(
             partition,
@@ -314,6 +345,7 @@ mod tests {
             config.region.clone(),
             false,
             0,
+            shutdown_signal,
         );
         let _ = boot_tx.send(BootResult::Started);
 
@@ -334,32 +366,36 @@ mod tests {
         );
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
-        scheduled_check2.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config2.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check2_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
+        scheduled_check2
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config2.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check2_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
@@ -419,6 +455,7 @@ mod tests {
         let (executor_tx, mut executor_rx) = CheckSender::new();
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
+        let (shutdown_signal, _) = mpsc::unbounded_channel();
 
         let join_handle = run_scheduler(
             partition,
@@ -431,6 +468,7 @@ mod tests {
             config.region.clone(),
             false,
             100,
+            shutdown_signal,
         );
         let _ = boot_tx.send(BootResult::Started);
 
@@ -440,19 +478,21 @@ mod tests {
         assert_eq!(scheduled_check1.get_config().clone(), config1);
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
@@ -506,6 +546,7 @@ mod tests {
         let (executor_tx, mut executor_rx) = CheckSender::new();
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
+        let (shutdown_signal, _) = mpsc::unbounded_channel();
 
         let join_handle = run_scheduler(
             partition,
@@ -518,6 +559,7 @@ mod tests {
             config.region.clone(),
             false,
             0,
+            shutdown_signal,
         );
         let _ = boot_tx.send(BootResult::Started);
 
@@ -538,32 +580,36 @@ mod tests {
         );
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
-        scheduled_check2.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config2.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check2_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
+        scheduled_check2
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config2.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check2_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
@@ -611,6 +657,7 @@ mod tests {
         let (executor_tx, mut executor_rx) = CheckSender::new();
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
+        let (shutdown_signal, _) = mpsc::unbounded_channel();
 
         let join_handle = run_scheduler(
             partition,
@@ -623,6 +670,7 @@ mod tests {
             config.region.clone(),
             false,
             0,
+            shutdown_signal,
         );
 
         let _ = boot_tx.send(BootResult::Started);
@@ -644,32 +692,36 @@ mod tests {
         );
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config2.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
-        scheduled_check2.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check2_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config2.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
+        scheduled_check2
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check2_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
@@ -714,6 +766,7 @@ mod tests {
         let (executor_tx, mut executor_rx) = CheckSender::new();
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
+        let (shutdown_signal, _) = mpsc::unbounded_channel();
 
         let join_handle = run_scheduler(
             partition,
@@ -726,6 +779,7 @@ mod tests {
             config.region.clone(),
             false,
             0,
+            shutdown_signal,
         );
 
         let _ = boot_tx.send(BootResult::Started);
@@ -736,19 +790,21 @@ mod tests {
         assert_eq!(scheduled_check1.get_config().clone(), config1);
 
         // Record results for both to complete both ticks
-        scheduled_check1.record_result(CheckResult {
-            guid: Uuid::new_v4(),
-            subscription_id: config1.subscription_id,
-            status: CheckStatus::Success,
-            status_reason: None,
-            trace_id: Default::default(),
-            span_id: Default::default(),
-            scheduled_check_time: scheduled_check1_time,
-            actual_check_time: Utc::now(),
-            duration: Some(Duration::seconds(1)),
-            request_info: None,
-            region: config.region.clone(),
-        });
+        scheduled_check1
+            .record_result(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: config1.subscription_id,
+                status: CheckStatus::Success,
+                status_reason: None,
+                trace_id: Default::default(),
+                span_id: Default::default(),
+                scheduled_check_time: scheduled_check1_time,
+                actual_check_time: Utc::now(),
+                duration: Some(Duration::seconds(1)),
+                request_info: None,
+                region: config.region.clone(),
+            })
+            .unwrap();
 
         shutdown_token.cancel();
         join_handle.await.unwrap();
