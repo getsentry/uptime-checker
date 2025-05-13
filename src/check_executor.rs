@@ -101,7 +101,7 @@ impl CheckSender {
             retry_count: 0,
         };
 
-        self.queue_size.fetch_add(1, Ordering::SeqCst);
+        self.queue_size.fetch_add(1, Ordering::Relaxed);
 
         // The SendError type from `send` doesn't have any useful context (except the entire
         // check object!) so just map to empty.
@@ -112,7 +112,7 @@ impl CheckSender {
     /// Requeues the check to be executed again, increasing the number of retries by 1
     fn queue_check_for_retry(&self, mut check: ScheduledCheck) -> Result<()> {
         check.retry_count += 1;
-        self.queue_size.fetch_add(1, Ordering::SeqCst);
+        self.queue_size.fetch_add(1, Ordering::Relaxed);
         self.sender.send(check)?;
         Ok(())
     }
@@ -227,12 +227,13 @@ async fn executor_loop(
 
             let job_metrics_monitor = metrics_monitor.clone();
 
-            num_running.fetch_add(1, Ordering::SeqCst);
-            queue_size.fetch_sub(1, Ordering::SeqCst);
+            let num_running_val = num_running.fetch_add(1, Ordering::Relaxed);
+            let queue_size_val = queue_size.fetch_sub(1, Ordering::Relaxed);
+
             metrics::gauge!("executor.queue_size", "uptime_region" => conf.region.clone())
-                .set(queue_size.load(Ordering::SeqCst) as f64);
+                .set(queue_size_val as f64);
             metrics::gauge!("executor.num_running", "uptime_region" => conf.region.clone())
-                .set(num_running.load(Ordering::SeqCst) as f64);
+                .set(num_running_val as f64);
 
             async move {
                 let check_task = async move {
@@ -267,7 +268,7 @@ async fn executor_loop(
                         job_check_sender
                             .queue_check_for_retry(scheduled_check)
                             .expect("Executor loop channel should exist");
-                        job_num_running.fetch_sub(1, Ordering::SeqCst);
+                        job_num_running.fetch_sub(1, Ordering::Relaxed);
                         return;
                     }
 
@@ -281,7 +282,7 @@ async fn executor_loop(
                     scheduled_check
                         .record_result(check_result)
                         .expect("Check recording channel should exist");
-                    job_num_running.fetch_sub(1, Ordering::SeqCst);
+                    job_num_running.fetch_sub(1, Ordering::Relaxed);
                 };
 
                 if conf.record_task_metrics {
@@ -516,8 +517,8 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 4);
-        assert_eq!(sender.num_running.load(Ordering::SeqCst), 0);
+        assert_eq!(sender.queue_size.load(Ordering::Relaxed), 4);
+        assert_eq!(sender.num_running.load(Ordering::Relaxed), 0);
 
         let resolve_rx_4 = configs.pop().unwrap();
         tokio::pin!(resolve_rx_4);
@@ -539,8 +540,8 @@ mod tests {
         // Move time forward less than one second. Two will start running
         time::sleep(Duration::from_millis(999)).await;
         // No task has completed yet, some are running, some are queued
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 2);
-        assert_eq!(sender.num_running.load(Ordering::SeqCst), 2);
+        assert_eq!(sender.queue_size.load(Ordering::Relaxed), 2);
+        assert_eq!(sender.num_running.load(Ordering::Relaxed), 2);
         assert_eq!(poll!(resolve_rx_1.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_2.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_3.as_mut()), Poll::Pending);
@@ -555,16 +556,16 @@ mod tests {
         assert_eq!(poll!(resolve_rx_3.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_4.as_mut()), Poll::Pending);
 
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 0);
-        assert_eq!(sender.num_running.load(Ordering::SeqCst), 2);
+        assert_eq!(sender.queue_size.load(Ordering::Relaxed), 0);
+        assert_eq!(sender.num_running.load(Ordering::Relaxed), 2);
 
         // Move forward another second, the last two tasks should now be complete
         time::sleep(Duration::from_millis(1001)).await;
         assert!(matches!(poll!(resolve_rx_3.as_mut()), Poll::Ready(_)));
         assert!(matches!(poll!(resolve_rx_4.as_mut()), Poll::Ready(_)));
 
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 0);
-        assert_eq!(sender.num_running.load(Ordering::SeqCst), 0);
+        assert_eq!(sender.queue_size.load(Ordering::Relaxed), 0);
+        assert_eq!(sender.num_running.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test(start_paused = true)]
