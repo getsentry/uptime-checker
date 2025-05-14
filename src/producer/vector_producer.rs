@@ -68,8 +68,7 @@ impl VectorResultsProducer {
 
             while let Some(json) = receiver.recv().await {
                 let new_count = pending_items.fetch_sub(1, Ordering::Relaxed);
-                metrics::gauge!("producer.pending_items")
-                    .set(new_count as f64);
+                metrics::gauge!("producer.pending_items").set(new_count as f64);
 
                 batch.push(json);
 
