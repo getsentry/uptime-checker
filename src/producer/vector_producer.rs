@@ -67,9 +67,9 @@ impl VectorResultsProducer {
             let mut batch = Vec::with_capacity(config.vector_batch_size);
 
             while let Some(json) = receiver.recv().await {
-                pending_items.fetch_sub(1, Ordering::SeqCst);
+                let new_count = pending_items.fetch_sub(1, Ordering::Relaxed);
                 metrics::gauge!("producer.pending_items")
-                    .set(pending_items.load(Ordering::SeqCst) as f64);
+                    .set(new_count as f64);
 
                 batch.push(json);
 
@@ -124,7 +124,7 @@ impl ResultsProducer for VectorResultsProducer {
             return Err(ExtractCodeError::VectorError);
         }
         self.pending_items
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         Ok(())
     }
@@ -164,31 +164,31 @@ async fn send_batch(
 
         match response {
             Ok(resp) if !resp.status().is_server_error() => return Ok(()),
-            Ok(resp) => {
-                tracing::warn!(
-                    status = ?resp.status(),
-                    retry = num_of_retries + 1,
-                    delay_ms = ?delay.as_millis(),
-                    batch_size = batch.len(),
-                    "request.failed_to_vector_retrying"
-                );
+            r => {
+                num_of_retries += 1;
+                match r {
+                    Ok(resp) => {
+                        tracing::warn!(
+                            status = ?resp.status(),
+                            retry = num_of_retries,
+                            delay_ms = ?delay.as_millis(),
+                            batch_size = batch.len(),
+                            "request.failed_to_vector_retrying"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = ?e,
+                            retry = num_of_retries,
+                            batch_size = batch.len(),
+                            delay_ms = ?delay.as_millis(),
+                            "request.failed_to_vector_retrying"
+                        );
+                    }
+                }
                 if !retry_vector_errors_forever {
                     return Err(ExtractCodeError::VectorError);
                 }
-                num_of_retries += 1;
-                sleep(delay).await;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = ?e,
-                    retry = num_of_retries + 1,
-                    delay_ms = ?delay.as_millis(),
-                    "request.failed_to_vector_retrying"
-                );
-                if !retry_vector_errors_forever {
-                    return Err(ExtractCodeError::VectorError);
-                }
-                num_of_retries += 1;
                 sleep(delay).await;
             }
         }
