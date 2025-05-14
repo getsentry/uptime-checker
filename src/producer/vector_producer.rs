@@ -30,7 +30,8 @@ impl VectorResultsProducer {
         retry_vector_errors_forever: bool,
         region: String,
     ) -> (Self, JoinHandle<()>) {
-        let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
+        let schema =
+            sentry_kafka_schemas::get_schema(topic_name, None).expect("Schema should exist");
         let client = Client::new();
         let pending_items = Arc::new(AtomicUsize::new(0));
 

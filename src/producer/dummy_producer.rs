@@ -8,7 +8,8 @@ pub struct DummyResultsProducer {
 
 impl DummyResultsProducer {
     pub fn new(topic_name: &str) -> Self {
-        let schema = sentry_kafka_schemas::get_schema(topic_name, None).unwrap();
+        let schema =
+            sentry_kafka_schemas::get_schema(topic_name, None).expect("Schema should exist");
         Self { schema }
     }
 }

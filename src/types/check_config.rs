@@ -24,8 +24,15 @@ pub enum CheckInterval {
 /// The largest check interval
 pub const MAX_CHECK_INTERVAL_SECS: usize = CheckInterval::SixtyMinutes as usize;
 
-/// A random hardcoded id that we use to generated v5 uuids based on subscription ids.
-pub const SUBSCRIPTION_ID_NAMESPACE: Uuid = Uuid::from_u128(31415926535897932384626433832795u128);
+/// A random hardcoded id that we use to generated v5 uuids based on subscription ids for assigning
+/// to slots.
+pub const SUBSCRIPTION_SLOT_NAMESPACE: Uuid =
+    Uuid::from_u128(134104732365955935133175004175948885464u128);
+
+/// A random hardcoded id that we use to generated v5 uuids based on subscription ids for deciding
+/// whether a subscription should run in this region.
+pub const SUBSCRIPTION_SHOULD_RUN_NAMESPACE: Uuid =
+    Uuid::from_u128(31415926535897932384626433832795u128);
 
 /// The CheckConfig represents a configuration for a single check.
 #[serde_as]
@@ -82,11 +89,19 @@ impl CheckConfig {
     pub fn slots(&self) -> Vec<usize> {
         let interval_secs = self.interval as usize;
 
-        let first_slot = self
-            .subscription_id
-            .as_u128()
-            .checked_rem(self.interval as u128)
-            .unwrap() as usize;
+        // We deterministically produce a new uuid here based on the subscription id and use it to
+        // help distribute subscriptions to slots. Without this, we end up distributing all checks
+        // associated with a specific partition into the same slots.
+        //
+        // We have to use this instead of the subscription id itself because we already use the
+        // subscription id to partition checks.
+        let first_slot = Uuid::new_v5(
+            &SUBSCRIPTION_SLOT_NAMESPACE,
+            self.subscription_id.as_bytes(),
+        )
+        .as_u128()
+        .checked_rem(self.interval as u128)
+        .expect("Interval cannot be zero") as usize;
 
         let pattern_count = MAX_CHECK_INTERVAL_SECS / interval_secs;
 
@@ -118,12 +133,14 @@ impl CheckConfig {
         // We have to use this instead of the subscription id itself because we already use the
         // subscription id distribute checks across the check interval. If we used it here, then
         // it'd mean that we still end up running checks for a given region at the same time.
-        let subscription_seed_id =
-            Uuid::new_v5(&SUBSCRIPTION_ID_NAMESPACE, self.subscription_id.as_bytes());
+        let subscription_seed_id = Uuid::new_v5(
+            &SUBSCRIPTION_SHOULD_RUN_NAMESPACE,
+            self.subscription_id.as_bytes(),
+        );
         let running_region_idx = (((tick.time().timestamp() / self.interval as i64) as u128)
             + subscription_seed_id.as_u128())
         .checked_rem(active_regions.len() as u128)
-        .unwrap();
+        .expect("Active regions is non-zero");
         active_regions[running_region_idx as usize] == current_region
     }
 }
@@ -258,7 +275,11 @@ mod tests {
     fn test_slots() {
         let all_slots = 0..MAX_CHECK_INTERVAL_SECS;
 
-        let minute_config = CheckConfig::default();
+        let minute_config = CheckConfig {
+            // 64 maps to 0 after converting to a uuid5 with our namespace
+            subscription_id: Uuid::from_u128(64),
+            ..Default::default()
+        };
 
         // Every minute slot includes the config
         assert_eq!(
@@ -267,7 +288,8 @@ mod tests {
         );
 
         let hour_config = CheckConfig {
-            subscription_id: Uuid::from_u128(1),
+            // 15071 maps to 1 after converting to a uuid5 with our namespace
+            subscription_id: Uuid::from_u128(15071),
             interval: CheckInterval::SixtyMinutes,
             ..Default::default()
         };
@@ -277,6 +299,7 @@ mod tests {
 
         let five_minute_config = CheckConfig {
             interval: CheckInterval::FiveMinutes,
+            subscription_id: Uuid::from_u128(174),
             ..Default::default()
         };
 
@@ -287,7 +310,7 @@ mod tests {
         );
 
         let five_minute_config_offset = CheckConfig {
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128 + 15),
+            subscription_id: Uuid::from_u128(9737),
             interval: CheckInterval::FiveMinutes,
             ..Default::default()
         };

@@ -1,20 +1,19 @@
+use anyhow::Result;
 use redis::AsyncCommands;
-use std::collections::HashSet;
 use std::sync::Arc;
+use std::{collections::HashSet, time::Instant};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::{app::config::Config, manager::Manager, types::check_config::CheckConfig};
+use crate::{
+    app::config::Config, manager::Manager, redis::RedisClient, types::check_config::CheckConfig,
+};
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::time::Duration;
 use tokio::time::interval;
 use uuid::Uuid;
-
-#[allow(unused_imports)]
-use crate::redis::{RedisAsyncConnection, RedisClient};
 
 #[derive(Debug)]
 pub struct RedisPartition {
@@ -71,6 +70,7 @@ impl RedisKey for CheckConfig {
 
 pub struct RedisConfigProvider {
     redis: RedisClient,
+    redis_timeouts_ms: u64,
     partitions: HashSet<u16>,
     check_interval: Duration,
 }
@@ -81,12 +81,14 @@ impl RedisConfigProvider {
         partitions: HashSet<u16>,
         check_interval: Duration,
         enable_cluster: bool,
-    ) -> Result<Self, redis::RedisError> {
-        let client = crate::redis::build_redis_client(redis_url, enable_cluster);
+        redis_timeouts_ms: u64,
+    ) -> Result<Self> {
+        let client = crate::redis::build_redis_client(redis_url, enable_cluster)?;
         Ok(Self {
             redis: client,
             partitions,
             check_interval,
+            redis_timeouts_ms,
         })
     }
 
@@ -124,19 +126,23 @@ impl RedisConfigProvider {
         // Fetch configs for all partitions from Redis and register them with the manager
         manager.update_partitions(&self.partitions);
 
-        let mut conn = self.redis.get_async_connection().await;
+        let mut conn = self
+            .redis
+            .get_async_connection(self.redis_timeouts_ms)
+            .await
+            .expect("Redis should be available");
         metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region.clone())
             .set(partitions.len() as f64);
 
-        let start_loading = Utc::now();
+        let start_loading = Instant::now();
 
         // Initial load of all configs for all partitions
         for partition in partitions {
-            let partition_start_loading = Utc::now();
+            let partition_start_loading = Instant::now();
             let config_payloads: Vec<Vec<u8>> = conn
                 .hvals(&partition.config_key)
                 .await
-                .expect("Unable to get configs");
+                .expect("Config key should exist");
             tracing::info!(
                 partition = partition.number,
                 config_count = config_payloads.len(),
@@ -158,10 +164,7 @@ impl RedisConfigProvider {
                     .unwrap()
                     .add_config(Arc::new(config));
             }
-            let partition_loading_time = (Utc::now() - partition_start_loading)
-                .to_std()
-                .unwrap()
-                .as_secs_f64();
+            let partition_loading_time = partition_start_loading.elapsed().as_secs_f64();
             metrics::histogram!(
                 "config_provider.initial_load.partition.duration",
                 "histogram" => "timer",
@@ -171,7 +174,7 @@ impl RedisConfigProvider {
             .record(partition_loading_time);
         }
 
-        let loading_time = (Utc::now() - start_loading).to_std().unwrap().as_secs_f64();
+        let loading_time = start_loading.elapsed().as_secs_f64();
 
         metrics::histogram!(
             "config_provider.initial_load.duration",
@@ -188,19 +191,23 @@ impl RedisConfigProvider {
         shutdown: CancellationToken,
         region: String,
     ) {
-        let mut conn = self.redis.get_async_connection().await;
+        let mut conn = self
+            .redis
+            .get_async_connection(self.redis_timeouts_ms)
+            .await
+            .expect("Redis should be available");
         let mut interval = interval(self.check_interval);
 
         while !shutdown.is_cancelled() {
             let _ = interval.tick().await;
 
-            let update_start = Utc::now();
+            let update_start = Instant::now();
 
             metrics::gauge!("config_provider.updater.partitions", "uptime_region" => region.clone())
                 .set(partitions.len() as f64);
 
             for partition in partitions.iter() {
-                let partition_update_start = Utc::now();
+                let partition_update_start = Instant::now();
                 let mut pipe = redis::pipe();
                 // We fetch all updates from the list and then delete the key. We do this
                 // atomically so that there isn't any chance of a race
@@ -241,7 +248,7 @@ impl RedisConfigProvider {
                         .get_service(partition.number)
                         .get_config_store()
                         .write()
-                        .unwrap()
+                        .expect("Lock should not be poisoned")
                         .remove_config(config_delete.subscription_id);
                     tracing::debug!(
                         %config_delete.subscription_id,
@@ -262,7 +269,10 @@ impl RedisConfigProvider {
                             .collect::<Vec<_>>(),
                     )
                     .await
-                    .unwrap();
+                    .unwrap_or_else(|err| {
+                        tracing::error!(?err, "redis_config_provider.config_key_get_failed");
+                        vec![]
+                    });
 
                 for config_payload in config_payloads {
                     let config: CheckConfig = rmp_serde::from_slice(&config_payload)
@@ -282,10 +292,7 @@ impl RedisConfigProvider {
                         .unwrap()
                         .add_config(Arc::new(config));
                 }
-                let partition_update_duration = (Utc::now() - partition_update_start)
-                    .to_std()
-                    .unwrap()
-                    .as_secs_f64();
+                let partition_update_duration = partition_update_start.elapsed().as_secs_f64();
                 metrics::histogram!(
                     "config_provider.updater.partition.duration",
                     "histogram" => "timer",
@@ -294,7 +301,7 @@ impl RedisConfigProvider {
                 )
                 .record(partition_update_duration);
             }
-            let update_duration = (Utc::now() - update_start).to_std().unwrap().as_secs_f64();
+            let update_duration = update_start.elapsed().as_secs_f64();
             metrics::histogram!(
                 "config_provider.updater.duration",
                 "histogram" => "timer",
@@ -316,21 +323,26 @@ pub fn run_config_provider(
         determine_owned_partitions(config),
         Duration::from_millis(config.config_provider_redis_update_ms),
         config.redis_enable_cluster,
+        config.redis_timeouts_ms,
     )
-    .expect("Failed to create Redis config provider");
+    .expect("Config provider should be initializable");
 
     let region = config.region.clone();
     tokio::spawn(async move {
         let monitor_shutdown = shutdown.clone();
+        let monitor_manager = manager.clone();
         let monitor_task = tokio::spawn(async move {
             provider
-                .monitor_configs(manager, monitor_shutdown, region)
+                .monitor_configs(monitor_manager, monitor_shutdown, region)
                 .await
         });
 
         tokio::select! {
             _ = shutdown.cancelled() => {
                 tracing::info!("redis_config_provider.shutdown_requested");
+
+                // Inform the manager that there are no longer any partitions
+                manager.update_partitions(&HashSet::default());
             }
             _ = monitor_task => {
                 tracing::error!("redis_config_provider.monitor_task_ended");
@@ -356,6 +368,8 @@ pub fn determine_owned_partitions(config: &Config) -> HashSet<u16> {
 
 #[cfg(test)]
 mod tests {
+    use crate::redis::RedisAsyncConnection;
+
     use super::*;
     use redis::AsyncCommands;
     use redis_test_macro::redis_test;
@@ -385,6 +399,7 @@ mod tests {
             test_partitions.clone(),
             Duration::from_millis(10),
             false,
+            config.redis_timeouts_ms,
         )
         .unwrap()
         .get_partition_keys();

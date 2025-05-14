@@ -20,7 +20,8 @@ impl KafkaResultsProducer {
     pub fn new(topic_name: &str, config: KafkaConfig) -> Self {
         let producer = KafkaProducer::new(config);
         let topic = TopicOrPartition::Topic(Topic::new(topic_name));
-        let schema = sentry_kafka_schemas::get_schema("uptime-results", None).unwrap();
+        let schema =
+            sentry_kafka_schemas::get_schema("uptime-results", None).expect("Schema should exist");
 
         Self {
             producer,

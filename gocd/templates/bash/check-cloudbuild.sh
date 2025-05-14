@@ -1,6 +1,8 @@
 #!/bin/bash
 
-/devinfra/scripts/checks/googlecloud/checkcloudbuild.py \
+/devinfra/scripts/checks/googlecloud/check_cloudbuild.py \
+	sentryio \
+	uptime-checker \
+	build-uptime-checker \
 	"${GO_REVISION_UPTIME_CHECKER_REPO}" \
-	"sentryio" \
-	"us-central1-docker.pkg.dev/sentryio/uptime-checker/image"
+	main

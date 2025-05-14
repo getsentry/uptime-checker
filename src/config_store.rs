@@ -149,7 +149,7 @@ mod tests {
 
     use crate::{
         config_store::{ConfigStore, Tick},
-        types::check_config::{CheckConfig, CheckInterval, MAX_CHECK_INTERVAL_SECS},
+        types::check_config::{CheckConfig, CheckInterval},
     };
 
     #[test]
@@ -171,7 +171,12 @@ mod tests {
     fn test_add_config() {
         let mut store = ConfigStore::new();
 
-        let config = Arc::new(CheckConfig::default());
+        let config = Arc::new(CheckConfig {
+            // 64 maps to 0 after converting to a uuid5 with our namespace
+            subscription_id: Uuid::from_u128(64),
+            ..Default::default()
+        });
+
         store.add_config(config.clone());
 
         assert_eq!(store.configs.len(), 1);
@@ -183,7 +188,7 @@ mod tests {
             // Cannot have multiple configs with the same subscription_id, to test configs that
             // exist in the same bucket manually create a uuid that slots into the 0th bucket after
             // wrapping around the max value.
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128),
+            subscription_id: Uuid::from_u128(9382),
             interval: CheckInterval::FiveMinutes,
             ..Default::default()
         });
@@ -207,6 +212,7 @@ mod tests {
 
         let config = Arc::new(CheckConfig {
             interval: CheckInterval::OneMinute,
+            subscription_id: Uuid::from_u128(174),
             ..Default::default()
         });
         store.add_config(config.clone());
@@ -218,6 +224,7 @@ mod tests {
 
         let config = Arc::new(CheckConfig {
             interval: CheckInterval::FiveMinutes,
+            subscription_id: Uuid::from_u128(174),
             ..Default::default()
         });
         store.add_config(config.clone());
@@ -246,7 +253,7 @@ mod tests {
         store.add_config(config.clone());
 
         let five_minute_config = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128),
+            subscription_id: Uuid::from_u128(9382),
             interval: CheckInterval::FiveMinutes,
             ..Default::default()
         });
@@ -268,11 +275,16 @@ mod tests {
     fn test_get_configs() {
         let mut store = ConfigStore::new();
 
-        let config = Arc::new(CheckConfig::default());
+        let config = Arc::new(CheckConfig {
+            // 64 maps to 0 after converting to a uuid5 with our namespace
+            subscription_id: Uuid::from_u128(64),
+            ..Default::default()
+        });
+
         store.add_config(config.clone());
 
         let five_minute_config = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(MAX_CHECK_INTERVAL_SECS as u128),
+            subscription_id: Uuid::from_u128(9382),
             interval: CheckInterval::FiveMinutes,
             ..Default::default()
         });
