@@ -226,18 +226,26 @@ async fn executor_loop(
             let job_check_sender = check_sender.clone();
             let job_queue_size = queue_size.clone();
 
-            let check_fut = do_check(
-                &conf,
-                scheduled_check,
-                job_queue_size,
-                job_num_running,
-                job_checker,
-                job_check_sender,
-                job_producer,
-                job_region,
-            );
-
-            metrics_monitor.instrument(check_fut)
+            async {
+                let check_fut = do_check(
+                    conf.region.clone(),
+                    conf.failure_retries,
+                    scheduled_check,
+                    job_queue_size,
+                    job_num_running,
+                    job_checker,
+                    job_check_sender,
+                    job_producer,
+                    job_region,
+                );
+                if conf.record_task_metrics {
+                    metrics_monitor.instrument(check_fut).await;
+                } else {
+                    tokio::spawn(check_fut)
+                        .await
+                        .expect("The check task should not fail");
+                }
+            }
         })
         .await;
     tracing::info!("executor.shutdown");
@@ -245,7 +253,8 @@ async fn executor_loop(
 
 #[allow(clippy::too_many_arguments)]
 async fn do_check(
-    conf: &ExecutorConfig,
+    region: String,
+    failure_retries: u16,
     scheduled_check: ScheduledCheck,
     queue_size: Arc<AtomicU64>,
     num_running: Arc<AtomicU64>,
@@ -257,9 +266,9 @@ async fn do_check(
     let num_running_val = num_running.fetch_add(1, Ordering::Relaxed);
     let queue_size_val = queue_size.fetch_sub(1, Ordering::Relaxed);
 
-    metrics::gauge!("executor.queue_size", "uptime_region" => conf.region.clone())
+    metrics::gauge!("executor.queue_size", "uptime_region" => region.clone())
         .set(queue_size_val as f64);
-    metrics::gauge!("executor.num_running", "uptime_region" => conf.region.clone())
+    metrics::gauge!("executor.num_running", "uptime_region" => region.clone())
         .set(num_running_val as f64);
 
     let config = &scheduled_check.config;
@@ -277,7 +286,7 @@ async fn do_check(
     };
 
     let will_retry = check_result.status == CheckStatus::Failure
-        && scheduled_check.retry_count < conf.failure_retries;
+        && scheduled_check.retry_count < failure_retries;
 
     record_result_metrics(&check_result, scheduled_check.retry_count > 0, will_retry);
 
