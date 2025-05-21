@@ -216,23 +216,29 @@ async fn executor_loop(
         });
     }
 
+    let queue_gauge =
+        metrics::gauge!("executor.queue_size", "uptime_region" => conf.region.clone());
+    let num_running_gauge =
+        metrics::gauge!("executor.num_running", "uptime_region" => conf.region.clone());
+
     schedule_check_stream
         .take_until(cancel_token.cancelled())
         .for_each_concurrent(conf.concurrency, |scheduled_check| {
             let job_checker = checker.clone();
             let job_producer = producer.clone();
             let job_region = conf.region.clone();
-            let job_num_running = num_running.clone();
             let job_check_sender = check_sender.clone();
-            let job_queue_size = queue_size.clone();
+
+            let queue_size_val = queue_size.fetch_sub(1, Ordering::Relaxed) - 1;
+            queue_gauge.set(queue_size_val as f64);
+
+            let num_running_val = num_running.fetch_add(1, Ordering::Relaxed) + 1;
+            num_running_gauge.set(num_running_val as f64);
 
             async {
                 let check_fut = do_check(
-                    conf.region.clone(),
                     conf.failure_retries,
                     scheduled_check,
-                    job_queue_size,
-                    job_num_running,
                     job_checker,
                     job_check_sender,
                     job_producer,
@@ -245,6 +251,8 @@ async fn executor_loop(
                         .await
                         .expect("The check task should not fail");
                 }
+                let num_running_val = num_running.fetch_sub(1, Ordering::Relaxed) - 1;
+                num_running_gauge.set(num_running_val as f64);
             }
         })
         .await;
@@ -253,24 +261,13 @@ async fn executor_loop(
 
 #[allow(clippy::too_many_arguments)]
 async fn do_check(
-    region: String,
     failure_retries: u16,
     scheduled_check: ScheduledCheck,
-    queue_size: Arc<AtomicU64>,
-    num_running: Arc<AtomicU64>,
     job_checker: Arc<impl Checker + 'static>,
     job_check_sender: Arc<CheckSender>,
     job_producer: Arc<impl ResultsProducer + 'static>,
     job_region: String,
 ) {
-    let num_running_val = num_running.fetch_add(1, Ordering::Relaxed);
-    let queue_size_val = queue_size.fetch_sub(1, Ordering::Relaxed);
-
-    metrics::gauge!("executor.queue_size", "uptime_region" => region.clone())
-        .set(queue_size_val as f64);
-    metrics::gauge!("executor.num_running", "uptime_region" => region.clone())
-        .set(num_running_val as f64);
-
     let config = &scheduled_check.config;
     let tick = &scheduled_check.tick;
 
@@ -298,7 +295,6 @@ async fn do_check(
         job_check_sender
             .queue_check_for_retry(scheduled_check)
             .expect("Executor loop channel should exist");
-        num_running.fetch_sub(1, Ordering::Relaxed);
         return;
     }
 
@@ -312,7 +308,6 @@ async fn do_check(
     scheduled_check
         .record_result(check_result)
         .expect("Check recording channel should exist");
-    num_running.fetch_sub(1, Ordering::Relaxed);
 }
 
 fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool) {
