@@ -96,14 +96,14 @@ impl RedisConfigProvider {
         &self,
         manager: Arc<Manager>,
         shutdown: CancellationToken,
-        region: String,
+        region: &'static str,
     ) {
         // Start monitoring configs using this provider. Loads the initial configs and
         // monitors redis for updates
         let partitions = self.get_partition_keys();
-        metrics::gauge!("config_provider.redis.boot.partitions", "uptime_region" => region.clone())
+        metrics::gauge!("config_provider.redis.boot.partitions", "uptime_region" => region)
             .set(partitions.len() as f64);
-        self.load_initial_configs(manager.clone(), &partitions, region.clone())
+        self.load_initial_configs(manager.clone(), &partitions, region)
             .await;
         self.monitor_updates(manager.clone(), &partitions, shutdown, region)
             .await;
@@ -121,7 +121,7 @@ impl RedisConfigProvider {
         &self,
         manager: Arc<Manager>,
         partitions: &[RedisPartition],
-        region: String,
+        region: &'static str,
     ) {
         // Fetch configs for all partitions from Redis and register them with the manager
         manager.update_partitions(&self.partitions);
@@ -131,7 +131,7 @@ impl RedisConfigProvider {
             .get_async_connection(self.redis_timeouts_ms)
             .await
             .expect("Redis should be available");
-        metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region.clone())
+        metrics::gauge!("config_provider.initial_load.partitions", "uptime_region" => region)
             .set(partitions.len() as f64);
 
         let start_loading = Instant::now();
@@ -148,7 +148,7 @@ impl RedisConfigProvider {
                 config_count = config_payloads.len(),
                 "redis_config_provider.loading_initial_configs"
             );
-            metrics::gauge!("config_provider.initial_load.partition_size", "uptime_region" => region.clone(), "partition" => partition.number.to_string())
+            metrics::gauge!("config_provider.initial_load.partition_size", "uptime_region" => region, "partition" => partition.number.to_string())
                 .set(config_payloads.len() as f64);
 
             for config_payload in config_payloads {
@@ -168,7 +168,7 @@ impl RedisConfigProvider {
             metrics::histogram!(
                 "config_provider.initial_load.partition.duration",
                 "histogram" => "timer",
-                "uptime_region" => region.clone(),
+                "uptime_region" => region,
                 "partition" => partition.number.to_string(),
             )
             .record(partition_loading_time);
@@ -179,7 +179,7 @@ impl RedisConfigProvider {
         metrics::histogram!(
             "config_provider.initial_load.duration",
             "histogram" => "timer",
-            "uptime_region" => region.clone(),
+            "uptime_region" => region,
         )
         .record(loading_time);
     }
@@ -189,7 +189,7 @@ impl RedisConfigProvider {
         manager: Arc<Manager>,
         partitions: &[RedisPartition],
         shutdown: CancellationToken,
-        region: String,
+        region: &'static str,
     ) {
         let mut conn = self
             .redis
@@ -203,7 +203,7 @@ impl RedisConfigProvider {
 
             let update_start = Instant::now();
 
-            metrics::gauge!("config_provider.updater.partitions", "uptime_region" => region.clone())
+            metrics::gauge!("config_provider.updater.partitions", "uptime_region" => region)
                 .set(partitions.len() as f64);
 
             for partition in partitions.iter() {
@@ -238,9 +238,9 @@ impl RedisConfigProvider {
                         (upserts, deletes)
                     });
 
-                metrics::counter!("config_provider.updater.upserts", "uptime_region" => region.clone(), "partition" => partition.number.to_string())
+                metrics::counter!("config_provider.updater.upserts", "uptime_region" => region, "partition" => partition.number.to_string())
                     .increment(config_upserts.len() as u64);
-                metrics::counter!("config_provider.updater.deletes", "uptime_region" => region.clone(), "partition" => partition.number.to_string())
+                metrics::counter!("config_provider.updater.deletes", "uptime_region" => region, "partition" => partition.number.to_string())
                     .increment(config_deletes.len() as u64);
 
                 config_deletes.into_iter().for_each(|config_delete| {
@@ -296,7 +296,7 @@ impl RedisConfigProvider {
                 metrics::histogram!(
                     "config_provider.updater.partition.duration",
                     "histogram" => "timer",
-                    "uptime_region" => region.clone(),
+                    "uptime_region" => region,
                     "partition" => partition.number.to_string(),
                 )
                 .record(partition_update_duration);
@@ -305,7 +305,7 @@ impl RedisConfigProvider {
             metrics::histogram!(
                 "config_provider.updater.duration",
                 "histogram" => "timer",
-                "uptime_region" => region.clone(),
+                "uptime_region" => region,
             )
             .record(update_duration);
         }
@@ -327,7 +327,7 @@ pub fn run_config_provider(
     )
     .expect("Config provider should be initializable");
 
-    let region = config.region.clone();
+    let region = config.region;
     tokio::spawn(async move {
         let monitor_shutdown = shutdown.clone();
         let monitor_manager = manager.clone();

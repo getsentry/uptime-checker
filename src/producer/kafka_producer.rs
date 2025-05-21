@@ -85,7 +85,7 @@ mod tests {
                 request_type: RequestMethod::Get,
                 http_status_code: Some(200),
             }),
-            region: "us-west-1".to_string(),
+            region: "us-west-1",
         };
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since
         // it will fail async

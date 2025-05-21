@@ -25,7 +25,7 @@ pub fn run_scheduler(
     progress_key: String,
     redis_host: String,
     config_loaded_receiver: Receiver<BootResult>,
-    region: String,
+    region: &'static str,
     redis_enable_cluster: bool,
     redis_timeouts_ms: u64,
     tasks_finished_tx: mpsc::UnboundedSender<Result<(), anyhow::Error>>,
@@ -61,7 +61,7 @@ async fn scheduler_loop(
     shutdown: CancellationToken,
     progress_key: String,
     redis_host: String,
-    region: String,
+    region: &'static str,
     redis_enable_cluster: bool,
     redis_timeouts_ms: u64,
 ) -> anyhow::Result<()> {
@@ -121,10 +121,10 @@ async fn scheduler_loop(
             // Stat to see if the cadence that configs are processed is spiky between regions
             metrics::counter!(
                 "scheduler.config_might_run",
-                "uptime_region" => region.clone(),
+                "uptime_region" => region,
             )
             .increment(1);
-            if config.should_run(tick, &region) {
+            if config.should_run(tick, region) {
                 let check = executor_sender
                     .queue_check(tick, config)
                     .context("executor_sender.queue_check failed")?;
@@ -135,7 +135,7 @@ async fn scheduler_loop(
 
                 metrics::counter!(
                     "scheduler.skipped_region",
-                    "uptime_region" => region.clone(),
+                    "uptime_region" => region,
                 )
                 .increment(1);
             }
@@ -145,7 +145,7 @@ async fn scheduler_loop(
             total_configs=total_configs, skipped_configs=total_configs - bucket_size,
             "scheduler.tick_scheduled"
         );
-        metrics::gauge!("scheduler.bucket_size", "uptime_region" => region.clone(), "partition" => partition.to_string())
+        metrics::gauge!("scheduler.bucket_size", "uptime_region" => region, "partition" => partition.to_string())
         .set(bucket_size as f64);
 
         // Spawn a task to wait for checks to complete.
@@ -342,7 +342,7 @@ mod tests {
             build_progress_key(0),
             config.redis_host.clone(),
             boot_rx,
-            config.region.clone(),
+            config.region,
             false,
             0,
             shutdown_signal,
@@ -378,7 +378,7 @@ mod tests {
                 actual_check_time: Utc::now(),
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
-                region: config.region.clone(),
+                region: config.region,
             })
             .unwrap();
         scheduled_check2
@@ -393,7 +393,7 @@ mod tests {
                 actual_check_time: Utc::now(),
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
-                region: config.region.clone(),
+                region: config.region,
             })
             .unwrap();
 
@@ -427,7 +427,7 @@ mod tests {
         let redis_url = format!("redis://{}", mock_server.socket_address());
 
         let config = Config {
-            region: "us_west".to_string(),
+            region: "us_west",
             ..Default::default()
         };
         let partition = 0;
@@ -465,7 +465,7 @@ mod tests {
             build_progress_key(0),
             redis_url,
             boot_rx,
-            config.region.clone(),
+            config.region,
             false,
             100,
             shutdown_signal,
@@ -490,7 +490,7 @@ mod tests {
                 actual_check_time: Utc::now(),
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
-                region: config.region.clone(),
+                region: config.region,
             })
             .unwrap();
 
@@ -503,7 +503,7 @@ mod tests {
     #[redis_test(start_paused = true)]
     async fn test_scheduler_multi_region() {
         let config = Config {
-            region: "us_west".to_string(),
+            region: "us_west",
             ..Default::default()
         };
         let partition = 0;
@@ -556,7 +556,7 @@ mod tests {
             build_progress_key(0),
             config.redis_host.clone(),
             boot_rx,
-            config.region.clone(),
+            config.region,
             false,
             0,
             shutdown_signal,
@@ -592,7 +592,7 @@ mod tests {
                 actual_check_time: Utc::now(),
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
-                region: config.region.clone(),
+                region: config.region,
             })
             .unwrap();
         scheduled_check2
@@ -607,7 +607,7 @@ mod tests {
                 actual_check_time: Utc::now(),
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
-                region: config.region.clone(),
+                region: config.region,
             })
             .unwrap();
 
@@ -667,7 +667,7 @@ mod tests {
             progress_key.clone(),
             config.redis_host.clone(),
             boot_rx,
-            config.region.clone(),
+            config.region,
             false,
             0,
             shutdown_signal,
@@ -704,7 +704,7 @@ mod tests {
                 actual_check_time: Utc::now(),
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
-                region: config.region.clone(),
+                region: config.region,
             })
             .unwrap();
         scheduled_check2
@@ -719,7 +719,7 @@ mod tests {
                 actual_check_time: Utc::now(),
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
-                region: config.region.clone(),
+                region: config.region,
             })
             .unwrap();
 
@@ -776,7 +776,7 @@ mod tests {
             progress_key.clone(),
             config.redis_host.clone(),
             boot_rx,
-            config.region.clone(),
+            config.region,
             false,
             0,
             shutdown_signal,
@@ -802,7 +802,7 @@ mod tests {
                 actual_check_time: Utc::now(),
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
-                region: config.region.clone(),
+                region: config.region,
             })
             .unwrap();
 

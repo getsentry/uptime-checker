@@ -111,7 +111,8 @@ pub struct Config {
     pub redis_host: String,
 
     /// The region that this checker is running in
-    pub region: String,
+    #[serde(default, deserialize_with = "deserialize_region")]
+    pub region: &'static str,
 
     /// Allow uptime checks against internal IP addresses
     pub allow_internal_ips: bool,
@@ -172,7 +173,7 @@ impl Default for Config {
             config_provider_redis_total_partitions: 128,
             redis_enable_cluster: false,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
-            region: "default".to_owned(),
+            region: "default",
             allow_internal_ips: false,
             disable_connection_reuse: true,
             pool_idle_timeout_secs: 90,
@@ -210,6 +211,18 @@ impl Config {
         let config: Config = builder.extract()?;
         Ok(config)
     }
+}
+
+fn deserialize_region<'de, D>(deserializer: D) -> Result<&'static str, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = String::deserialize(deserializer)?;
+
+    // We're going to deliberately leak the region string here--at the cost of some unfreeable
+    // memory, we eliminate a major source of clones, especially in the inner-loops of the
+    // schedueler and executor.
+    Ok(s.leak())
 }
 
 fn deserialize_nameservers<'de, D>(deserializer: D) -> Result<Option<Vec<IpAddr>>, D::Error>
@@ -309,7 +322,7 @@ mod tests {
                         config_provider_redis_total_partitions: 128,
                         redis_enable_cluster: false,
                         redis_host: "redis://127.0.0.1:6379".to_owned(),
-                        region: "default".to_owned(),
+                        region: "default",
                         allow_internal_ips: false,
                         disable_connection_reuse: true,
                         record_task_metrics: false,
@@ -396,7 +409,7 @@ mod tests {
                         config_provider_redis_total_partitions: 32,
                         redis_enable_cluster: true,
                         redis_host: "10.0.0.3:6379".to_owned(),
-                        region: "us-west".to_owned(),
+                        region: "us-west",
                         allow_internal_ips: true,
                         disable_connection_reuse: false,
                         record_task_metrics: false,
