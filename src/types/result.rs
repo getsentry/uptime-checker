@@ -102,7 +102,7 @@ pub struct CheckResult {
     pub request_info: Option<RequestInfo>,
 
     /// Region slug that produced the check result
-    pub region: String,
+    pub region: &'static str,
 }
 
 #[cfg(test)]

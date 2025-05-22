@@ -120,7 +120,7 @@ impl CheckSender {
 
 impl CheckResult {
     /// Produce a missed check result from a scheduled check.
-    pub fn missed_from(check: &ScheduledCheck, region: String) -> Self {
+    pub fn missed_from(check: &ScheduledCheck, region: &'static str) -> Self {
         Self {
             guid: Uuid::new_v4(),
             subscription_id: check.get_config().subscription_id,
@@ -146,7 +146,7 @@ pub struct ExecutorConfig {
     pub failure_retries: u16,
 
     /// The region the checker checker is running as
-    pub region: String,
+    pub region: &'static str,
 
     /// Track metrics about executed tasks
     pub record_task_metrics: bool,
@@ -206,27 +206,23 @@ async fn executor_loop(
 
     // record metrics to datadog every 10 seconds
     if conf.record_task_metrics {
-        let metrics_region = conf.region.clone();
         let metrics_monitor = metrics_monitor.clone();
         tokio::spawn(async move {
             for interval in metrics_monitor.intervals() {
-                record_task_metrics(interval, metrics_region.clone());
+                record_task_metrics(interval, conf.region);
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
     }
 
-    let queue_gauge =
-        metrics::gauge!("executor.queue_size", "uptime_region" => conf.region.clone());
-    let num_running_gauge =
-        metrics::gauge!("executor.num_running", "uptime_region" => conf.region.clone());
+    let queue_gauge = metrics::gauge!("executor.queue_size", "uptime_region" => conf.region);
+    let num_running_gauge = metrics::gauge!("executor.num_running", "uptime_region" => conf.region);
 
     schedule_check_stream
         .take_until(cancel_token.cancelled())
         .for_each_concurrent(conf.concurrency, |scheduled_check| {
             let job_checker = checker.clone();
             let job_producer = producer.clone();
-            let job_region = conf.region.clone();
             let job_check_sender = check_sender.clone();
 
             let queue_size_val = queue_size.fetch_sub(1, Ordering::Relaxed) - 1;
@@ -242,7 +238,7 @@ async fn executor_loop(
                     job_checker,
                     job_check_sender,
                     job_producer,
-                    job_region,
+                    conf.region,
                 );
                 if conf.record_task_metrics {
                     metrics_monitor.instrument(check_fut).await;
@@ -266,7 +262,7 @@ async fn do_check(
     job_checker: Arc<impl Checker + 'static>,
     job_check_sender: Arc<CheckSender>,
     job_producer: Arc<impl ResultsProducer + 'static>,
-    job_region: String,
+    job_region: &'static str,
 ) {
     let config = &scheduled_check.config;
     let tick = &scheduled_check.tick;
@@ -352,7 +348,7 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
             "status" => status_label,
             "failure_reason" => failure_reason.unwrap_or("ok"),
             "status_code" => status_code.clone(),
-            "uptime_region" => result.region.clone(),
+            "uptime_region" => result.region,
             "is_retry" => retry_label,
             "will_retry" => will_retry_label,
         )
@@ -371,7 +367,7 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
         "status_code" => status_code.clone(),
-        "uptime_region" => result.region.clone(),
+        "uptime_region" => result.region,
         "is_retry" => retry_label,
         "will_retry" => will_retry_label,
     )
@@ -383,52 +379,52 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
         "status_code" => status_code,
-        "uptime_region" => result.region.clone(),
+        "uptime_region" => result.region,
         "is_retry" => retry_label,
         "will_retry" => will_retry_label,
     )
     .increment(1);
 }
 
-fn record_task_metrics(interval: tokio_metrics::TaskMetrics, region: String) {
+fn record_task_metrics(interval: tokio_metrics::TaskMetrics, region: &'static str) {
     metrics::gauge!(
         "executor_task.mean_first_poll_delay",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_first_poll_delay());
     metrics::gauge!(
         "executor_task.mean_idle_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_idle_duration());
     metrics::gauge!(
         "executor_task.mean_poll_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_poll_duration());
     metrics::gauge!(
         "executor_task.mean_scheduled_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_scheduled_duration());
     metrics::gauge!(
         "executor_task.mean_slow_poll_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_slow_poll_duration());
     metrics::gauge!(
         "executor_task.mean_fast_poll_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_fast_poll_duration());
     metrics::gauge!(
         "executor_task.mean_long_delay_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_long_delay_duration());
     metrics::gauge!(
         "executor_task.mean_short_delay_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_short_delay_duration());
 }
@@ -468,7 +464,7 @@ mod tests {
         let conf = ExecutorConfig {
             concurrency: 1,
             failure_retries: 0,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -511,7 +507,7 @@ mod tests {
         let conf = ExecutorConfig {
             concurrency: 2,
             failure_retries: 0,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -595,7 +591,7 @@ mod tests {
         let conf = ExecutorConfig {
             concurrency: 1,
             failure_retries: 0,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -640,7 +636,7 @@ mod tests {
         let conf = ExecutorConfig {
             concurrency: 1,
             failure_retries: 1,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -685,7 +681,7 @@ mod tests {
         let conf = ExecutorConfig {
             concurrency: 1,
             failure_retries: 2,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -717,7 +713,7 @@ mod tests {
         let conf = ExecutorConfig {
             concurrency: 1,
             failure_retries: 2,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (_, join_handle) = run_executor(checker, producer, conf, cancel_token.clone());

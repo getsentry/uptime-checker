@@ -50,7 +50,7 @@ pub trait Checker: Send + Sync {
     fn check_url(
         &self,
         check: &ScheduledCheck,
-        region: String,
+        region: &'static str,
     ) -> impl Future<Output = CheckResult> + Send;
 }
 
@@ -61,7 +61,7 @@ pub enum HttpChecker {
 }
 
 impl Checker for HttpChecker {
-    async fn check_url(&self, check: &ScheduledCheck, region: String) -> CheckResult {
+    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
         match self {
             Self::IsahcChecker(c) => c.check_url(check, region).await,
             Self::ReqwestChecker(c) => c.check_url(check, region).await,

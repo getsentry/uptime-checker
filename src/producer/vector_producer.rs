@@ -148,7 +148,7 @@ mod tests {
                 request_type: RequestMethod::Get,
                 http_status_code: Some(200),
             }),
-            region: "us-west-1".to_string(),
+            region: "us-west-1",
         }
     }
 

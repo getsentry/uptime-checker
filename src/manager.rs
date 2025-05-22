@@ -59,7 +59,7 @@ impl PartitionedService {
             waiter_config_store,
             partition,
             shutdown_signal.clone(),
-            config.region.clone(),
+            config.region,
         );
 
         let scheduler_join_handle = run_scheduler(
@@ -70,7 +70,7 @@ impl PartitionedService {
             build_progress_key(partition),
             config.redis_host.clone(),
             config_loaded,
-            config.region.clone(),
+            config.region,
             config.redis_enable_cluster,
             config.redis_timeouts_ms,
             tasks_finished_tx,
@@ -167,7 +167,7 @@ impl Manager {
         let executor_conf = ExecutorConfig {
             concurrency: config.checker_concurrency,
             failure_retries: config.failure_retries,
-            region: config.region.clone(),
+            region: config.region,
             record_task_metrics: config.record_task_metrics,
         };
 
