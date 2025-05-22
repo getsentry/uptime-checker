@@ -1,5 +1,6 @@
 use anyhow::Context;
 use chrono::{DurationRound, TimeDelta, TimeZone, Utc};
+use futures::future::{join_all, JoinAll};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
@@ -14,6 +15,7 @@ use crate::check_executor::CheckSender;
 use crate::config_store::{RwConfigStore, Tick};
 use crate::config_waiter::BootResult;
 use crate::redis::build_redis_client;
+use crate::types::result::CheckResult;
 use redis::AsyncCommands;
 
 #[allow(clippy::too_many_arguments)]
@@ -51,6 +53,12 @@ pub fn run_scheduler(
         // channel is open or not.
         let _ = tasks_finished_tx.send(result);
     })
+}
+
+struct ExecutionBundle {
+    start: Instant,
+    tick: Tick,
+    checks: JoinAll<Receiver<CheckResult>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -148,35 +156,16 @@ async fn scheduler_loop(
         metrics::gauge!("scheduler.bucket_size", "uptime_region" => region, "partition" => partition.to_string())
         .set(bucket_size as f64);
 
-        // Spawn a task to wait for checks to complete.
-        //
-        // TODO(epurkhiser): We'll want to record the tick timestamp  in redis or some other store
-        // so that we can resume processing if we fail to process ticks (crash-loop, etc)
-        let tick_complete_join_handle = tokio::spawn(async move {
-            let checks_scheduled = results.len();
-            while let Some(result) = results.pop() {
-                // TODO(epurkhiser): Do we want to do something with the CheckResult here?
-                if let Err(err) = result.await {
-                    tracing::error!(error = ?err, "scheduler.tick_complete_join_await_error");
-                    return Err(anyhow::anyhow!(
-                        "Error receiving check result from executor"
-                    ));
-                }
-            }
+        let join_all_handle = join_all(results);
 
-            let execution_duration = tick_start.elapsed();
-
-            tracing::debug!(
-                result = %tick,
-                duration = ?execution_duration,
-                checks_scheduled,
-                "scheduler.tick_execution_complete"
-            );
-            Ok(tick)
-        });
+        let bundle = ExecutionBundle {
+            start: tick_start,
+            tick,
+            checks: join_all_handle,
+        };
 
         tick_complete_tx
-            .send(tick_complete_join_handle)
+            .send(bundle)
             .context("tick_complete_tx.send failure")?;
         Ok(())
     };
@@ -193,24 +182,35 @@ async fn scheduler_loop(
             // The handles arriving in the receiver are received in-order; look for the very
             // latest tick that completed.
             tracing::debug!("scheduler.tick_awaiting_join_handle");
-            let num_read = tick_handles.len();
 
-            let Some(tick) = tick_handles.pop() else {
+            let num_read = tick_handles.len();
+            let mut last_tick = None;
+            for bundle in tick_handles.drain(..) {
+                let results = bundle.checks.await;
+                let checks_scheduled = results.len();
+
+                for result in results {
+                    if let Err(err) = result {
+                        tracing::error!(error = ?err, "scheduler.tick_complete_join_await_error");
+                        return Err(anyhow::anyhow!(
+                            "Error receiving check result from executor"
+                        ));
+                    }
+                }
+
+                let execution_duration = bundle.start.elapsed();
+                tracing::debug!(
+                    result = %bundle.tick,
+                    duration = ?execution_duration,
+                    checks_scheduled,
+                    "scheduler.tick_execution_complete"
+                );
+                last_tick = Some(bundle.tick);
+            }
+
+            let Some(tick) = last_tick else {
                 unreachable!("We have at least one element in the receive buffer");
             };
-
-            let tick = match tick.await {
-                Ok(Ok(tick)) => tick,
-                Ok(Err(err)) => {
-                    tracing::error!(progress_key, error = ?err, "scheduler.tick_processor_handle_await_error");
-                    return Err(anyhow::anyhow!("other error"));
-                }
-                Err(err) => {
-                    tracing::error!(progress_key, error = ?err, "scheduler.tick_processor_handle_await_error");
-                    return Err(anyhow::anyhow!("join handle error"));
-                }
-            };
-            tick_handles.clear();
 
             let Some(progress) = tick.time().timestamp_nanos_opt() else {
                 tracing::error!(progress_key, tick = %tick, "scheduler.tick_processor_bad_timestamp");
