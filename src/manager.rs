@@ -157,6 +157,7 @@ impl Manager {
             )
             .into(),
             CheckerMode::Isahc => IsahcChecker::new(
+                !config.allow_internal_ips,
                 config.disable_connection_reuse,
                 Duration::from_secs(config.pool_idle_timeout_secs),
                 config.interface.to_owned(),
