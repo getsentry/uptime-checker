@@ -717,6 +717,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
         let tick = make_tick();
 
@@ -867,6 +868,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
         let tick = make_tick();
         let config = CheckConfig {
