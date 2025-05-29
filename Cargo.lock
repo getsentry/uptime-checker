@@ -1947,7 +1947,7 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 [[package]]
 name = "isahc"
 version = "1.7.3"
-source = "git+https://github.com/getsentry/isahc?rev=be5d9777b20f664fd13acdaf61ae2212765ff0d8#be5d9777b20f664fd13acdaf61ae2212765ff0d8"
+source = "git+https://github.com/getsentry/isahc?rev=0c2a09afac3fec92b7b7059ded726c85c9b1068c#0c2a09afac3fec92b7b7059ded726c85c9b1068c"
 dependencies = [
  "async-channel 1.9.0",
  "castaway",

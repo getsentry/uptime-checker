@@ -242,6 +242,7 @@ mod tests {
     use httpmock::Method;
 
     use sentry::protocol::SpanId;
+    use tokio::io::AsyncReadExt;
     use uuid::Uuid;
     #[cfg(target_os = "linux")]
     use {
@@ -453,33 +454,33 @@ mod tests {
             "224.0.0.1",
             "240.0.0.1",
             "255.255.255.255",
-            "::ffff:0:1",
-            "::ffff:a00:1",
-            "::ffff:6440:1",
-            "::ffff:7f00:1",
-            "::ffff:a9fe:1",
-            "::ffff:ac10:1",
-            "::ffff:c000:1",
-            "::ffff:c000:200",
-            "::ffff:c058:6300",
-            "::ffff:c0a8:1",
-            "::ffff:c612:1",
-            "::ffff:c633:6400",
-            "::ffff:e000:1",
-            "::ffff:f000:1",
-            "::ffff:ffff:ffff",
-            "::1",
-            "::ffff:0:0:1",
-            "64:ff9b::1",
-            "64:ff9b:1::1",
-            "100::1",
-            "2001:0000::1",
-            "2001:20::1",
-            "2001:db8::1",
-            "2002::1",
-            "fc00::1",
-            "fe80::1",
-            "ff00::1",
+            "[::ffff:0:1]",
+            "[::ffff:a00:1]",
+            "[::ffff:6440:1]",
+            "[::ffff:7f00:1]",
+            "[::ffff:a9fe:1]",
+            "[::ffff:ac10:1]",
+            "[::ffff:c000:1]",
+            "[::ffff:c000:200]",
+            "[::ffff:c058:6300]",
+            "[::ffff:c0a8:1]",
+            "[::ffff:c612:1]",
+            "[::ffff:c633:6400]",
+            "[::ffff:e000:1]",
+            "[::ffff:f000:1]",
+            "[::ffff:ffff:ffff]",
+            "[::1]",
+            "[::ffff:0:0:1]",
+            "[64:ff9b::1]",
+            "[64:ff9b:1::1]",
+            "[100::1]",
+            "[2001:0000::1]",
+            "[2001:20::1]",
+            "[2001:db8::1]",
+            "[2002::1]",
+            "[fc00::1]",
+            "[fe80::1]",
+            "[ff00::1]",
         ]
         .iter()
         .map(|ip| format!("http://{ip}/get"))
@@ -496,6 +497,73 @@ mod tests {
 
             assert_eq!(result.status, CheckStatus::Failure);
         }
+    }
+
+    #[tokio::test]
+    async fn test_restricted_resolution() {
+        let checker = IsahcChecker::new_internal(Options {
+            validate_url: true,
+            disable_connection_reuse: true,
+            interface: None,
+            connection_cache_ttl: Duration::from_secs(90),
+        });
+
+        let localhost_config = CheckConfig {
+            url: "http://localhost/whatever".to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, localhost_config);
+        let result = checker.check_url(&check, "us-west".into()).await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_url() {
+        let checker = IsahcChecker::new_internal(Options {
+            validate_url: true,
+            disable_connection_reuse: true,
+            interface: None,
+            connection_cache_ttl: Duration::from_secs(90),
+        });
+
+        // Private address space
+        let restricted_ip_config = CheckConfig {
+            url: "http://10.0.0.1/".to_string(),
+            ..Default::default()
+        };
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, restricted_ip_config);
+        let result = checker.check_url(&check, "us-west".into()).await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+
+        // Unique Local Address
+        let restricted_ipv6_config = CheckConfig {
+            url: "http://[fd12:3456:789a:1::1]/".to_string(),
+            ..Default::default()
+        };
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, restricted_ipv6_config);
+        let result = checker.check_url(&check, "us-west".into()).await;
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
     }
 
     #[tokio::test]
@@ -786,6 +854,49 @@ mod tests {
         };
         let check = ScheduledCheck::new_for_test(tick, config);
         let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+        let result_description = result.status_reason.map(|r| r.description).unwrap();
+        assert_eq!(
+            result_description, "unknown error",
+            "Expected error message about closed connection: {}",
+            result_description
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_accept() {
+        // Other tests implicitly test whether or not we can query an ipv4 address; given the
+        // way ip blocking works, it's a good idea to also test that we can hit an ipv6 address
+        // as well.
+        let listener = tokio::net::TcpListener::bind("::1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buff = [0; 8];
+            stream.read(&mut buff).await.unwrap();
+        });
+
+        let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            connection_cache_ttl: Duration::from_secs(90),
+            interface: None,
+        });
+        let tick = make_tick();
+        let config = CheckConfig {
+            url: format!("http://[::1]:{}", addr.port()),
+            ..Default::default()
+        };
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west".into()).await;
+        eprintln!("{:?}", result);
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
