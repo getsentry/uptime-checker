@@ -881,7 +881,7 @@ mod tests {
         tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut buff = [0; 8];
-            stream.read(&mut buff).await.unwrap();
+            let _ = stream.read(&mut buff).await.unwrap();
         });
 
         let checker = IsahcChecker::new_internal(Options {
