@@ -724,7 +724,6 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
             ..Default::default()
         });
         let tick = make_tick();
