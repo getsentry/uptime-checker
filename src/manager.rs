@@ -172,6 +172,7 @@ impl Manager {
             failure_retries: config.failure_retries,
             region: config.region,
             record_task_metrics: config.record_task_metrics,
+            checker_parallel: config.checker_parallel,
         };
 
         let cancel_token = CancellationToken::new();

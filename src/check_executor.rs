@@ -141,6 +141,9 @@ pub struct ExecutorConfig {
     /// Number of checks that will be executed at the same time.
     pub concurrency: usize,
 
+    /// Whether the checks should be multiplexed on more than on thread.
+    pub checker_parallel: bool,
+
     /// Number of times a check will be retred when the execution of the check results in a
     /// failure.
     pub failure_retries: u16,
@@ -241,7 +244,13 @@ async fn executor_loop(
                     conf.region,
                 );
                 if conf.record_task_metrics {
-                    metrics_monitor.instrument(check_fut).await;
+                    if conf.checker_parallel {
+                        tokio::spawn(metrics_monitor.instrument(check_fut))
+                            .await
+                            .expect("The check task should not fail");
+                    } else {
+                        metrics_monitor.instrument(check_fut).await;
+                    }
                 } else {
                     tokio::spawn(check_fut)
                         .await
@@ -463,6 +472,7 @@ mod tests {
 
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 0,
             region: "us-west",
             record_task_metrics: false,
@@ -506,6 +516,7 @@ mod tests {
         // Only allow 2 configs to execute concurrently
         let conf = ExecutorConfig {
             concurrency: 2,
+            checker_parallel: false,
             failure_retries: 0,
             region: "us-west",
             record_task_metrics: false,
@@ -590,6 +601,7 @@ mod tests {
 
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 0,
             region: "us-west",
             record_task_metrics: false,
@@ -635,6 +647,7 @@ mod tests {
         // Allow one retry
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 1,
             region: "us-west",
             record_task_metrics: false,
@@ -680,6 +693,7 @@ mod tests {
         // Allow two retries
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 2,
             region: "us-west",
             record_task_metrics: false,
@@ -712,6 +726,7 @@ mod tests {
 
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 2,
             region: "us-west",
             record_task_metrics: false,

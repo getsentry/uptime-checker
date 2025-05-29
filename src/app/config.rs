@@ -63,6 +63,9 @@ pub struct Config {
     /// The number of HTTP checks that will be executed at once.
     pub checker_concurrency: usize,
 
+    /// Whether the HTTP checks are multiplexed on more than one thread.
+    pub checker_parallel: bool,
+
     /// The network interface to bind the uptime checker HTTP client to if set.
     pub interface: Option<String>,
 
@@ -157,6 +160,7 @@ impl Default for Config {
             sentry_dsn: None,
             sentry_env: None,
             checker_concurrency: 200,
+            checker_parallel: false,
             log_level: logging::Level::Warn,
             log_format: logging::LogFormat::Auto,
             interface: None,
@@ -304,6 +308,7 @@ mod tests {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env")),
                         checker_concurrency: 100,
+                        checker_parallel: false,
                         log_level: logging::Level::Warn,
                         log_format: logging::LogFormat::Auto,
                         interface: None,
@@ -395,6 +400,7 @@ mod tests {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env_override")),
                         checker_concurrency: 200,
+                        checker_parallel: false,
                         log_level: logging::Level::Warn,
                         log_format: logging::LogFormat::Json,
                         interface: Some("eth0".to_owned()),
