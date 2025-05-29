@@ -11,7 +11,7 @@ use ipnet::{Ipv4Net, Ipv6Net};
 use iprange::IpRange;
 use isahc::config::{Configurable, NetworkInterface, RedirectPolicy};
 use isahc::error::ErrorKind;
-use isahc::{AsyncBody, HttpClient, Request, Response};
+use isahc::{AsyncBody, HttpClient, Request, Response, ResponseExt};
 use sentry::protocol::SpanId;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -43,6 +43,9 @@ struct Options {
     /// pooling and forcing a new connection for each new request. This may help reduce connection
     /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
+
+    /// When true, causes Isahc to collect detailed connection-level metrics.
+    enable_metrics: bool,
 }
 
 impl Default for Options {
@@ -53,6 +56,7 @@ impl Default for Options {
             connection_cache_ttl: Duration::from_secs(90),
             disable_connection_reuse: false,
             dns_nameservers: None,
+            enable_metrics: false,
         }
     }
 }
@@ -90,6 +94,7 @@ impl IsahcChecker {
         let mut builder = HttpClient::builder()
             .default_headers(&[("User-Agent", UPTIME_USER_AGENT)])
             .connection_cache_ttl(options.connection_cache_ttl)
+            .metrics(options.enable_metrics)
             .redirect_policy(RedirectPolicy::Limit(9));
 
         if options.disable_connection_reuse {
@@ -134,6 +139,7 @@ impl IsahcChecker {
         connection_cache_ttl: Duration,
         interface: Option<String>,
         dns_nameservers: Option<Vec<IpAddr>>,
+        enable_metrics: bool,
     ) -> Self {
         Self::new_internal(Options {
             validate_url,
@@ -141,6 +147,7 @@ impl IsahcChecker {
             connection_cache_ttl,
             interface,
             dns_nameservers,
+            enable_metrics,
         })
     }
 }
@@ -159,6 +166,27 @@ impl Checker for IsahcChecker {
         let start = Instant::now();
         let response = do_request(&self.client, check.get_config(), &trace_header).await;
         let duration = Some(TimeDelta::from_std(start.elapsed()).expect("Duration should be sane"));
+
+        // For now, record any metrics we get from Isahc to datadog.
+        if let Some(metrics) = match &response {
+            Ok(r) => r.metrics(),
+            _ => None,
+        } {
+            metrics::histogram!("isahc_metrics.connect_time")
+                .record(metrics.connect_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.name_lookup_time")
+                .record(metrics.name_lookup_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.secure_connect_time")
+                .record(metrics.secure_connect_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.transfer_time")
+                .record(metrics.transfer_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.transfer_start_time")
+                .record(metrics.transfer_start_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.redirect_time")
+                .record(metrics.redirect_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.total_time")
+                .record(metrics.total_time().as_micros() as f64);
+        }
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
             CheckStatus::Success
@@ -244,7 +272,6 @@ mod tests {
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
-    use std::time::Duration;
 
     use super::{make_trace_header, IsahcChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
@@ -275,9 +302,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         let get_mock = server.mock(|when, then| {
@@ -312,9 +337,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         let get_mock = server.mock(|when, then| {
@@ -361,9 +384,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -405,9 +426,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         let head_mock = server.mock(|when, then| {
@@ -446,11 +465,8 @@ mod tests {
     #[tokio::test]
     async fn test_blocked_ranges() {
         let checker = IsahcChecker::new_internal(Options {
-            validate_url: true,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         let test_urls: Vec<_> = vec![
@@ -519,9 +535,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: true,
             disable_connection_reuse: true,
-            interface: None,
-            connection_cache_ttl: Duration::from_secs(90),
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         let localhost_config = CheckConfig {
@@ -545,11 +559,8 @@ mod tests {
     #[tokio::test]
     async fn test_validate_url() {
         let checker = IsahcChecker::new_internal(Options {
-            validate_url: true,
             disable_connection_reuse: true,
-            interface: None,
-            connection_cache_ttl: Duration::from_secs(90),
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         // Private address space
@@ -589,9 +600,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         let get_mock = server.mock(|when, then| {
@@ -716,8 +725,7 @@ mod tests {
             validate_url: false,
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
         let tick = make_tick();
 
@@ -780,9 +788,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -809,9 +815,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
 
         // Create a redirect loop where each request redirects back to itself
@@ -866,9 +870,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -909,9 +911,7 @@ mod tests {
         let checker = IsahcChecker::new_internal(Options {
             validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
-            dns_nameservers: None,
+            ..Default::default()
         });
         let tick = make_tick();
         let config = CheckConfig {

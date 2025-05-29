@@ -146,6 +146,9 @@ pub struct Config {
 
     /// Redis connection/response timeouts, in milliseconds.
     pub redis_timeouts_ms: u64,
+
+    /// Whether to collect connection-level metrics (only available on Isahc)
+    pub enable_metrics: bool,
 }
 
 impl Default for Config {
@@ -184,6 +187,7 @@ impl Default for Config {
             http_checker_dns_nameservers: None,
             thread_cpu_scale_factor: 1,
             redis_timeouts_ms: 30_000,
+            enable_metrics: false,
         }
     }
 }
@@ -336,6 +340,7 @@ mod tests {
                         http_checker_dns_nameservers: None,
                         thread_cpu_scale_factor: 1,
                         redis_timeouts_ms: 30_000,
+                        enable_metrics: false,
                     }
                 );
             },
@@ -426,6 +431,7 @@ mod tests {
                         ]),
                         thread_cpu_scale_factor: 3,
                         redis_timeouts_ms: 30_000,
+                        enable_metrics: false,
                     }
                 );
             },
