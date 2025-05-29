@@ -162,6 +162,7 @@ impl Manager {
                 Duration::from_secs(config.pool_idle_timeout_secs),
                 config.interface.to_owned(),
                 config.http_checker_dns_nameservers.clone(),
+                config.enable_metrics,
             )
             .into(),
         });
