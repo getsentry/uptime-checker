@@ -493,7 +493,7 @@ mod tests {
                 ..Default::default()
             };
             let check = ScheduledCheck::new_for_test(tick, config);
-            let result = checker.check_url(&check, "us-west".into()).await;
+            let result = checker.check_url(&check, "us-west").await;
 
             assert_eq!(result.status, CheckStatus::Failure);
         }
@@ -515,7 +515,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, localhost_config);
-        let result = checker.check_url(&check, "us-west".into()).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -542,7 +542,7 @@ mod tests {
         };
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, restricted_ip_config);
-        let result = checker.check_url(&check, "us-west".into()).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -559,7 +559,7 @@ mod tests {
         };
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, restricted_ipv6_config);
-        let result = checker.check_url(&check, "us-west".into()).await;
+        let result = checker.check_url(&check, "us-west").await;
         assert_eq!(
             result.status_reason.as_ref().map(|r| r.status_type),
             Some(CheckStatusReasonType::ConnectionError)
@@ -896,7 +896,7 @@ mod tests {
             ..Default::default()
         };
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west".into()).await;
+        let result = checker.check_url(&check, "us-west").await;
         eprintln!("{:?}", result);
 
         assert_eq!(result.status, CheckStatus::Failure);
