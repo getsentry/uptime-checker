@@ -1,5 +1,6 @@
 use anyhow::Context;
 use chrono::{DurationRound, TimeDelta, TimeZone, Utc};
+use futures::future::{join_all, JoinAll};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
@@ -14,6 +15,7 @@ use crate::check_executor::CheckSender;
 use crate::config_store::{RwConfigStore, Tick};
 use crate::config_waiter::BootResult;
 use crate::redis::build_redis_client;
+use crate::types::result::CheckResult;
 use redis::AsyncCommands;
 
 #[allow(clippy::too_many_arguments)]
@@ -51,6 +53,12 @@ pub fn run_scheduler(
         // channel is open or not.
         let _ = tasks_finished_tx.send(result);
     })
+}
+
+struct ExecutionBundle {
+    start: Instant,
+    tick: Tick,
+    checks: JoinAll<Receiver<CheckResult>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -148,35 +156,16 @@ async fn scheduler_loop(
         metrics::gauge!("scheduler.bucket_size", "uptime_region" => region, "partition" => partition.to_string())
         .set(bucket_size as f64);
 
-        // Spawn a task to wait for checks to complete.
-        //
-        // TODO(epurkhiser): We'll want to record the tick timestamp  in redis or some other store
-        // so that we can resume processing if we fail to process ticks (crash-loop, etc)
-        let tick_complete_join_handle = tokio::spawn(async move {
-            let checks_scheduled = results.len();
-            while let Some(result) = results.pop() {
-                // TODO(epurkhiser): Do we want to do something with the CheckResult here?
-                if let Err(err) = result.await {
-                    tracing::error!(error = ?err, "scheduler.tick_complete_join_await_error");
-                    return Err(anyhow::anyhow!(
-                        "Error receiving check result from executor"
-                    ));
-                }
-            }
+        let join_all_handle = join_all(results);
 
-            let execution_duration = tick_start.elapsed();
-
-            tracing::debug!(
-                result = %tick,
-                duration = ?execution_duration,
-                checks_scheduled,
-                "scheduler.tick_execution_complete"
-            );
-            Ok(tick)
-        });
+        let bundle = ExecutionBundle {
+            start: tick_start,
+            tick,
+            checks: join_all_handle,
+        };
 
         tick_complete_tx
-            .send(tick_complete_join_handle)
+            .send(bundle)
             .context("tick_complete_tx.send failure")?;
         Ok(())
     };
@@ -193,24 +182,44 @@ async fn scheduler_loop(
             // The handles arriving in the receiver are received in-order; look for the very
             // latest tick that completed.
             tracing::debug!("scheduler.tick_awaiting_join_handle");
+
             let num_read = tick_handles.len();
+            let mut last_tick = None;
+            for bundle in tick_handles.drain(..) {
+                let results = bundle.checks.await;
+                let checks_scheduled = results.len();
 
-            let Some(tick) = tick_handles.pop() else {
-                unreachable!("We have at least one element in the receive buffer");
-            };
+                let mut executor_done = false;
+                for result in results {
+                    if let Err(err) = result {
+                        // The executor is gone; we'll stop processing checks, and finish up any valid
+                        // redis writes.  The next loop ought to fail the tick_complete_rx handler (since the scheduler
+                        // should come down before the executor.)
+                        tracing::error!(error = ?err, "scheduler.tick_complete_join_await_error");
+                        executor_done = true;
+                        break;
+                    }
+                }
 
-            let tick = match tick.await {
-                Ok(Ok(tick)) => tick,
-                Ok(Err(err)) => {
-                    tracing::error!(progress_key, error = ?err, "scheduler.tick_processor_handle_await_error");
-                    return Err(anyhow::anyhow!("other error"));
+                if executor_done {
+                    break;
                 }
-                Err(err) => {
-                    tracing::error!(progress_key, error = ?err, "scheduler.tick_processor_handle_await_error");
-                    return Err(anyhow::anyhow!("join handle error"));
-                }
+
+                let execution_duration = bundle.start.elapsed();
+                tracing::debug!(
+                    result = %bundle.tick,
+                    duration = ?execution_duration,
+                    checks_scheduled,
+                    "scheduler.tick_execution_complete"
+                );
+                last_tick = Some(bundle.tick);
+            }
+
+            let Some(tick) = last_tick else {
+                return Err(anyhow::anyhow!(
+                    "Didn't process any checks; executor must be down"
+                ));
             };
-            tick_handles.clear();
 
             let Some(progress) = tick.time().timestamp_nanos_opt() else {
                 tracing::error!(progress_key, tick = %tick, "scheduler.tick_processor_bad_timestamp");
@@ -245,6 +254,9 @@ async fn scheduler_loop(
                     }
                 } else {
                     tracing::error!(progress_key, error = %e, "scheduler.progress_fatal_error");
+                    return Err(
+                        anyhow::anyhow!("Fatal error trying to set redis progress key").context(e),
+                    );
                 }
             }
             tracing::debug!(tick = %tick, "scheduler.tick_execution_complete_in_order");
@@ -398,12 +410,13 @@ mod tests {
             .unwrap();
 
         shutdown_token.cancel();
+        drop(executor_rx);
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
         let progress: u64 = connection
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
-        assert_eq!(progress, 128000000000);
+        assert_eq!(progress, 7140000000000);
     }
 
     #[tokio::test]
@@ -495,6 +508,7 @@ mod tests {
             .unwrap();
 
         shutdown_token.cancel();
+        drop(executor_rx);
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
     }
@@ -612,12 +626,13 @@ mod tests {
             .unwrap();
 
         shutdown_token.cancel();
+        drop(executor_rx);
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
         let progress: u64 = connection
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
-        assert_eq!(progress, 128000000000);
+        assert_eq!(progress, 7142000000000);
     }
 
     #[traced_test]
@@ -724,12 +739,13 @@ mod tests {
             .unwrap();
 
         shutdown_token.cancel();
+        drop(executor_rx);
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
         let progress: u64 = connection
             .get(progress_key)
             .expect("Couldn't save progress of scheduler");
-        assert_eq!(progress, 130000000000);
+        assert_eq!(progress, 7140000000000);
     }
 
     #[traced_test]
@@ -807,6 +823,7 @@ mod tests {
             .unwrap();
 
         shutdown_token.cancel();
+        drop(executor_rx);
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
     }
