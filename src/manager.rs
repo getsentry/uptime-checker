@@ -161,6 +161,7 @@ impl Manager {
                 config.disable_connection_reuse,
                 Duration::from_secs(config.pool_idle_timeout_secs),
                 config.interface.to_owned(),
+                config.http_checker_dns_nameservers.clone(),
             )
             .into(),
         });

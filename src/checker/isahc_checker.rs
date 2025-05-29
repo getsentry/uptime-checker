@@ -13,6 +13,7 @@ use isahc::config::{Configurable, NetworkInterface, RedirectPolicy};
 use isahc::error::ErrorKind;
 use isahc::{AsyncBody, HttpClient, Request, Response};
 use sentry::protocol::SpanId;
+use std::net::IpAddr;
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -36,6 +37,8 @@ struct Options {
     /// Set the maximum time-to-live (TTL) for connections to remain in the connection cache.
     connection_cache_ttl: Duration,
 
+    dns_nameservers: Option<Vec<IpAddr>>,
+
     /// When set to true sets the connection_cache_size to 0. Effectively removing connection
     /// pooling and forcing a new connection for each new request. This may help reduce connection
     /// errors due to connections being held open too long.
@@ -49,6 +52,7 @@ impl Default for Options {
             interface: None,
             connection_cache_ttl: Duration::from_secs(90),
             disable_connection_reuse: false,
+            dns_nameservers: None,
         }
     }
 }
@@ -111,6 +115,10 @@ impl IsahcChecker {
             builder = builder.ip_blacklists(ipv4_blacklist, ipv6_blacklist);
         }
 
+        if let Some(nameservers) = options.dns_nameservers {
+            builder = builder.dns_servers(&nameservers);
+        }
+
         if let Some(nic) = options.interface {
             builder = builder.interface(NetworkInterface::name(nic))
         }
@@ -125,12 +133,14 @@ impl IsahcChecker {
         disable_connection_reuse: bool,
         connection_cache_ttl: Duration,
         interface: Option<String>,
+        dns_nameservers: Option<Vec<IpAddr>>,
     ) -> Self {
         Self::new_internal(Options {
             validate_url,
             disable_connection_reuse,
             connection_cache_ttl,
             interface,
+            dns_nameservers,
         })
     }
 }
@@ -267,6 +277,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -303,6 +314,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -351,6 +363,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -394,6 +407,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
 
         let head_mock = server.mock(|when, then| {
@@ -436,6 +450,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
 
         let test_urls: Vec<_> = vec![
@@ -506,6 +521,7 @@ mod tests {
             disable_connection_reuse: true,
             interface: None,
             connection_cache_ttl: Duration::from_secs(90),
+            dns_nameservers: None,
         });
 
         let localhost_config = CheckConfig {
@@ -533,6 +549,7 @@ mod tests {
             disable_connection_reuse: true,
             interface: None,
             connection_cache_ttl: Duration::from_secs(90),
+            dns_nameservers: None,
         });
 
         // Private address space
@@ -574,6 +591,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
 
         let get_mock = server.mock(|when, then| {
@@ -763,6 +781,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
         let tick = make_tick();
         let config = CheckConfig {
@@ -791,6 +810,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
 
         // Create a redirect loop where each request redirects back to itself
@@ -889,6 +909,7 @@ mod tests {
             disable_connection_reuse: true,
             connection_cache_ttl: Duration::from_secs(90),
             interface: None,
+            dns_nameservers: None,
         });
         let tick = make_tick();
         let config = CheckConfig {
