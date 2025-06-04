@@ -866,7 +866,7 @@ dependencies = [
 [[package]]
 name = "curl"
 version = "0.4.47"
-source = "git+https://github.com/getsentry/curl-rust?rev=7b63d9d780bb9bd577abcbca37911adfd93ca7e9#7b63d9d780bb9bd577abcbca37911adfd93ca7e9"
+source = "git+https://github.com/getsentry/curl-rust?rev=213aa433e3cdb14f369f7e7007206ecc3334b210#213aa433e3cdb14f369f7e7007206ecc3334b210"
 dependencies = [
  "curl-sys",
  "libc",
@@ -880,7 +880,7 @@ dependencies = [
 [[package]]
 name = "curl-sys"
 version = "0.4.80+curl-8.12.1"
-source = "git+https://github.com/getsentry/curl-rust?rev=7b63d9d780bb9bd577abcbca37911adfd93ca7e9#7b63d9d780bb9bd577abcbca37911adfd93ca7e9"
+source = "git+https://github.com/getsentry/curl-rust?rev=213aa433e3cdb14f369f7e7007206ecc3334b210#213aa433e3cdb14f369f7e7007206ecc3334b210"
 dependencies = [
  "c-ares-sys",
  "cc",
@@ -1947,7 +1947,7 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 [[package]]
 name = "isahc"
 version = "1.7.3"
-source = "git+https://github.com/getsentry/isahc?rev=0c2a09afac3fec92b7b7059ded726c85c9b1068c#0c2a09afac3fec92b7b7059ded726c85c9b1068c"
+source = "git+https://github.com/getsentry/isahc?rev=268675f84e06ad184db9c2f3932a1524e5a40982#268675f84e06ad184db9c2f3932a1524e5a40982"
 dependencies = [
  "async-channel 1.9.0",
  "castaway",
