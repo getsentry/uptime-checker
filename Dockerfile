@@ -45,8 +45,8 @@ FROM alpine:3.20
 COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
 
 RUN apk add --no-cache tini libgcc curl && \
-    addgroup -S app --gid 100 && \
-    adduser -S app -G app --uid 100
+    addgroup -S app --gid 1000 && \
+    adduser -S app -G app --uid 1000
 
 USER app
 
