@@ -73,4 +73,4 @@ substitutions:
 
 options:
   machineType: 'E2_HIGHCPU_32'
-  diskSizeGb: 100
+  diskSizeGb: 25
