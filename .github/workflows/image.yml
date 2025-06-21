@@ -17,11 +17,21 @@ jobs:
           - os: ubuntu-24.04-arm
             platform: arm64
     name: build-${{ matrix.platform }}
+    if: ${{ github.repository_owner == 'getsentry' }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      # Only login to GHCR when we're not on Pull Request. Provenance only works
+      # when we push to the registry directly.
+      # This is safe to run on forks, since the entire job is guarded with
+      # `github.repository_owner == 'getsentry'` above.
+      - if: ${{ github.event_name != 'pull_request' }}
+        run: docker login --username '${{ github.actor }}' --password-stdin ghcr.io <<< "$GHCR_TOKEN"
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.10
@@ -30,15 +40,18 @@ jobs:
           cache-from: ghcr.io/getsentry/uptime-checker:latest
           cache-to: type=inline
           platforms: linux/${{ matrix.platform }}
-          tags: uptime-checker:${{ matrix.platform }}
-          outputs: type=docker,dest=/tmp/uptime-checker-${{ matrix.platform }}.tar
-          push: false
-
-      - name: Upload Image
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: uptime-checker-${{ matrix.platform }}
-          path: /tmp/uptime-checker-${{ matrix.platform }}.tar
+          tags: ghcr.io/getsentry/uptime-checker:${{ github.sha }}-${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.title=uptime-checker
+            org.opencontainers.image.description="Sentry Uptime Checker image"
+            org.opencontainers.image.vendor="Sentry"
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+          push: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
 
   assemble-uptime-checker-image:
     runs-on: ubuntu-latest
@@ -54,30 +67,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
-      - name: Download amd64 Image
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.2
-        with:
-          name: uptime-checker-amd64
-          path: /tmp
-
-      - name: Load amd64 Image
-        run: docker load --input /tmp/uptime-checker-amd64.tar
-
-      - name: Download arm64 Image
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.2
-        with:
-          name: uptime-checker-arm64
-          path: /tmp
-
-      - name: Load arm64 Image
-        run: docker load --input /tmp/uptime-checker-arm64.tar
-
       - name: Push to GitHub Container Registry
         run: |
-          docker tag uptime-checker:amd64 ghcr.io/getsentry/uptime-checker:${{ github.sha }}-amd64
-
-          docker tag uptime-checker:arm64 ghcr.io/getsentry/uptime-checker:${{ github.sha }}-arm64
-
           docker manifest create \
             ghcr.io/getsentry/uptime-checker:${{ github.sha }} \
             --amend ghcr.io/getsentry/uptime-checker:${{ github.sha }}-amd64 \
