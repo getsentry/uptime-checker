@@ -43,8 +43,8 @@ RUN cargo build --release
 FROM alpine:3.20
 
 RUN apk add --no-cache tini libgcc curl && \
-    addgroup -S app && \
-    adduser -S app -G app
+    addgroup -S app --gid 1000 && \
+    adduser -S app -G app --uid 1000
 
 COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
 

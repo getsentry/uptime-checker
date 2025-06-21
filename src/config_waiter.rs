@@ -39,7 +39,7 @@ pub fn wait_for_partition_boot(
     config_store: Arc<RwConfigStore>,
     partition: u16,
     shutdown: CancellationToken,
-    region: String,
+    region: &'static str,
 ) -> Receiver<BootResult> {
     let start = Instant::now();
     let (boot_finished, boot_finished_rx) = oneshot::channel::<BootResult>();
@@ -53,7 +53,7 @@ pub fn wait_for_partition_boot(
 
             let last_update = config_store
                 .read()
-                .expect("Lock poisoned")
+                .expect("Lock should not be poisoned")
                 .get_last_update();
 
             // If it's been longer than the BOOT_MAX_IDLE and we haven't updated the config store
@@ -70,7 +70,7 @@ pub fn wait_for_partition_boot(
         let boot_time_ms = start.elapsed().as_millis();
         let total_configs = config_store
             .read()
-            .expect("Lock poisoned")
+            .expect("Lock should not be poisoned")
             .all_configs()
             .len();
 
@@ -87,7 +87,7 @@ pub fn wait_for_partition_boot(
         if shutdown.is_cancelled() {
             boot_finished
                 .send(BootResult::Cancelled)
-                .expect("Failed to report boot cancellation");
+                .expect("Receiver should still exist");
             return;
         }
 
@@ -105,7 +105,7 @@ pub fn wait_for_partition_boot(
 
         boot_finished
             .send(BootResult::Started)
-            .expect("Failed to report boot");
+            .expect("Receiver should still exist");
     });
 
     boot_finished_rx
@@ -126,12 +126,8 @@ mod tests {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let shutdown_signal = CancellationToken::new();
-        let wait_booted = wait_for_partition_boot(
-            config_store.clone(),
-            0,
-            shutdown_signal.clone(),
-            "us-west".to_string(),
-        );
+        let wait_booted =
+            wait_for_partition_boot(config_store.clone(), 0, shutdown_signal.clone(), "us-west");
         tokio::pin!(wait_booted);
 
         // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.
@@ -172,12 +168,8 @@ mod tests {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let shutdown_signal = CancellationToken::new();
-        let wait_booted = wait_for_partition_boot(
-            config_store.clone(),
-            0,
-            shutdown_signal.clone(),
-            "us-west".to_string(),
-        );
+        let wait_booted =
+            wait_for_partition_boot(config_store.clone(), 0, shutdown_signal.clone(), "us-west");
         tokio::pin!(wait_booted);
 
         // nothing produced yet. Move time right before to the BOOT_MAX_IDLE.

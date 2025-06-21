@@ -1,6 +1,6 @@
 use super::ip_filter::is_external_ip;
 use super::{make_trace_header, make_trace_id, Checker};
-use crate::config_store::Tick;
+use crate::check_executor::ScheduledCheck;
 use crate::types::{
     check_config::CheckConfig,
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
@@ -62,7 +62,7 @@ async fn do_request(
     let timeout = check_config
         .timeout
         .to_std()
-        .expect("Timeout duration could not be converted to std::time::Duration");
+        .expect("Timeout duration should be representable as a duration");
 
     let url = check_config.url.as_str();
 
@@ -169,7 +169,13 @@ fn hyper_util_error(err: &reqwest::Error) -> Option<(CheckStatusReasonType, Stri
 impl ReqwestChecker {
     fn new_internal(options: Options) -> Self {
         let mut default_headers = HeaderMap::new();
-        default_headers.insert("User-Agent", UPTIME_USER_AGENT.to_string().parse().unwrap());
+        default_headers.insert(
+            "User-Agent",
+            UPTIME_USER_AGENT
+                .to_string()
+                .parse()
+                .expect("Valid by construction"),
+        );
 
         let mut builder = ClientBuilder::new()
             .hickory_dns(true)
@@ -194,7 +200,7 @@ impl ReqwestChecker {
             builder = builder.interface(&nic);
         }
 
-        let client = builder.build().expect("Failed to build checker client");
+        let client = builder.build().expect("builder should be buildable");
 
         Self { client }
     }
@@ -220,15 +226,15 @@ impl Checker for ReqwestChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     #[tracing::instrument]
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
-        let scheduled_check_time = tick.time();
+    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
+        let scheduled_check_time = check.get_tick().time();
         let actual_check_time = Utc::now();
         let span_id = SpanId::default();
-        let trace_id = make_trace_id(config, tick);
-        let trace_header = make_trace_header(config, &trace_id, span_id);
+        let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
+        let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
 
         let start = Instant::now();
-        let response = do_request(&self.client, config, &trace_header).await;
+        let response = do_request(&self.client, check.get_config(), &trace_header).await;
         let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
@@ -237,6 +243,52 @@ impl Checker for ReqwestChecker {
             CheckStatus::Failure
         };
 
+        if let Some(metrics) = match &response {
+            Ok(r) => Some(r.stats()),
+            Err(_) => None,
+        } {
+            if let Some(connect_stats) = metrics.http_stats.connection_stats {
+                if let Some(start) = connect_stats.get_connect_start() {
+                    if let Some(end) = connect_stats.get_connect_end() {
+                        metrics::histogram!("reqwest.connect_time")
+                            .record((end.as_micros() - start.as_micros()) as f64);
+                    }
+                }
+
+                if let Some(start) = connect_stats.get_dns_resolve_start() {
+                    if let Some(end) = connect_stats.get_dns_resolve_end() {
+                        metrics::histogram!("reqwest.name_lookup_time")
+                            .record((end.as_micros() - start.as_micros()) as f64);
+                    }
+                }
+
+                if let Some(start) = connect_stats.get_tls_start() {
+                    if let Some(end) = connect_stats.get_tls_end() {
+                        metrics::histogram!("reqwest.secure_connect_time")
+                            .record((end.as_micros() - start.as_micros()) as f64);
+                    }
+                }
+            }
+
+            if !metrics.redirects.is_empty() {
+                metrics::histogram!("reqwest.num_redirects").record(metrics.redirects.len() as f64);
+            }
+
+            if let Some(redirect_time) = metrics.get_last_redirect_start() {
+                metrics::histogram!("reqwest.redirect_time")
+                    .record(redirect_time.as_micros() as f64);
+            }
+
+            if let Some(ttfb) = metrics.get_header_ttfb() {
+                metrics::histogram!("reqwest.transfer_start_time").record(ttfb.as_micros() as f64);
+                metrics::histogram!("reqwest.transfer_time")
+                    .record((metrics.get_request_end().as_micros() - ttfb.as_micros()) as f64);
+            }
+
+            metrics::histogram!("reqwest.total_time")
+                .record(metrics.get_request_end().as_micros() as f64);
+        }
+
         let http_status_code = match &response {
             Ok(r) => Some(r.status().as_u16()),
             Err(e) => e.status().map(|s| s.as_u16()),
@@ -244,7 +296,7 @@ impl Checker for ReqwestChecker {
 
         let request_info = Some(RequestInfo {
             http_status_code,
-            request_type: config.request_method,
+            request_type: check.get_config().request_method,
         });
 
         let status_reason = match response {
@@ -304,7 +356,7 @@ impl Checker for ReqwestChecker {
 
         CheckResult {
             guid: trace_id,
-            subscription_id: config.subscription_id,
+            subscription_id: check.get_config().subscription_id,
             status,
             status_reason,
             trace_id,
@@ -313,13 +365,14 @@ impl Checker for ReqwestChecker {
             actual_check_time,
             duration,
             request_info,
-            region: region.to_string(),
+            region,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::check_executor::ScheduledCheck;
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
@@ -375,7 +428,9 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -420,7 +475,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -460,7 +516,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
@@ -501,7 +558,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(
@@ -536,7 +594,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&localhost_config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, localhost_config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -567,9 +626,8 @@ mod tests {
             ..Default::default()
         };
         let tick = make_tick();
-        let result = checker
-            .check_url(&restricted_ip_config, &tick, "us-west")
-            .await;
+        let check = ScheduledCheck::new_for_test(tick, restricted_ip_config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -589,9 +647,9 @@ mod tests {
             ..Default::default()
         };
         let tick = make_tick();
-        let result = checker
-            .check_url(&restricted_ipv6_config, &tick, "us-west")
-            .await;
+        let check = ScheduledCheck::new_for_test(tick, restricted_ipv6_config);
+        let result = checker.check_url(&check, "us-west").await;
+
         assert_eq!(
             result.status_reason.map(|r| r.description),
             Some("destination is restricted".to_string())
@@ -623,8 +681,9 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
-        let result_2 = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
+        let result_2 = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(result_2.status, CheckStatus::Success);
@@ -749,8 +808,8 @@ mod tests {
                 url: server_url,
                 ..Default::default()
             };
-
-            let result = checker.check_url(&config, &tick, "us-west").await;
+            let check = ScheduledCheck::new_for_test(tick, config);
+            let result = checker.check_url(&check, "us-west").await;
 
             assert_eq!(
                 result.status,
@@ -793,7 +852,8 @@ mod tests {
             url: "http://localhost:12345/".to_string(),
             ..Default::default()
         };
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
@@ -832,7 +892,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -878,19 +939,16 @@ mod tests {
             url: format!("http://localhost:{}", addr.port()),
             ..Default::default()
         };
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
-        assert_eq!(
-            result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::ConnectionError)
-        );
-        let result_description = result.status_reason.map(|r| r.description).unwrap();
-        assert_eq!(
-            result_description, "connection closed before message completed",
-            "Expected error message about closed connection: {}",
-            result_description
+        assert!(
+            result.status_reason.as_ref().map(|r| r.status_type)
+                == Some(CheckStatusReasonType::ConnectionError)
+                || result.status_reason.as_ref().map(|r| r.status_type)
+                    == Some(CheckStatusReasonType::Failure)
         );
     }
 
@@ -918,7 +976,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(

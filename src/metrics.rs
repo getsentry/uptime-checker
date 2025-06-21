@@ -23,7 +23,7 @@ pub fn init(config: &MetricsConfig) {
 
     let recorder = builder
         .build(Some("uptime_checker"))
-        .expect("Could not create StatsdRecorder");
+        .expect("Builder should be valid");
 
-    metrics::set_global_recorder(recorder).expect("Could not set global metrics recorder")
+    metrics::set_global_recorder(recorder).expect("Global recorder should be settable")
 }

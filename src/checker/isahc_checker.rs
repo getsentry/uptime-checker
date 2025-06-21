@@ -1,15 +1,19 @@
+use super::ip_filter::PRIVATE_RANGES;
 use super::{make_trace_header, make_trace_id, Checker};
-use crate::config_store::Tick;
+use crate::check_executor::ScheduledCheck;
 use crate::types::{
     check_config::CheckConfig,
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 use chrono::{TimeDelta, Utc};
 use http::Method;
+use ipnet::{Ipv4Net, Ipv6Net};
+use iprange::IpRange;
 use isahc::config::{Configurable, NetworkInterface, RedirectPolicy};
 use isahc::error::ErrorKind;
-use isahc::{AsyncBody, HttpClient, Request, Response};
+use isahc::{AsyncBody, HttpClient, Request, Response, ResponseExt};
 use sentry::protocol::SpanId;
+use std::net::IpAddr;
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -23,24 +27,36 @@ pub struct IsahcChecker {
 }
 
 struct Options {
+    /// When set to true (the default) resolution to internal network addresses will be restricted.
+    /// This should primarily be disabled for tests.
+    validate_url: bool,
+
     /// Specifies the network interface to bind the client to.
     interface: Option<String>,
 
     /// Set the maximum time-to-live (TTL) for connections to remain in the connection cache.
     connection_cache_ttl: Duration,
 
+    dns_nameservers: Option<Vec<IpAddr>>,
+
     /// When set to true sets the connection_cache_size to 0. Effectively removing connection
     /// pooling and forcing a new connection for each new request. This may help reduce connection
     /// errors due to connections being held open too long.
     disable_connection_reuse: bool,
+
+    /// When true, causes Isahc to collect detailed connection-level metrics.
+    enable_metrics: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
+            validate_url: true,
             interface: None,
             connection_cache_ttl: Duration::from_secs(90),
             disable_connection_reuse: false,
+            dns_nameservers: None,
+            enable_metrics: false,
         }
     }
 }
@@ -54,7 +70,7 @@ async fn do_request(
     let timeout = check_config
         .timeout
         .to_std()
-        .expect("Timeout duration could not be converted to std::time::Duration");
+        .expect("Timeout duration should be representable as a duration");
 
     let url = check_config.url.as_str();
 
@@ -78,10 +94,34 @@ impl IsahcChecker {
         let mut builder = HttpClient::builder()
             .default_headers(&[("User-Agent", UPTIME_USER_AGENT)])
             .connection_cache_ttl(options.connection_cache_ttl)
+            .metrics(options.enable_metrics)
             .redirect_policy(RedirectPolicy::Limit(9));
 
         if options.disable_connection_reuse {
             builder = builder.connection_cache_size(0);
+        }
+
+        if options.validate_url {
+            let ipv4_blacklist: IpRange<Ipv4Net> = PRIVATE_RANGES
+                .iter()
+                .filter_map(|r| match r.addr() {
+                    std::net::IpAddr::V4(_) => Some(r.to_string().parse().unwrap()),
+                    std::net::IpAddr::V6(_) => None,
+                })
+                .collect();
+
+            let ipv6_blacklist: IpRange<Ipv6Net> = PRIVATE_RANGES
+                .iter()
+                .filter_map(|r| match r.addr() {
+                    std::net::IpAddr::V4(_) => None,
+                    std::net::IpAddr::V6(_) => Some(r.to_string().parse().unwrap()),
+                })
+                .collect();
+            builder = builder.ip_blacklists(ipv4_blacklist, ipv6_blacklist);
+        }
+
+        if let Some(nameservers) = options.dns_nameservers {
+            builder = builder.dns_servers(&nameservers);
         }
 
         if let Some(nic) = options.interface {
@@ -94,14 +134,20 @@ impl IsahcChecker {
     }
 
     pub fn new(
+        validate_url: bool,
         disable_connection_reuse: bool,
         connection_cache_ttl: Duration,
         interface: Option<String>,
+        dns_nameservers: Option<Vec<IpAddr>>,
+        enable_metrics: bool,
     ) -> Self {
         Self::new_internal(Options {
+            validate_url,
             disable_connection_reuse,
             connection_cache_ttl,
             interface,
+            dns_nameservers,
+            enable_metrics,
         })
     }
 }
@@ -110,16 +156,37 @@ impl Checker for IsahcChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     #[tracing::instrument]
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
-        let scheduled_check_time = tick.time();
+    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
+        let scheduled_check_time = check.get_tick().time();
         let actual_check_time = Utc::now();
         let span_id = SpanId::default();
-        let trace_id = make_trace_id(config, tick);
-        let trace_header = make_trace_header(config, &trace_id, span_id);
+        let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
+        let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
 
         let start = Instant::now();
-        let response = do_request(&self.client, config, &trace_header).await;
-        let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
+        let response = do_request(&self.client, check.get_config(), &trace_header).await;
+        let duration = Some(TimeDelta::from_std(start.elapsed()).expect("Duration should be sane"));
+
+        // For now, record any metrics we get from Isahc to datadog.
+        if let Some(metrics) = match &response {
+            Ok(r) => r.metrics(),
+            _ => None,
+        } {
+            metrics::histogram!("isahc_metrics.connect_time")
+                .record(metrics.connect_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.name_lookup_time")
+                .record(metrics.name_lookup_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.secure_connect_time")
+                .record(metrics.secure_connect_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.transfer_time")
+                .record(metrics.transfer_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.transfer_start_time")
+                .record(metrics.transfer_start_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.redirect_time")
+                .record(metrics.redirect_time().as_micros() as f64);
+            metrics::histogram!("isahc_metrics.total_time")
+                .record(metrics.total_time().as_micros() as f64);
+        }
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
             CheckStatus::Success
@@ -134,7 +201,7 @@ impl Checker for IsahcChecker {
 
         let request_info = Some(RequestInfo {
             http_status_code,
-            request_type: config.request_method,
+            request_type: check.get_config().request_method,
         });
 
         let status_reason = match response {
@@ -183,7 +250,7 @@ impl Checker for IsahcChecker {
 
         CheckResult {
             guid: trace_id,
-            subscription_id: config.subscription_id,
+            subscription_id: check.get_config().subscription_id,
             status,
             status_reason,
             trace_id,
@@ -192,19 +259,19 @@ impl Checker for IsahcChecker {
             actual_check_time,
             duration,
             request_info,
-            region: region.to_string(),
+            region,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::check_executor::ScheduledCheck;
     use crate::checker::Checker;
     use crate::config_store::Tick;
     use crate::types::check_config::CheckConfig;
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
-    use std::time::Duration;
 
     use super::{make_trace_header, IsahcChecker, Options, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
@@ -212,6 +279,7 @@ mod tests {
     use httpmock::Method;
 
     use sentry::protocol::SpanId;
+    use tokio::io::AsyncReadExt;
     use uuid::Uuid;
     #[cfg(target_os = "linux")]
     use {
@@ -232,9 +300,9 @@ mod tests {
     async fn test_default_get() {
         let server = MockServer::start();
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
 
         let get_mock = server.mock(|when, then| {
@@ -251,7 +319,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -266,9 +335,9 @@ mod tests {
     async fn test_configured_post() {
         let server = MockServer::start();
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
 
         let get_mock = server.mock(|when, then| {
@@ -294,7 +363,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -312,9 +382,9 @@ mod tests {
 
         let timeout = TimeDelta::milliseconds(TIMEOUT);
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
 
         let timeout_mock = server.mock(|when, then| {
@@ -332,7 +402,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
@@ -353,9 +424,9 @@ mod tests {
     async fn test_simple_400() {
         let server = MockServer::start();
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
 
         let head_mock = server.mock(|when, then| {
@@ -371,7 +442,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(
@@ -390,89 +462,145 @@ mod tests {
         head_mock.assert();
     }
 
-    //#[tokio::test]
-    //async fn test_restricted_resolution() {
-    //    let checker = IsahcChecker::new_internal(Options {
-    //        validate_url: true,
-    //        disable_connection_reuse: true,
-    //        pool_idle_timeout: Duration::from_secs(90),
-    //        interface: None,
-    //    });
-    //
-    //    let localhost_config = CheckConfig {
-    //        url: "http://localhost/whatever".to_string(),
-    //        ..Default::default()
-    //    };
-    //
-    //    let tick = make_tick();
-    //    let result = checker.check_url(&localhost_config, &tick, "us-west").await;
-    //
-    //    assert_eq!(result.status, CheckStatus::Failure);
-    //    assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
-    //
-    //    assert_eq!(
-    //        result.status_reason.as_ref().map(|r| r.status_type),
-    //        Some(CheckStatusReasonType::DnsError)
-    //    );
-    //    assert_eq!(
-    //        result.status_reason.map(|r| r.description),
-    //        Some("destination is restricted".to_string())
-    //    );
-    //}
-    //
-    //#[tokio::test]
-    //async fn test_validate_url() {
-    //    let checker = IsahcChecker::new_internal(Options {
-    //        validate_url: true,
-    //        disable_connection_reuse: true,
-    //        pool_idle_timeout: Duration::from_secs(90),
-    //        interface: None,
-    //    });
-    //
-    //    // Private address space
-    //    let restricted_ip_config = CheckConfig {
-    //        url: "http://10.0.0.1/".to_string(),
-    //        ..Default::default()
-    //    };
-    //    let tick = make_tick();
-    //    let result = checker
-    //        .check_url(&restricted_ip_config, &tick, "us-west")
-    //        .await;
-    //
-    //    assert_eq!(result.status, CheckStatus::Failure);
-    //    assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
-    //
-    //    assert_eq!(
-    //        result.status_reason.as_ref().map(|r| r.status_type),
-    //        Some(CheckStatusReasonType::DnsError)
-    //    );
-    //    assert_eq!(
-    //        result.status_reason.map(|r| r.description),
-    //        Some("destination is restricted".to_string())
-    //    );
-    //
-    //    // Unique Local Address
-    //    let restricted_ipv6_config = CheckConfig {
-    //        url: "http://[fd12:3456:789a:1::1]/".to_string(),
-    //        ..Default::default()
-    //    };
-    //    let tick = make_tick();
-    //    let result = checker
-    //        .check_url(&restricted_ipv6_config, &tick, "us-west")
-    //        .await;
-    //    assert_eq!(
-    //        result.status_reason.map(|r| r.description),
-    //        Some("destination is restricted".to_string())
-    //    );
-    //}
+    #[tokio::test]
+    async fn test_blocked_ranges() {
+        let checker = IsahcChecker::new_internal(Options {
+            disable_connection_reuse: true,
+            ..Default::default()
+        });
+
+        let test_urls: Vec<_> = vec![
+            "0.0.0.1",
+            "10.0.0.1",
+            "100.64.0.1",
+            "127.0.0.1",
+            "169.254.1.1",
+            "172.16.0.1",
+            "192.0.0.1",
+            "192.0.2.1",
+            "192.88.99.1",
+            "192.168.1.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "224.0.0.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "[::ffff:0:1]",
+            "[::ffff:a00:1]",
+            "[::ffff:6440:1]",
+            "[::ffff:7f00:1]",
+            "[::ffff:a9fe:1]",
+            "[::ffff:ac10:1]",
+            "[::ffff:c000:1]",
+            "[::ffff:c000:200]",
+            "[::ffff:c058:6300]",
+            "[::ffff:c0a8:1]",
+            "[::ffff:c612:1]",
+            "[::ffff:c633:6400]",
+            "[::ffff:e000:1]",
+            "[::ffff:f000:1]",
+            "[::ffff:ffff:ffff]",
+            "[::1]",
+            "[::ffff:0:0:1]",
+            "[64:ff9b::1]",
+            "[64:ff9b:1::1]",
+            "[100::1]",
+            "[2001:0000::1]",
+            "[2001:20::1]",
+            "[2001:db8::1]",
+            "[2002::1]",
+            "[fc00::1]",
+            "[fe80::1]",
+            "[ff00::1]",
+        ]
+        .iter()
+        .map(|ip| format!("http://{ip}/get"))
+        .collect();
+
+        for url in test_urls {
+            let tick = make_tick();
+            let config = CheckConfig {
+                url: url.to_owned(),
+                ..Default::default()
+            };
+            let check = ScheduledCheck::new_for_test(tick, config);
+            let result = checker.check_url(&check, "us-west").await;
+
+            assert_eq!(result.status, CheckStatus::Failure);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_restricted_resolution() {
+        let checker = IsahcChecker::new_internal(Options {
+            validate_url: true,
+            disable_connection_reuse: true,
+            ..Default::default()
+        });
+
+        let localhost_config = CheckConfig {
+            url: "http://localhost/whatever".to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, localhost_config);
+        let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_url() {
+        let checker = IsahcChecker::new_internal(Options {
+            disable_connection_reuse: true,
+            ..Default::default()
+        });
+
+        // Private address space
+        let restricted_ip_config = CheckConfig {
+            url: "http://10.0.0.1/".to_string(),
+            ..Default::default()
+        };
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, restricted_ip_config);
+        let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+
+        // Unique Local Address
+        let restricted_ipv6_config = CheckConfig {
+            url: "http://[fd12:3456:789a:1::1]/".to_string(),
+            ..Default::default()
+        };
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, restricted_ipv6_config);
+        let result = checker.check_url(&check, "us-west").await;
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+    }
 
     #[tokio::test]
     async fn test_same_check_same_id() {
         let server = MockServer::start();
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
 
         let get_mock = server.mock(|when, then| {
@@ -489,8 +617,9 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
-        let result_2 = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
+        let result_2 = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(result_2.status, CheckStatus::Success);
@@ -593,9 +722,9 @@ mod tests {
         }
 
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
         let tick = make_tick();
 
@@ -623,7 +752,8 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = checker.check_url(&config, &tick, "us-west").await;
+            let check = ScheduledCheck::new_for_test(tick, config);
+            let result = checker.check_url(&check, "us-west").await;
 
             assert_eq!(
                 result.status,
@@ -655,16 +785,17 @@ mod tests {
     #[tokio::test]
     async fn test_connection_refused() {
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
         let tick = make_tick();
         let config = CheckConfig {
             url: "http://localhost:12345/".to_string(),
             ..Default::default()
         };
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
@@ -681,9 +812,9 @@ mod tests {
     async fn test_too_many_redirects() {
         let server = MockServer::start();
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
 
         // Create a redirect loop where each request redirects back to itself
@@ -701,8 +832,8 @@ mod tests {
         };
 
         let tick = make_tick();
-        let result = checker.check_url(&config, &tick, "us-west").await;
-
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
@@ -736,16 +867,59 @@ mod tests {
         });
 
         let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
             disable_connection_reuse: true,
-            connection_cache_ttl: Duration::from_secs(90),
-            interface: None,
+            ..Default::default()
         });
         let tick = make_tick();
         let config = CheckConfig {
             url: format!("http://localhost:{}", addr.port()),
             ..Default::default()
         };
-        let result = checker.check_url(&config, &tick, "us-west").await;
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+        assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+        let result_description = result.status_reason.map(|r| r.description).unwrap();
+        assert_eq!(
+            result_description, "unknown error",
+            "Expected error message about closed connection: {}",
+            result_description
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_accept() {
+        // Other tests implicitly test whether or not we can query an ipv4 address; given the
+        // way ip blocking works, it's a good idea to also test that we can hit an ipv6 address
+        // as well.
+        let listener = tokio::net::TcpListener::bind("::1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buff = [0; 8];
+            let _ = stream.read(&mut buff).await.unwrap();
+        });
+
+        let checker = IsahcChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            ..Default::default()
+        });
+        let tick = make_tick();
+        let config = CheckConfig {
+            url: format!("http://[::1]:{}", addr.port()),
+            ..Default::default()
+        };
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
+        eprintln!("{:?}", result);
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);

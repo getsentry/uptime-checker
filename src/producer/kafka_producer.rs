@@ -20,7 +20,8 @@ impl KafkaResultsProducer {
     pub fn new(topic_name: &str, config: KafkaConfig) -> Self {
         let producer = KafkaProducer::new(config);
         let topic = TopicOrPartition::Topic(Topic::new(topic_name));
-        let schema = sentry_kafka_schemas::get_schema("uptime-results", None).unwrap();
+        let schema =
+            sentry_kafka_schemas::get_schema("uptime-results", None).expect("Schema should exist");
 
         Self {
             producer,
@@ -84,7 +85,7 @@ mod tests {
                 request_type: RequestMethod::Get,
                 http_status_code: Some(200),
             }),
-            region: "us-west-1".to_string(),
+            region: "us-west-1",
         };
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since
         // it will fail async

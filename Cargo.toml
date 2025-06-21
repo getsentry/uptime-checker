@@ -48,7 +48,7 @@ metrics = "0.23.0"
 futures = "0.3.30"
 tokio-stream = "0.1.15"
 redis = { version = "0.30.0", features = ["cluster-async", "tokio-comp"] }
-ipnet = "2.10.0"
+ipnet = "2.11.0"
 hickory-resolver = "0.24.1"
 tokio-rustls = "0.26.1"
 rustls = "0.23.21"
@@ -57,11 +57,12 @@ time = "0.3"
 ctor = "0.2"
 hostname = "0.4.0"
 tokio-metrics = "0.4.0"
-isahc = "1.7.2"
+isahc = { git = "https://github.com/getsentry/isahc", rev = "268675f84e06ad184db9c2f3932a1524e5a40982" }
+iprange = "0.6.7"
 http = "1.2.0"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
-reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "be34e1e20c88190dfd46dd609f43aeb15e9ede1b" }
+reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "736b8ca01602cf00f4bef363aa1e98c5e56fb3ca" }
 # we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
 
 [profile.release]

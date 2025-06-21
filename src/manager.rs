@@ -1,7 +1,6 @@
-use futures::{Future, StreamExt};
+use futures::StreamExt;
 use rust_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::Vacant;
-use std::pin::Pin;
 use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
@@ -42,7 +41,12 @@ pub fn build_progress_key(partition: u16) -> String {
 }
 
 impl PartitionedService {
-    pub fn start(config: Arc<Config>, executor_sender: Arc<CheckSender>, partition: u16) -> Self {
+    pub fn start(
+        config: Arc<Config>,
+        executor_sender: Arc<CheckSender>,
+        partition: u16,
+        tasks_finished_tx: mpsc::UnboundedSender<Result<(), anyhow::Error>>,
+    ) -> Self {
         let config_store = Arc::new(ConfigStore::new_rw());
 
         let waiter_config_store = config_store.clone();
@@ -55,7 +59,7 @@ impl PartitionedService {
             waiter_config_store,
             partition,
             shutdown_signal.clone(),
-            config.region.clone(),
+            config.region,
         );
 
         let scheduler_join_handle = run_scheduler(
@@ -66,8 +70,10 @@ impl PartitionedService {
             build_progress_key(partition),
             config.redis_host.clone(),
             config_loaded,
-            config.region.clone(),
+            config.region,
             config.redis_enable_cluster,
+            config.redis_timeouts_ms,
+            tasks_finished_tx,
         );
 
         Self {
@@ -89,6 +95,8 @@ impl PartitionedService {
 
     pub async fn stop(self) {
         self.shutdown_signal.cancel();
+
+        // Okay to unwrap here, since we're just shutting down.
         self.scheduler_join_handle.await.unwrap();
         tracing::info!(partition = self.partition, "partitioned_service.shutdown");
     }
@@ -100,7 +108,35 @@ pub struct Manager {
     services: RwLock<HashMap<u16, Arc<PartitionedService>>>,
     executor_sender: Arc<CheckSender>,
     shutdown_sender: UnboundedSender<PartitionedService>,
+    tasks_finished_tx: tokio::sync::mpsc::UnboundedSender<Result<(), anyhow::Error>>,
+}
+
+pub struct ManagerShutdown {
+    tasks_finished_rx: mpsc::UnboundedReceiver<Result<(), anyhow::Error>>,
     shutdown_signal: CancellationToken,
+    consumer_join_handle: JoinHandle<()>,
+    results_worker: JoinHandle<()>,
+    services_join_handle: JoinHandle<()>,
+    executor_join_handle: JoinHandle<()>,
+}
+
+impl ManagerShutdown {
+    pub async fn stop(self) {
+        self.shutdown_signal.cancel();
+        // Unwrapping here because we're just shutting down; it's okay to fail badly
+        // at this point.
+        self.consumer_join_handle.await.unwrap();
+
+        self.results_worker.await.unwrap();
+
+        self.services_join_handle.await.unwrap();
+
+        self.executor_join_handle.await.unwrap();
+    }
+
+    pub async fn recv_task_finished(&mut self) -> Option<anyhow::Result<()>> {
+        self.tasks_finished_rx.recv().await
+    }
 }
 
 impl Manager {
@@ -110,7 +146,7 @@ impl Manager {
     ///
     /// The returned shutdown function may be called to stop the consumer and thus shutdown all
     /// PartitionedService's, stopping check execution.
-    pub fn start(config: Arc<Config>) -> impl FnOnce() -> Pin<Box<dyn Future<Output = ()>>> {
+    pub fn start(config: Arc<Config>) -> ManagerShutdown {
         let checker: Arc<HttpChecker> = Arc::new(match config.checker_mode {
             CheckerMode::Reqwest => ReqwestChecker::new(
                 !config.allow_internal_ips,
@@ -121,9 +157,12 @@ impl Manager {
             )
             .into(),
             CheckerMode::Isahc => IsahcChecker::new(
+                !config.allow_internal_ips,
                 config.disable_connection_reuse,
                 Duration::from_secs(config.pool_idle_timeout_secs),
                 config.interface.to_owned(),
+                config.http_checker_dns_nameservers.clone(),
+                config.enable_metrics,
             )
             .into(),
         });
@@ -131,8 +170,9 @@ impl Manager {
         let executor_conf = ExecutorConfig {
             concurrency: config.checker_concurrency,
             failure_retries: config.failure_retries,
-            region: config.region.clone(),
+            region: config.region,
             record_task_metrics: config.record_task_metrics,
+            checker_parallel: config.checker_parallel,
         };
 
         let cancel_token = CancellationToken::new();
@@ -180,24 +220,23 @@ impl Manager {
         };
 
         let (shutdown_sender, shutdown_service_rx) = mpsc::unbounded_channel();
+        let (tasks_finished_tx, tasks_finished_rx) = mpsc::unbounded_channel();
 
         let manager = Arc::new(Self {
             config,
             services: RwLock::new(HashMap::new()),
             executor_sender,
             shutdown_sender,
-            shutdown_signal: cancel_token,
+            tasks_finished_tx,
         });
 
         let consumer_join_handle = match &manager.config.config_provider_mode {
-            ConfigProviderMode::Redis => run_config_provider(
-                &manager.config,
-                manager.clone(),
-                manager.shutdown_signal.clone(),
-            ),
+            ConfigProviderMode::Redis => {
+                run_config_provider(&manager.config, manager.clone(), cancel_token.clone())
+            }
         };
 
-        let shutdown_signal = manager.shutdown_signal.clone();
+        let shutdown_signal = cancel_token.clone();
 
         // process shutdown services as they are shutdown. All services must be shutdown before
         // the manager is completely stopped
@@ -211,33 +250,30 @@ impl Manager {
                 .await
         });
 
-        move || {
-            Box::pin(async move {
-                shutdown_signal.cancel();
-                consumer_join_handle.await.expect("Failed to stop consumer");
-
-                results_worker.await.expect("Failed to stop vector worker");
-
-                services_join_handle
-                    .await
-                    .expect("Failed to stop partitioned services");
-
-                executor_join_handle.await.expect("Failed to stop executor");
-            })
+        ManagerShutdown {
+            tasks_finished_rx,
+            shutdown_signal,
+            consumer_join_handle,
+            results_worker,
+            services_join_handle,
+            executor_join_handle,
         }
     }
 
     pub fn get_service(&self, partition: u16) -> Arc<PartitionedService> {
         self.services
             .read()
-            .unwrap()
+            .expect("Lock should not be poisoned")
             .get(&partition)
-            .expect("Cannot access unregistered partition")
+            .expect("Parition should have been registered")
             .clone()
     }
 
     pub fn has_service(&self, partition: u16) -> bool {
-        self.services.read().unwrap().contains_key(&partition)
+        self.services
+            .read()
+            .expect("Lock should not be poisoned")
+            .contains_key(&partition)
     }
 
     /// Notify the manager for which parititions it is responsible for.
@@ -245,7 +281,13 @@ impl Manager {
     /// Partitions that were previously known will have their services dropped. New partitions will
     /// register a new PartitionedService.
     pub fn update_partitions(&self, new_partitions: &HashSet<u16>) {
-        let known_partitions: HashSet<_> = self.services.read().unwrap().keys().cloned().collect();
+        let known_partitions: HashSet<_> = self
+            .services
+            .read()
+            .expect("Lock should not be poisoned")
+            .keys()
+            .cloned()
+            .collect();
 
         // Drop partitions that we are no longer responsible for
         for removed_part in known_partitions.difference(new_partitions) {
@@ -260,21 +302,25 @@ impl Manager {
 
     fn register_partition(&self, partition: u16) {
         tracing::info!(partition, "partition_update.registered_new");
-        let mut services = self.services.write().unwrap();
+        let mut services = self.services.write().expect("Lock should not be poisoned");
 
         let Vacant(entry) = services.entry(partition) else {
             tracing::error!(partition, "partition_update.already_registered");
             return;
         };
 
-        let service =
-            PartitionedService::start(self.config.clone(), self.executor_sender.clone(), partition);
+        let service = PartitionedService::start(
+            self.config.clone(),
+            self.executor_sender.clone(),
+            partition,
+            self.tasks_finished_tx.clone(),
+        );
         entry.insert(Arc::new(service));
     }
 
     fn unregister_partition(&self, partition: u16) {
         tracing::info!(partition, "partition_update.unregistering");
-        let mut services = self.services.write().unwrap();
+        let mut services = self.services.write().expect("Lock should not be poisoned");
 
         let Some(service) = services.remove(&partition) else {
             tracing::error!(partition, "partition_update.not_registered");
@@ -282,8 +328,8 @@ impl Manager {
         };
 
         self.shutdown_sender
-            .send(Arc::into_inner(service).expect("Cannot take ownership of service"))
-            .expect("Cannot queue service for shutdown");
+            .send(Arc::into_inner(service).expect("Should be no outstanding references to arc"))
+            .expect("Shutdown sender should still be open");
     }
 }
 
@@ -295,20 +341,20 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
     use tokio::sync::mpsc::{self};
-    use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
 
     impl Manager {
         pub fn start_without_consumer(config: Arc<Config>) -> Arc<Self> {
             let (executor_sender, _) = CheckSender::new();
             let (shutdown_sender, mut shutdown_service_rx) = mpsc::unbounded_channel();
+            let (partition_finished_tx, _) = mpsc::unbounded_channel();
 
             let manager = Arc::new(Self {
                 config,
                 services: RwLock::new(HashMap::new()),
                 executor_sender: Arc::new(executor_sender),
                 shutdown_sender,
-                shutdown_signal: CancellationToken::new(),
+                tasks_finished_tx: partition_finished_tx,
             });
 
             // For mocking purposes just recieve shutdowns, no need to do anything with them
@@ -323,8 +369,14 @@ mod tests {
     #[tokio::test]
     async fn test_partitioned_service_get_config_store() {
         let (executor_sender, _) = CheckSender::new();
-        let service =
-            PartitionedService::start(Arc::new(Config::default()), Arc::new(executor_sender), 0);
+        let (partition_finished_tx, _) = mpsc::unbounded_channel();
+
+        let service = PartitionedService::start(
+            Arc::new(Config::default()),
+            Arc::new(executor_sender),
+            0,
+            partition_finished_tx,
+        );
         service.get_config_store();
         service.stop().await;
     }
@@ -332,19 +384,31 @@ mod tests {
     #[tokio::test]
     async fn test_start_stop() {
         let (executor_sender, _) = CheckSender::new();
-        let service =
-            PartitionedService::start(Arc::new(Config::default()), Arc::new(executor_sender), 0);
+        let (partition_finished_tx, _) = mpsc::unbounded_channel();
+
+        let service = PartitionedService::start(
+            Arc::new(Config::default()),
+            Arc::new(executor_sender),
+            0,
+            partition_finished_tx,
+        );
         service.stop().await;
     }
 
     #[tokio::test]
     async fn test_start_stop_redis() {
         let (executor_sender, _) = CheckSender::new();
+        let (partition_finished_tx, _) = mpsc::unbounded_channel();
         let config = Config {
             config_provider_mode: ConfigProviderMode::Redis,
             ..Default::default()
         };
-        let service = PartitionedService::start(Arc::new(config), Arc::new(executor_sender), 0);
+        let service = PartitionedService::start(
+            Arc::new(config),
+            Arc::new(executor_sender),
+            0,
+            partition_finished_tx,
+        );
         service.stop().await;
     }
 
@@ -356,7 +420,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "Cannot access unregistered partition")]
+    #[should_panic(expected = "Parition should have been registered")]
     async fn test_manager_get_service_fail() {
         let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         manager.register_partition(0);
@@ -382,7 +446,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "Cannot access unregistered partition")]
+    #[should_panic(expected = "Parition should have been registered")]
     async fn test_manager_unregister_partition() {
         let manager = Manager::start_without_consumer(Arc::new(Config::default()));
         manager.register_partition(0);

@@ -63,6 +63,9 @@ pub struct Config {
     /// The number of HTTP checks that will be executed at once.
     pub checker_concurrency: usize,
 
+    /// Whether the HTTP checks are multiplexed on more than one thread.
+    pub checker_parallel: bool,
+
     /// The network interface to bind the uptime checker HTTP client to if set.
     pub interface: Option<String>,
 
@@ -111,7 +114,8 @@ pub struct Config {
     pub redis_host: String,
 
     /// The region that this checker is running in
-    pub region: String,
+    #[serde(default, deserialize_with = "deserialize_region")]
+    pub region: &'static str,
 
     /// Allow uptime checks against internal IP addresses
     pub allow_internal_ips: bool,
@@ -142,6 +146,12 @@ pub struct Config {
     /// DNS name servers to use when making checks in the http checker
     #[serde(default, deserialize_with = "deserialize_nameservers")]
     pub http_checker_dns_nameservers: Option<Vec<IpAddr>>,
+
+    /// Redis connection/response timeouts, in milliseconds.
+    pub redis_timeouts_ms: u64,
+
+    /// Whether to collect connection-level metrics (only available on Isahc)
+    pub enable_metrics: bool,
 }
 
 impl Default for Config {
@@ -150,11 +160,12 @@ impl Default for Config {
             sentry_dsn: None,
             sentry_env: None,
             checker_concurrency: 200,
+            checker_parallel: false,
             log_level: logging::Level::Warn,
             log_format: logging::LogFormat::Auto,
             interface: None,
             metrics: MetricsConfig {
-                statsd_addr: "127.0.0.1:8126".parse().unwrap(),
+                statsd_addr: "127.0.0.1:8126".parse().expect("Parsable by construction"),
                 default_tags: BTreeMap::new(),
                 hostname_tag: None,
             },
@@ -169,7 +180,7 @@ impl Default for Config {
             config_provider_redis_total_partitions: 128,
             redis_enable_cluster: false,
             redis_host: "redis://127.0.0.1:6379".to_owned(),
-            region: "default".to_owned(),
+            region: "default",
             allow_internal_ips: false,
             disable_connection_reuse: true,
             pool_idle_timeout_secs: 90,
@@ -179,6 +190,8 @@ impl Default for Config {
             failure_retries: 0,
             http_checker_dns_nameservers: None,
             thread_cpu_scale_factor: 1,
+            redis_timeouts_ms: 30_000,
+            enable_metrics: false,
         }
     }
 }
@@ -206,6 +219,18 @@ impl Config {
         let config: Config = builder.extract()?;
         Ok(config)
     }
+}
+
+fn deserialize_region<'de, D>(deserializer: D) -> Result<&'static str, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = String::deserialize(deserializer)?;
+
+    // We're going to deliberately leak the region string here--at the cost of some unfreeable
+    // memory, we eliminate a major source of clones, especially in the inner-loops of the
+    // schedueler and executor.
+    Ok(s.leak())
 }
 
 fn deserialize_nameservers<'de, D>(deserializer: D) -> Result<Option<Vec<IpAddr>>, D::Error>
@@ -283,6 +308,7 @@ mod tests {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env")),
                         checker_concurrency: 100,
+                        checker_parallel: false,
                         log_level: logging::Level::Warn,
                         log_format: logging::LogFormat::Auto,
                         interface: None,
@@ -305,7 +331,7 @@ mod tests {
                         config_provider_redis_total_partitions: 128,
                         redis_enable_cluster: false,
                         redis_host: "redis://127.0.0.1:6379".to_owned(),
-                        region: "default".to_owned(),
+                        region: "default",
                         allow_internal_ips: false,
                         disable_connection_reuse: true,
                         record_task_metrics: false,
@@ -318,6 +344,8 @@ mod tests {
                         failure_retries: 0,
                         http_checker_dns_nameservers: None,
                         thread_cpu_scale_factor: 1,
+                        redis_timeouts_ms: 30_000,
+                        enable_metrics: false,
                     }
                 );
             },
@@ -372,6 +400,7 @@ mod tests {
                         sentry_dsn: Some("my_dsn".to_owned()),
                         sentry_env: Some(Cow::from("my_env_override")),
                         checker_concurrency: 200,
+                        checker_parallel: false,
                         log_level: logging::Level::Warn,
                         log_format: logging::LogFormat::Json,
                         interface: Some("eth0".to_owned()),
@@ -391,7 +420,7 @@ mod tests {
                         config_provider_redis_total_partitions: 32,
                         redis_enable_cluster: true,
                         redis_host: "10.0.0.3:6379".to_owned(),
-                        region: "us-west".to_owned(),
+                        region: "us-west",
                         allow_internal_ips: true,
                         disable_connection_reuse: false,
                         record_task_metrics: false,
@@ -407,6 +436,8 @@ mod tests {
                             IpAddr::from([8, 8, 4, 4])
                         ]),
                         thread_cpu_scale_factor: 3,
+                        redis_timeouts_ms: 30_000,
+                        enable_metrics: false,
                     }
                 );
             },

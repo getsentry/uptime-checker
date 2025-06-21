@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Result;
 use chrono::{TimeDelta, Utc};
 use futures::StreamExt;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -30,6 +31,17 @@ pub struct ScheduledCheck {
 }
 
 impl ScheduledCheck {
+    #[cfg(test)]
+    pub fn new_for_test(tick: Tick, config: CheckConfig) -> Self {
+        let (resolve_tx, _) = tokio::sync::oneshot::channel();
+        ScheduledCheck {
+            tick,
+            config: config.into(),
+            resolve_tx,
+            retry_count: 0,
+        }
+    }
+
     /// Get the scheduled CheckConfig.
     pub fn get_config(&self) -> &Arc<CheckConfig> {
         &self.config
@@ -40,11 +52,15 @@ impl ScheduledCheck {
         &self.tick
     }
 
+    pub fn get_retry(&self) -> u16 {
+        self.retry_count
+    }
+
     /// Report the completion of the scheduled check.
-    pub fn record_result(self, result: CheckResult) {
+    pub fn record_result(self, result: CheckResult) -> Result<()> {
         self.resolve_tx
             .send(result)
-            .expect("Failed to resolve completed check");
+            .map_err(|_| anyhow::anyhow!("Scheduled check send error"))
     }
 }
 
@@ -71,7 +87,11 @@ impl CheckSender {
 
     /// Queues a check for execution, returning a oneshot receiver that will be fired once the check
     /// has resolved to a CheckResult.
-    pub fn queue_check(&self, tick: Tick, config: Arc<CheckConfig>) -> Receiver<CheckResult> {
+    pub fn queue_check(
+        &self,
+        tick: Tick,
+        config: Arc<CheckConfig>,
+    ) -> anyhow::Result<Receiver<CheckResult>> {
         let (resolve_tx, resolve_rx) = oneshot::channel();
 
         let scheduled_check = ScheduledCheck {
@@ -81,39 +101,38 @@ impl CheckSender {
             retry_count: 0,
         };
 
-        self.queue_size.fetch_add(1, Ordering::SeqCst);
-        self.sender
-            .send(scheduled_check)
-            .expect("Failed to queue ScheduledCheck");
+        self.queue_size.fetch_add(1, Ordering::Relaxed);
 
-        resolve_rx
+        // The SendError type from `send` doesn't have any useful context (except the entire
+        // check object!) so just map to empty.
+        self.sender.send(scheduled_check)?;
+        Ok(resolve_rx)
     }
 
     /// Requeues the check to be executed again, increasing the number of retries by 1
-    fn queue_check_for_retry(&self, mut check: ScheduledCheck) {
+    fn queue_check_for_retry(&self, mut check: ScheduledCheck) -> Result<()> {
         check.retry_count += 1;
-        self.queue_size.fetch_add(1, Ordering::SeqCst);
-        self.sender
-            .send(check)
-            .expect("Failed to queue ScheduledCheck");
+        self.queue_size.fetch_add(1, Ordering::Relaxed);
+        self.sender.send(check)?;
+        Ok(())
     }
 }
 
 impl CheckResult {
     /// Produce a missed check result from a scheduled check.
-    pub fn missed_from(config: &CheckConfig, tick: &Tick, region: &str) -> Self {
+    pub fn missed_from(check: &ScheduledCheck, region: &'static str) -> Self {
         Self {
             guid: Uuid::new_v4(),
-            subscription_id: config.subscription_id,
+            subscription_id: check.get_config().subscription_id,
             status: CheckStatus::MissedWindow,
             status_reason: None,
             trace_id: Default::default(),
             span_id: Default::default(),
-            scheduled_check_time: tick.time(),
+            scheduled_check_time: check.get_tick().time(),
             actual_check_time: Utc::now(),
             duration: None,
             request_info: None,
-            region: region.to_string(),
+            region,
         }
     }
 }
@@ -122,12 +141,15 @@ pub struct ExecutorConfig {
     /// Number of checks that will be executed at the same time.
     pub concurrency: usize,
 
+    /// Whether the checks should be multiplexed on more than on thread.
+    pub checker_parallel: bool,
+
     /// Number of times a check will be retred when the execution of the check results in a
     /// failure.
     pub failure_retries: u16,
 
     /// The region the checker checker is running as
-    pub region: String,
+    pub region: &'static str,
 
     /// Track metrics about executed tasks
     pub record_task_metrics: bool,
@@ -187,86 +209,110 @@ async fn executor_loop(
 
     // record metrics to datadog every 10 seconds
     if conf.record_task_metrics {
-        let metrics_region = conf.region.clone();
         let metrics_monitor = metrics_monitor.clone();
         tokio::spawn(async move {
             for interval in metrics_monitor.intervals() {
-                record_task_metrics(interval, metrics_region.clone());
+                record_task_metrics(interval, conf.region);
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
     }
+
+    let queue_gauge = metrics::gauge!("executor.queue_size", "uptime_region" => conf.region);
+    let num_running_gauge = metrics::gauge!("executor.num_running", "uptime_region" => conf.region);
 
     schedule_check_stream
         .take_until(cancel_token.cancelled())
         .for_each_concurrent(conf.concurrency, |scheduled_check| {
             let job_checker = checker.clone();
             let job_producer = producer.clone();
-            let job_region = conf.region.clone();
-            let job_num_running = num_running.clone();
             let job_check_sender = check_sender.clone();
 
-            let job_metrics_monitor = metrics_monitor.clone();
+            let queue_size_val = queue_size.fetch_sub(1, Ordering::Relaxed) - 1;
+            queue_gauge.set(queue_size_val as f64);
 
-            num_running.fetch_add(1, Ordering::SeqCst);
-            queue_size.fetch_sub(1, Ordering::SeqCst);
-            metrics::gauge!("executor.queue_size", "uptime_region" => conf.region.clone())
-                .set(queue_size.load(Ordering::SeqCst) as f64);
-            metrics::gauge!("executor.num_running", "uptime_region" => conf.region.clone())
-                .set(num_running.load(Ordering::SeqCst) as f64);
+            let num_running_val = num_running.fetch_add(1, Ordering::Relaxed) + 1;
+            num_running_gauge.set(num_running_val as f64);
 
-            async move {
-                let check_task = async move {
-                    let config = &scheduled_check.config;
-                    let tick = &scheduled_check.tick;
-
-                    // If a check execution is processed after more than the interval of the check
-                    // config we skip the check, we were too late
-                    let late_by = Utc::now() - tick.time();
-                    let interval = TimeDelta::seconds(config.interval as i64);
-
-                    let check_result = if late_by > interval {
-                        CheckResult::missed_from(config, tick, &job_region)
-                    } else {
-                        job_checker.check_url(config, tick, &job_region).await
-                    };
-
-                    let will_retry = check_result.status == CheckStatus::Failure
-                        && scheduled_check.retry_count < conf.failure_retries;
-
-                    record_result_metrics(
-                        &check_result,
-                        scheduled_check.retry_count > 0,
-                        will_retry,
-                    );
-
-                    // re-queue for execution again
-                    if will_retry {
-                        tracing::debug!(result = ?check_result, "executor.check_will_retry");
-                        job_check_sender.queue_check_for_retry(scheduled_check);
-                        job_num_running.fetch_sub(1, Ordering::SeqCst);
-                        return;
-                    }
-
-                    if let Err(e) = job_producer.produce_checker_result(&check_result) {
-                        tracing::error!(error = ?e, "executor.failed_to_produce");
-                    }
-
-                    tracing::debug!(result = ?check_result, "executor.check_complete");
-
-                    scheduled_check.record_result(check_result);
-                    job_num_running.fetch_sub(1, Ordering::SeqCst);
-                };
-
+            async {
+                let check_fut = do_check(
+                    conf.failure_retries,
+                    scheduled_check,
+                    job_checker,
+                    job_check_sender,
+                    job_producer,
+                    conf.region,
+                );
                 if conf.record_task_metrics {
-                    let _ = job_metrics_monitor.instrument(check_task).await;
+                    if conf.checker_parallel {
+                        tokio::spawn(metrics_monitor.instrument(check_fut))
+                            .await
+                            .expect("The check task should not fail");
+                    } else {
+                        metrics_monitor.instrument(check_fut).await;
+                    }
                 } else {
-                    let _ = tokio::spawn(check_task).await;
+                    tokio::spawn(check_fut)
+                        .await
+                        .expect("The check task should not fail");
                 }
+                let num_running_val = num_running.fetch_sub(1, Ordering::Relaxed) - 1;
+                num_running_gauge.set(num_running_val as f64);
             }
         })
         .await;
     tracing::info!("executor.shutdown");
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn do_check(
+    failure_retries: u16,
+    scheduled_check: ScheduledCheck,
+    job_checker: Arc<impl Checker + 'static>,
+    job_check_sender: Arc<CheckSender>,
+    job_producer: Arc<impl ResultsProducer + 'static>,
+    job_region: &'static str,
+) {
+    let config = &scheduled_check.config;
+    let tick = &scheduled_check.tick;
+
+    // If a check execution is processed after more than the interval of the check
+    // config we skip the check, we were too late
+    let late_by = Utc::now() - tick.time();
+    let interval = TimeDelta::seconds(config.interval as i64);
+
+    let check_result = if late_by > interval {
+        CheckResult::missed_from(&scheduled_check, job_region)
+    } else {
+        job_checker.check_url(&scheduled_check, job_region).await
+    };
+
+    let will_retry = check_result.status == CheckStatus::Failure
+        && scheduled_check.retry_count < failure_retries;
+
+    record_result_metrics(&check_result, scheduled_check.retry_count > 0, will_retry);
+
+    // re-queue for execution again
+    if will_retry {
+        tracing::debug!(result = ?check_result, "executor.check_will_retry");
+
+        // Expect is necessary here--we need to break out of the stream processing loop.
+        job_check_sender
+            .queue_check_for_retry(scheduled_check)
+            .expect("Executor loop channel should exist");
+        return;
+    }
+
+    if let Err(e) = job_producer.produce_checker_result(&check_result) {
+        tracing::error!(error = ?e, "executor.failed_to_produce");
+    }
+
+    tracing::debug!(result = ?check_result, "executor.check_complete");
+
+    // Expect is necessary here--we need to break out of the stream processing loop.
+    scheduled_check
+        .record_result(check_result)
+        .expect("Check recording channel should exist");
 }
 
 fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool) {
@@ -311,17 +357,17 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
             "status" => status_label,
             "failure_reason" => failure_reason.unwrap_or("ok"),
             "status_code" => status_code.clone(),
-            "uptime_region" => result.region.clone(),
+            "uptime_region" => result.region,
             "is_retry" => retry_label,
             "will_retry" => will_retry_label,
         )
-        .record(duration.to_std().unwrap().as_secs_f64());
+        .record(duration.to_std().unwrap_or_default().as_secs_f64());
     }
 
     // Record time between scheduled and actual check
     let delay = (*actual_check_time - *scheduled_check_time)
         .to_std()
-        .unwrap()
+        .unwrap_or_default()
         .as_secs_f64();
 
     metrics::histogram!(
@@ -330,7 +376,7 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
         "status_code" => status_code.clone(),
-        "uptime_region" => result.region.clone(),
+        "uptime_region" => result.region,
         "is_retry" => retry_label,
         "will_retry" => will_retry_label,
     )
@@ -342,52 +388,52 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
         "status" => status_label,
         "failure_reason" => failure_reason.unwrap_or("ok"),
         "status_code" => status_code,
-        "uptime_region" => result.region.clone(),
+        "uptime_region" => result.region,
         "is_retry" => retry_label,
         "will_retry" => will_retry_label,
     )
     .increment(1);
 }
 
-fn record_task_metrics(interval: tokio_metrics::TaskMetrics, region: String) {
+fn record_task_metrics(interval: tokio_metrics::TaskMetrics, region: &'static str) {
     metrics::gauge!(
         "executor_task.mean_first_poll_delay",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_first_poll_delay());
     metrics::gauge!(
         "executor_task.mean_idle_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_idle_duration());
     metrics::gauge!(
         "executor_task.mean_poll_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_poll_duration());
     metrics::gauge!(
         "executor_task.mean_scheduled_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_scheduled_duration());
     metrics::gauge!(
         "executor_task.mean_slow_poll_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_slow_poll_duration());
     metrics::gauge!(
         "executor_task.mean_fast_poll_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_fast_poll_duration());
     metrics::gauge!(
         "executor_task.mean_long_delay_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_long_delay_duration());
     metrics::gauge!(
         "executor_task.mean_short_delay_duration",
-        "uptime_region" => region.clone(),
+        "uptime_region" => region,
     )
     .set(interval.mean_short_delay_duration());
 }
@@ -426,8 +472,9 @@ mod tests {
 
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 0,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -438,7 +485,7 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = sender.queue_check(tick, config.clone());
+        let resolve_rx = sender.queue_check(tick, config.clone()).unwrap();
         tokio::pin!(resolve_rx);
 
         // Will not be resolved yet
@@ -469,8 +516,9 @@ mod tests {
         // Only allow 2 configs to execute concurrently
         let conf = ExecutorConfig {
             concurrency: 2,
+            checker_parallel: false,
             failure_retries: 0,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -483,12 +531,12 @@ mod tests {
                     subscription_id: Uuid::from_u128(i),
                     ..Default::default()
                 });
-                sender.queue_check(tick, config)
+                sender.queue_check(tick, config).unwrap()
             })
             .collect();
 
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 4);
-        assert_eq!(sender.num_running.load(Ordering::SeqCst), 0);
+        assert_eq!(sender.queue_size.load(Ordering::Relaxed), 4);
+        assert_eq!(sender.num_running.load(Ordering::Relaxed), 0);
 
         let resolve_rx_4 = configs.pop().unwrap();
         tokio::pin!(resolve_rx_4);
@@ -510,8 +558,8 @@ mod tests {
         // Move time forward less than one second. Two will start running
         time::sleep(Duration::from_millis(999)).await;
         // No task has completed yet, some are running, some are queued
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 2);
-        assert_eq!(sender.num_running.load(Ordering::SeqCst), 2);
+        assert_eq!(sender.queue_size.load(Ordering::Relaxed), 2);
+        assert_eq!(sender.num_running.load(Ordering::Relaxed), 2);
         assert_eq!(poll!(resolve_rx_1.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_2.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_3.as_mut()), Poll::Pending);
@@ -526,16 +574,16 @@ mod tests {
         assert_eq!(poll!(resolve_rx_3.as_mut()), Poll::Pending);
         assert_eq!(poll!(resolve_rx_4.as_mut()), Poll::Pending);
 
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 0);
-        assert_eq!(sender.num_running.load(Ordering::SeqCst), 2);
+        assert_eq!(sender.queue_size.load(Ordering::Relaxed), 0);
+        assert_eq!(sender.num_running.load(Ordering::Relaxed), 2);
 
         // Move forward another second, the last two tasks should now be complete
         time::sleep(Duration::from_millis(1001)).await;
         assert!(matches!(poll!(resolve_rx_3.as_mut()), Poll::Ready(_)));
         assert!(matches!(poll!(resolve_rx_4.as_mut()), Poll::Ready(_)));
 
-        assert_eq!(sender.queue_size.load(Ordering::SeqCst), 0);
-        assert_eq!(sender.num_running.load(Ordering::SeqCst), 0);
+        assert_eq!(sender.queue_size.load(Ordering::Relaxed), 0);
+        assert_eq!(sender.num_running.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test(start_paused = true)]
@@ -553,8 +601,9 @@ mod tests {
 
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 0,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -566,7 +615,11 @@ mod tests {
             ..Default::default()
         });
 
-        let result = sender.queue_check(tick, config.clone()).await.unwrap();
+        let result = sender
+            .queue_check(tick, config.clone())
+            .unwrap()
+            .await
+            .unwrap();
 
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::MissedWindow);
@@ -594,8 +647,9 @@ mod tests {
         // Allow one retry
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 1,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -607,10 +661,9 @@ mod tests {
         });
 
         let resolve_rx = sender.queue_check(tick, config.clone());
-        tokio::pin!(resolve_rx);
 
         // Resolves as success since we will retry
-        let result = resolve_rx.await.unwrap();
+        let result = resolve_rx.unwrap().await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Success);
     }
@@ -640,8 +693,9 @@ mod tests {
         // Allow two retries
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 2,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
@@ -653,10 +707,9 @@ mod tests {
         });
 
         let resolve_rx = sender.queue_check(tick, config.clone());
-        tokio::pin!(resolve_rx);
 
         // Resolves as failure after the two retries
-        let result = resolve_rx.await.unwrap();
+        let result = resolve_rx.unwrap().await.unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Failure);
     }
@@ -673,8 +726,9 @@ mod tests {
 
         let conf = ExecutorConfig {
             concurrency: 1,
+            checker_parallel: false,
             failure_retries: 2,
-            region: "us-west".to_string(),
+            region: "us-west",
             record_task_metrics: false,
         };
         let (_, join_handle) = run_executor(checker, producer, conf, cancel_token.clone());

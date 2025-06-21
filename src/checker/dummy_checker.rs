@@ -7,9 +7,8 @@ use tokio::sync::RwLock;
 use tokio::time;
 use uuid::Uuid;
 
+use crate::check_executor::ScheduledCheck;
 use crate::checker::Checker;
-use crate::config_store::Tick;
-use crate::types::check_config::CheckConfig;
 use crate::types::result::{CheckResult, CheckStatus};
 
 /// A DummyReuslt can be used to configure the DummyChecker with results to produce
@@ -52,8 +51,8 @@ impl DummyChecker {
 }
 
 impl Checker for DummyChecker {
-    async fn check_url(&self, config: &CheckConfig, tick: &Tick, region: &str) -> CheckResult {
-        let scheduled_check_time = tick.time();
+    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
+        let scheduled_check_time = check.get_tick().time();
         let actual_check_time = Utc::now();
         let trace_id = Uuid::new_v4();
         let span_id = SpanId::default();
@@ -70,7 +69,7 @@ impl Checker for DummyChecker {
 
         CheckResult {
             guid: Uuid::new_v4(),
-            subscription_id: config.subscription_id,
+            subscription_id: check.get_config().subscription_id,
             status: result.status,
             status_reason,
             trace_id,
@@ -79,7 +78,7 @@ impl Checker for DummyChecker {
             actual_check_time,
             duration,
             request_info,
-            region: region.to_string(),
+            region,
         }
     }
 }

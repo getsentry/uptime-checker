@@ -1,6 +1,8 @@
+use anyhow::Result;
 use redis::aio::ConnectionLike;
-use redis::cluster::ClusterClient;
-use redis::{Cmd, Pipeline, RedisFuture, Value};
+use redis::cluster::{ClusterClient, ClusterConfig};
+use redis::{Cmd, Pipeline, RedisError, RedisFuture, Value};
+use std::time::Duration;
 
 #[derive(Clone)]
 pub enum RedisAsyncConnection {
@@ -45,33 +47,48 @@ pub enum RedisClient {
     Single(redis::Client),
 }
 
-pub fn build_redis_client(redis_url: &str, enable_cluster: bool) -> RedisClient {
-    if enable_cluster {
-        RedisClient::Cluster(
-            ClusterClient::builder(vec![redis_url.to_string()])
-                .build()
-                .expect("Failed to build cluster client"),
-        )
+pub fn build_redis_client(redis_url: &str, enable_cluster: bool) -> Result<RedisClient> {
+    let client = if enable_cluster {
+        RedisClient::Cluster(ClusterClient::builder(vec![redis_url.to_string()]).build()?)
     } else {
-        RedisClient::Single(redis::Client::open(redis_url).expect("Failed to open redis client"))
-    }
+        RedisClient::Single(redis::Client::open(redis_url)?)
+    };
+
+    Ok(client)
 }
 
 impl RedisClient {
-    pub async fn get_async_connection(&self) -> RedisAsyncConnection {
+    pub async fn get_async_connection(
+        &self,
+        redis_timeouts_ms: u64,
+    ) -> Result<RedisAsyncConnection, RedisError> {
+        // If timeout is set to 0, we create a connection with no timeout; this is a testing-related
+        // feature, as any timer-related future (when a test is paused) will immediately succeed,
+        // which will instantly trigger the connection timeout, causing the test to fail.
+        let timeout = Duration::from_millis(redis_timeouts_ms);
         match self {
-            RedisClient::Cluster(client) => RedisAsyncConnection::Cluster(
-                client
-                    .get_async_connection()
-                    .await
-                    .expect("Unable to connect to Redis"),
-            ),
-            RedisClient::Single(client) => RedisAsyncConnection::Single(
-                client
-                    .get_multiplexed_tokio_connection()
-                    .await
-                    .expect("Unable to connect to Redis"),
-            ),
+            RedisClient::Cluster(client) => {
+                let mut config = ClusterConfig::new();
+
+                if redis_timeouts_ms > 0 {
+                    config = config
+                        .set_connection_timeout(timeout)
+                        .set_response_timeout(timeout);
+                }
+
+                let connection = client.get_async_connection_with_config(config).await?;
+                Ok(RedisAsyncConnection::Cluster(connection))
+            }
+            RedisClient::Single(client) => {
+                let connection = if redis_timeouts_ms > 0 {
+                    client
+                        .get_multiplexed_tokio_connection_with_response_timeouts(timeout, timeout)
+                        .await?
+                } else {
+                    client.get_multiplexed_tokio_connection().await?
+                };
+                Ok(RedisAsyncConnection::Single(connection))
+            }
         }
     }
 }
