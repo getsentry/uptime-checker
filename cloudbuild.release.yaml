@@ -38,17 +38,14 @@ steps:
         docker buildx build \
             --push \
             --platform linux/amd64,linux/arm64 \
-            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/image:$COMMIT_SHA \
-            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/image:$SHORT_SHA \
-            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/image:nightly \
-            -t ghcr.io/$_GHCR_OWNER/$REPO_NAME:$COMMIT_SHA \
-            -t ghcr.io/$_GHCR_OWNER/$REPO_NAME:$SHORT_SHA \
-            -t ghcr.io/$_GHCR_OWNER/$REPO_NAME:nightly \
-            -t $_DOCKERHUB_OWNER/$REPO_NAME:$COMMIT_SHA \
-            -t $_DOCKERHUB_OWNER/$REPO_NAME:$SHORT_SHA \
-            -t $_DOCKERHUB_OWNER/$REPO_NAME:nightly \
+            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/image:$TAG_NAME \
+            -t $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/image:latest \
+            -t ghcr.io/$_GHCR_OWNER/$REPO_NAME:$TAG_NAME \
+            -t ghcr.io/$_GHCR_OWNER/$REPO_NAME:latest \
+            -t $_DOCKERHUB_OWNER/$REPO_NAME:$TAG_NAME \
+            -t $_DOCKERHUB_OWNER/$REPO_NAME:latest \
             --label org.opencontainers.image.revision=$COMMIT_SHA \
-            --label org.opencontainers.image.version=$COMMIT_SHA \
+            --label org.opencontainers.image.version=$TAG_NAME \
             --label org.opencontainers.image.title=$REPO_NAME \
             --label org.opencontainers.vendor="Sentry" \
             --label org.opencontainers.image.source=https://github.com/$REPO_FULL_NAME \
