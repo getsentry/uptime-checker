@@ -7,16 +7,18 @@ statusProvider:
   name: github
   config:
     contexts:
-      - 'build-uptime-checker (sentryio)'
+      - 'build-amd64'
+      - 'build-arm64'
+      - 'assemble-uptime-checker-image'
 
 targets:
   - name: github
   - id: release
     name: docker
-    source: us-central1-docker.pkg.dev/sentryio/uptime-checker/image
+    source: ghcr.io/getsentry/uptime-checker
     target: getsentry/uptime-checker
   - id: latest
     name: docker
-    source: us-central1-docker.pkg.dev/sentryio/uptime-checker/image
+    source: ghcr.io/getsentry/uptime-checker
     target: getsentry/uptime-checker
     targetFormat: '{{{target}}}:latest'
