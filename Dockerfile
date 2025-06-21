@@ -1,4 +1,4 @@
-FROM rust:1.80-alpine3.20 as builder
+FROM rust:1.81-alpine3.20 AS builder
 
 # Install system dependencies
 RUN apk add --no-cache \
@@ -42,11 +42,11 @@ RUN cargo build --release
 
 FROM alpine:3.20
 
-COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
-
 RUN apk add --no-cache tini libgcc curl && \
     addgroup -S app --gid 1000 && \
     adduser -S app -G app --uid 1000
+
+COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
 
 USER app
 
