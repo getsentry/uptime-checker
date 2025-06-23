@@ -1,8 +1,17 @@
 steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'create-builder'
-    waitFor: ['-']
-    args: ['buildx', 'create', '--driver', 'docker-container', '--name', 'container', '--use']
+  - name: "gcr.io/cloud-builders/docker"
+    id: "create-builder"
+    waitFor: ["-"]
+    args:
+      [
+        "buildx",
+        "create",
+        "--driver",
+        "docker-container",
+        "--name",
+        "container",
+        "--use",
+      ]
 
   # Login to GHCR
   - name: "gcr.io/cloud-builders/docker"
@@ -13,7 +22,7 @@ steps:
       - "-c"
       - "docker login ghcr.io --username $$GHCR_USER --password-stdin <<< $$GHCR_PAT"
     secretEnv: ["GHCR_USER", "GHCR_PAT"]
-  
+
   # Login to Docker Hub
   - name: "gcr.io/cloud-builders/docker"
     id: "dockerhub-auth"
@@ -24,16 +33,15 @@ steps:
       - "docker login --username=$$DOCKERHUB_USER --password-stdin <<< $$DOCKERHUB_PAT"
     secretEnv: ["DOCKERHUB_USER", "DOCKERHUB_PAT"]
 
-
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'build-image'
-    waitFor: ['dockerhub-auth']
-    entrypoint: 'bash'
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-image"
+    waitFor: ["dockerhub-auth"]
+    entrypoint: "bash"
     args:
-      - '-c'
+      - "-c"
       - |
         set -euxo pipefail
-        
+
         # Build and push with version tags
         docker buildx build \
             --push \
@@ -64,7 +72,7 @@ availableSecrets:
     - versionName: projects/${PROJECT_ID}/secrets/ghcr_user/versions/latest
       env: GHCR_USER
     - versionName: projects/${PROJECT_ID}/secrets/ghcr_pat/versions/latest
-      env: GHCR_PAT 
+      env: GHCR_PAT
     - versionName: projects/${PROJECT_ID}/secrets/dockerhub_user/versions/latest
       env: DOCKERHUB_USER
     - versionName: projects/${PROJECT_ID}/secrets/dockerhub_pat/versions/latest
@@ -74,6 +82,7 @@ substitutions:
   _DOCKERHUB_OWNER: "getsentry"
   _GHCR_OWNER: "getsentry"
 
+logsBucket: "gs://sentryio-cloudbuild-logs"
 options:
-  machineType: 'E2_HIGHCPU_32'
+  machineType: "E2_HIGHCPU_32"
   diskSizeGb: 25

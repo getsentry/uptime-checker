@@ -1,15 +1,24 @@
 steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'create-builder'
-    waitFor: ['-']
-    args: ['buildx', 'create', '--driver', 'docker-container', '--name', 'container', '--use']
-
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'build-image'
-    waitFor: ['create-builder']
-    entrypoint: 'bash'
+  - name: "gcr.io/cloud-builders/docker"
+    id: "create-builder"
+    waitFor: ["-"]
     args:
-      - '-c'
+      [
+        "buildx",
+        "create",
+        "--driver",
+        "docker-container",
+        "--name",
+        "container",
+        "--use",
+      ]
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-image"
+    waitFor: ["create-builder"]
+    entrypoint: "bash"
+    args:
+      - "-c"
       - |
         set -euxo pipefail
         docker buildx build \
@@ -25,6 +34,7 @@ steps:
             --build-arg UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA \
             .
 
+logsBucket: "gs://sentryio-cloudbuild-logs"
 options:
-  machineType: 'E2_HIGHCPU_32'
+  machineType: "E2_HIGHCPU_32"
   diskSizeGb: 25
