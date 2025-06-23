@@ -53,7 +53,7 @@ steps:
             --label org.opencontainers.vendor="Sentry" \
             --label org.opencontainers.image.source=https://github.com/$REPO_FULL_NAME \
             --label org.opencontainers.image.url=https://github.com/$REPO_FULL_NAME \
-            --cache-from $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/image:latest \
+            --cache-from $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/image:nightly \
             --sbom true \
             --provenance="mode=max" \
             --build-arg UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA \
