@@ -241,7 +241,7 @@ impl Checker for IsahcChecker {
                         tracing::info!("check_url.error: {:?}", error_msg);
                         CheckStatusReason {
                             status_type: CheckStatusReasonType::Failure,
-                            description: format!("{:?}", error_msg),
+                            description: format!("{error_msg:?}"),
                         }
                     }
                 }
@@ -919,7 +919,7 @@ mod tests {
         };
         let check = ScheduledCheck::new_for_test(tick, config);
         let result = checker.check_url(&check, "us-west").await;
-        eprintln!("{:?}", result);
+        eprintln!("{result:?}");
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -930,8 +930,7 @@ mod tests {
         let result_description = result.status_reason.map(|r| r.description).unwrap();
         assert_eq!(
             result_description, "unknown error",
-            "Expected error message about closed connection: {}",
-            result_description
+            "Expected error message about closed connection: {result_description}"
         );
     }
 }

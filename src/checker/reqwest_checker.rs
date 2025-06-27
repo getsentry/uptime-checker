@@ -95,7 +95,7 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
         inner = source;
 
         if let Some(inner_err) = source.downcast_ref::<hickory_resolver::error::ResolveError>() {
-            return Some(format!("{}", inner_err));
+            return Some(format!("{inner_err}"));
         }
     }
     None
@@ -348,7 +348,7 @@ impl Checker for ReqwestChecker {
                     tracing::info!("check_url.error: {:?}", error_msg);
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
-                        description: format!("{:?}", error_msg),
+                        description: format!("{error_msg:?}"),
                     }
                 }
             }),
