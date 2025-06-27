@@ -11,7 +11,7 @@
 # so you can test your changes without having to rebuild the container.
 ##
 
-FROM rust:1.80-alpine3.20 as builder
+FROM rust:1.85-alpine3.20 as builder
 
 ARG UPTIME_CHECKER_GIT_REVISION
 ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
