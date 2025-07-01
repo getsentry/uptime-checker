@@ -57,7 +57,6 @@ time = "0.3"
 ctor = "0.2"
 hostname = "0.4.0"
 tokio-metrics = "0.4.0"
-isahc = { git = "https://github.com/getsentry/isahc", rev = "268675f84e06ad184db9c2f3932a1524e5a40982" }
 iprange = "0.6.7"
 http = "1.2.0"
 [patch.crates-io]

@@ -29,7 +29,8 @@ pub enum ProducerMode {
 #[serde(rename_all = "snake_case")]
 pub enum CheckerMode {
     Reqwest,
-    Isahc,
+    // XXX(epurkhiser): In the future there may be other implementations of the HttpChecker
+    // interface.
 }
 
 #[serde_as]

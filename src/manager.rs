@@ -19,7 +19,6 @@ use crate::config_waiter::wait_for_partition_boot;
 use crate::producer::kafka_producer::KafkaResultsProducer;
 use crate::{
     app::config::Config,
-    checker::isahc_checker::IsahcChecker,
     checker::reqwest_checker::ReqwestChecker,
     config_store::{ConfigStore, RwConfigStore},
     producer::vector_producer::VectorResultsProducer,
@@ -154,15 +153,6 @@ impl Manager {
                 Duration::from_secs(config.pool_idle_timeout_secs),
                 config.http_checker_dns_nameservers.clone(),
                 config.interface.to_owned(),
-            )
-            .into(),
-            CheckerMode::Isahc => IsahcChecker::new(
-                !config.allow_internal_ips,
-                config.disable_connection_reuse,
-                Duration::from_secs(config.pool_idle_timeout_secs),
-                config.interface.to_owned(),
-                config.http_checker_dns_nameservers.clone(),
-                config.enable_metrics,
             )
             .into(),
         });
