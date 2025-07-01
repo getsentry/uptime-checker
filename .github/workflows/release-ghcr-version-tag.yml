@@ -21,5 +21,5 @@ jobs:
       - name: Tag release version
         run: |
           docker buildx imagetools create --tag \
-            ghcr.io/getsentry/uptime-checker:${{ github.ref_name }} \
-            ghcr.io/getsentry/uptime-checker:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.ref_name }} \
+            ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.sha }}

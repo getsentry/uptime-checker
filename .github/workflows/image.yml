@@ -39,7 +39,7 @@ jobs:
           cache-from: ghcr.io/getsentry/uptime-checker:latest
           cache-to: type=inline
           platforms: linux/${{ matrix.platform }}
-          tags: ghcr.io/getsentry/uptime-checker:${{ github.sha }}-${{ matrix.platform }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.sha }}-${{ matrix.platform }}
           push: false
 
   build-main-or-release:
@@ -93,8 +93,8 @@ jobs:
             type=sha,prefix=,format=long
             type=raw,value=nightly,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
           labels: |
-            org.opencontainers.image.title=uptime-checker
-            org.opencontainers.image.description="Sentry Uptime Checker"
+            org.opencontainers.image.title=${{ github.repository }}
+            org.opencontainers.image.description=${{ github.event.repository.description }}
             org.opencontainers.image.vendor="Sentry"
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.sha }}
