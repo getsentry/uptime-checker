@@ -36,7 +36,7 @@ jobs:
         uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.10
         with:
           context: .
-          cache-from: ghcr.io/getsentry/uptime-checker:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:nightly
           cache-to: type=inline
           platforms: linux/${{ matrix.platform }}
           tags: ghcr.io/getsentry/uptime-checker:${{ github.sha }}-${{ matrix.platform }}
@@ -108,7 +108,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/${{ matrix.platform }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:nightly
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:nightly
           cache-to: type=inline
           provenance: "mode=max"
           sbom: true
