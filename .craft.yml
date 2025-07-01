@@ -1,0 +1,24 @@
+minVersion: 1.0.0
+changelogPolicy: auto
+
+artifactProvider:
+  name: none
+statusProvider:
+  name: github
+  config:
+    contexts:
+      - 'build-amd64'
+      - 'build-arm64'
+      - 'release-ghcr-version-tag'
+
+targets:
+  - name: github
+  - id: release
+    name: docker
+    source: ghcr.io/getsentry/uptime-checker
+    target: getsentry/uptime-checker
+  - id: latest
+    name: docker
+    source: ghcr.io/getsentry/uptime-checker
+    target: getsentry/uptime-checker
+    targetFormat: '{{{target}}}:nightly'
