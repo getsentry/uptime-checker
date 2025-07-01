@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-sed -i '' "s/^version = \".*\"/version = \"$2\"/" Cargo.toml
+sed -i "s/^version = \".*\"/version = \"$2\"/" Cargo.toml
