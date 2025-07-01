@@ -21,7 +21,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    name: "Release a new uptime-checker version"
+    name: Release a new ${{ github.repository }} version
 
     steps:
       - name: Get auth token
