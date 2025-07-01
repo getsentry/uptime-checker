@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - release/**
 
 jobs:
   build-pr:
@@ -46,7 +47,7 @@ jobs:
     if: |
       github.repository_owner == 'getsentry'
       && github.event_name == 'push'
-      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/'))
 
     permissions:
       contents: read
@@ -97,7 +98,7 @@ jobs:
         uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.10
         with:
           context: .
-          push: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          push: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:nightly
