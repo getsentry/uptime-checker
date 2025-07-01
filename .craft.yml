@@ -9,7 +9,6 @@ statusProvider:
     contexts:
       - 'build-amd64'
       - 'build-arm64'
-      - 'release-ghcr-version-tag'
 
 targets:
   - name: github
