@@ -1,3 +1,9 @@
+## 25.6.2
+
+### Various fixes & improvements
+
+- ci: Fix `latest` tag (#352) by @evanpurkhiser
+
 ## 25.6.1
 
 ### Various fixes & improvements
