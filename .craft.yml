@@ -20,4 +20,4 @@ targets:
     name: docker
     source: ghcr.io/getsentry/uptime-checker
     target: getsentry/uptime-checker
-    targetFormat: '{{{target}}}:nightly'
+    targetFormat: '{{{target}}}:latest'
