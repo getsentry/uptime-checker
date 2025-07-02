@@ -27,32 +27,29 @@ for registry in "${!REGISTRIES[@]}"; do
   echo ""
   echo "Creating manifests for ${IMAGE_NAME}"
   
-  # Create long SHA manifest
+  # Create long SHA manifest using buildx imagetools (handles manifest lists with attestations)
   echo "Creating long SHA manifest: ${IMAGE_NAME}:${SHA}"
-  docker manifest create "${IMAGE_NAME}:${SHA}" \
-    --amend "${IMAGE_NAME}:${SHA}-amd64" \
-    --amend "${IMAGE_NAME}:${SHA}-arm64"
-  
-  docker manifest push "${IMAGE_NAME}:${SHA}"
+  docker buildx imagetools create \
+    --tag "${IMAGE_NAME}:${SHA}" \
+    "${IMAGE_NAME}:${SHA}-amd64" \
+    "${IMAGE_NAME}:${SHA}-arm64"
   echo "✓ Pushed ${IMAGE_NAME}:${SHA}"
   
   # Create short SHA manifest
   echo "Creating short SHA manifest: ${IMAGE_NAME}:${SHORT_SHA}"
-  docker manifest create "${IMAGE_NAME}:${SHORT_SHA}" \
-    --amend "${IMAGE_NAME}:${SHA}-amd64" \
-    --amend "${IMAGE_NAME}:${SHA}-arm64"
-  
-  docker manifest push "${IMAGE_NAME}:${SHORT_SHA}"
+  docker buildx imagetools create \
+    --tag "${IMAGE_NAME}:${SHORT_SHA}" \
+    "${IMAGE_NAME}:${SHA}-amd64" \
+    "${IMAGE_NAME}:${SHA}-arm64"
   echo "✓ Pushed ${IMAGE_NAME}:${SHORT_SHA}"
   
   # Create nightly manifest if requested
   if [[ "${PUSH_NIGHTLY}" == "true" ]]; then
     echo "Creating nightly manifest: ${IMAGE_NAME}:nightly"
-    docker manifest create "${IMAGE_NAME}:nightly" \
-      --amend "${IMAGE_NAME}:${SHA}-amd64" \
-      --amend "${IMAGE_NAME}:${SHA}-arm64"
-    
-    docker manifest push "${IMAGE_NAME}:nightly"
+    docker buildx imagetools create \
+      --tag "${IMAGE_NAME}:nightly" \
+      "${IMAGE_NAME}:${SHA}-amd64" \
+      "${IMAGE_NAME}:${SHA}-arm64"
     echo "✓ Pushed ${IMAGE_NAME}:nightly"
   else
     echo "Skipping nightly manifest"
