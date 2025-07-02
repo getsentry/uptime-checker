@@ -108,6 +108,7 @@ jobs:
           platforms: linux/${{ matrix.platform }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-${{ matrix.platform }}
           cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-${{ matrix.platform }},mode=max
+          annotations: ${{ steps.meta.outputs.annotations }}
           provenance: mode=max
           sbom: true
           push: true
