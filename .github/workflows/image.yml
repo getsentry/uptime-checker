@@ -40,6 +40,7 @@ jobs:
           platforms: linux/${{ matrix.platform }}
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}-${{ matrix.platform }}
           push: false
+          pull: true
 
   build-main-or-release:
     name: build-${{ matrix.platform }}
@@ -112,3 +113,4 @@ jobs:
           provenance: "mode=max"
           sbom: true
           push: true
+          pull: true
