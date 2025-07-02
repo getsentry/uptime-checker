@@ -1,9 +1,12 @@
 name: Run linting and formatting
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - release/**
 
 env:
   # workaround: secrets cannot be directly referenced in `if`

@@ -1,9 +1,12 @@
 name: Run Tests
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - release/**
 jobs:
   test:
     timeout-minutes: 5
