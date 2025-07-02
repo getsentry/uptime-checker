@@ -2,12 +2,11 @@
 set -euo pipefail
 
 # Script to create and push multi-platform Docker manifests
-# Usage: create-manifest.sh <repository> <sha> <git_ref> <default_branch>
+# Usage: create-manifest.sh <repository> <sha> <push_nightly>
 
 REPOSITORY="$1"
 SHA="$2"
-GIT_REF="$3"
-DEFAULT_BRANCH="$4"
+PUSH_NIGHTLY="$3"
 
 # Define registries and their prefixes
 declare -A REGISTRIES=(
@@ -20,8 +19,7 @@ SHORT_SHA="${SHA:0:7}"
 
 echo "Creating manifests for repository: ${REPOSITORY}"
 echo "SHA: ${SHA} (short: ${SHORT_SHA})"
-echo "Git ref: ${GIT_REF}"
-echo "Default branch: ${DEFAULT_BRANCH}"
+echo "Push nightly: ${PUSH_NIGHTLY}"
 
 # Create manifests for each registry
 for registry in "${!REGISTRIES[@]}"; do
@@ -47,8 +45,8 @@ for registry in "${!REGISTRIES[@]}"; do
   docker manifest push "${IMAGE_NAME}:${SHORT_SHA}"
   echo "✓ Pushed ${IMAGE_NAME}:${SHORT_SHA}"
   
-  # Create nightly manifest only for main branch
-  if [[ "${GIT_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+  # Create nightly manifest if requested
+  if [[ "${PUSH_NIGHTLY}" == "true" ]]; then
     echo "Creating nightly manifest: ${IMAGE_NAME}:nightly"
     docker manifest create "${IMAGE_NAME}:nightly" \
       --amend "${IMAGE_NAME}:${SHA}-amd64" \
@@ -57,7 +55,7 @@ for registry in "${!REGISTRIES[@]}"; do
     docker manifest push "${IMAGE_NAME}:nightly"
     echo "✓ Pushed ${IMAGE_NAME}:nightly"
   else
-    echo "Skipping nightly manifest (not on default branch)"
+    echo "Skipping nightly manifest"
   fi
 done
 
