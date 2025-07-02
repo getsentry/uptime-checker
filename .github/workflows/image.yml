@@ -109,6 +109,6 @@ jobs:
           platforms: linux/${{ matrix.platform }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
-          provenance: "mode=max"
+          provenance: mode=max
           sbom: true
           push: true
