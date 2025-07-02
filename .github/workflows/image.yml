@@ -88,10 +88,7 @@ jobs:
             ghcr.io/${{ github.repository }}
             ${{ github.repository }}
           tags: |
-            type=sha,prefix=
-            type=sha,prefix=,format=long
             type=sha,prefix=,format=long,suffix=-${{ matrix.platform }}
-            type=raw,value=nightly,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
           labels: |
             org.opencontainers.image.title=${{ github.event.repository.name }}
             org.opencontainers.image.description=${{ github.event.repository.description }}
@@ -146,45 +143,9 @@ jobs:
 
       - name: Create and push multi-platform manifest
         run: |
-          # Define registries and their prefixes
-          declare -A REGISTRIES=(
-            ["ghcr.io"]="ghcr.io/${{ github.repository }}"
-            ["docker.io"]="${{ github.repository }}"
-          )
-          
-          # Create manifests for each registry
-          for registry in "${!REGISTRIES[@]}"; do
-            IMAGE_NAME="${REGISTRIES[$registry]}"
-            echo "Creating manifests for $IMAGE_NAME"
-            
-            # Create long SHA manifest
-            docker manifest create "${IMAGE_NAME}:${{ github.sha }}" \
-              --amend "${IMAGE_NAME}:${{ github.sha }}-amd64" \
-              --amend "${IMAGE_NAME}:${{ github.sha }}-arm64"
-            
-            docker manifest push "${IMAGE_NAME}:${{ github.sha }}"
-            echo "Pushed ${IMAGE_NAME}:${{ github.sha }}"
-            
-            # Create short SHA manifest
-            SHORT_SHA="${{ github.sha }}"
-            SHORT_SHA="${SHORT_SHA:0:7}"
-            docker manifest create "${IMAGE_NAME}:${SHORT_SHA}" \
-              --amend "${IMAGE_NAME}:${{ github.sha }}-amd64" \
-              --amend "${IMAGE_NAME}:${{ github.sha }}-arm64"
-            
-            docker manifest push "${IMAGE_NAME}:${SHORT_SHA}"
-            echo "Pushed ${IMAGE_NAME}:${SHORT_SHA}"
-            
-            # Create nightly manifest only for main branch
-            if [[ "${{ github.ref }}" == "refs/heads/${{ github.event.repository.default_branch }}" ]]; then
-              docker manifest create "${IMAGE_NAME}:nightly" \
-                --amend "${IMAGE_NAME}:${{ github.sha }}-amd64" \
-                --amend "${IMAGE_NAME}:${{ github.sha }}-arm64"
-              
-              docker manifest push "${IMAGE_NAME}:nightly"
-              echo "Pushed ${IMAGE_NAME}:nightly"
-            fi
-          done
-          
-          echo "All manifests created and pushed successfully!"
+          ./scripts/create-manifest.sh \
+            "${{ github.repository }}" \
+            "${{ github.sha }}" \
+            "${{ github.ref }}" \
+            "${{ github.event.repository.default_branch }}"
 
