@@ -60,6 +60,10 @@ jobs:
           - os: ubuntu-24.04-arm
             platform: arm64
 
+    outputs:
+      digest: ${{ steps.build_push.outputs.digest }}
+      metadata: ${{ steps.meta.outputs.json }}
+
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
@@ -90,6 +94,7 @@ jobs:
           tags: |
             type=sha,prefix=
             type=sha,prefix=,format=long
+            type=sha,prefix=,format=long,suffix=-${{ matrix.platform }}
             type=raw,value=nightly,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
           labels: |
             org.opencontainers.image.title=${{ github.event.repository.name }}
@@ -101,6 +106,7 @@ jobs:
             org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
 
       - name: Build & Push
+        id: build_push
         uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.10
         with:
           context: .
@@ -112,3 +118,77 @@ jobs:
           provenance: mode=max
           sbom: true
           push: true
+
+  create-manifest:
+    name: Create multi-platform manifest
+    needs: build-main-or-release
+    if: |
+      github.repository_owner == 'getsentry'
+      && github.event_name == 'push'
+      && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/'))
+
+    permissions:
+      contents: read
+      packages: write
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          username: sentrybuilder
+          password: ${{ secrets.DOCKER_HUB_RW_TOKEN }}
+
+      - name: Create and push multi-platform manifest
+        run: |
+          # Define registries and their prefixes
+          declare -A REGISTRIES=(
+            ["ghcr.io"]="ghcr.io/${{ github.repository }}"
+            ["docker.io"]="${{ github.repository }}"
+          )
+          
+          # Create manifests for each registry
+          for registry in "${!REGISTRIES[@]}"; do
+            IMAGE_NAME="${REGISTRIES[$registry]}"
+            echo "Creating manifests for $IMAGE_NAME"
+            
+            # Create long SHA manifest
+            docker manifest create "${IMAGE_NAME}:${{ github.sha }}" \
+              --amend "${IMAGE_NAME}:${{ github.sha }}-amd64" \
+              --amend "${IMAGE_NAME}:${{ github.sha }}-arm64"
+            
+            docker manifest push "${IMAGE_NAME}:${{ github.sha }}"
+            echo "Pushed ${IMAGE_NAME}:${{ github.sha }}"
+            
+            # Create short SHA manifest
+            SHORT_SHA="${{ github.sha }}"
+            SHORT_SHA="${SHORT_SHA:0:7}"
+            docker manifest create "${IMAGE_NAME}:${SHORT_SHA}" \
+              --amend "${IMAGE_NAME}:${{ github.sha }}-amd64" \
+              --amend "${IMAGE_NAME}:${{ github.sha }}-arm64"
+            
+            docker manifest push "${IMAGE_NAME}:${SHORT_SHA}"
+            echo "Pushed ${IMAGE_NAME}:${SHORT_SHA}"
+            
+            # Create nightly manifest only for main branch
+            if [[ "${{ github.ref }}" == "refs/heads/${{ github.event.repository.default_branch }}" ]]; then
+              docker manifest create "${IMAGE_NAME}:nightly" \
+                --amend "${IMAGE_NAME}:${{ github.sha }}-amd64" \
+                --amend "${IMAGE_NAME}:${{ github.sha }}-arm64"
+              
+              docker manifest push "${IMAGE_NAME}:nightly"
+              echo "Pushed ${IMAGE_NAME}:nightly"
+            fi
+          done
+          
+          echo "All manifests created and pushed successfully!"
+
