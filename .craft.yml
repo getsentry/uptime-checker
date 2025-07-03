@@ -9,6 +9,7 @@ statusProvider:
     contexts:
       - 'build-amd64'
       - 'build-arm64'
+      - 'Create multi-platform manifest'
 
 targets:
   - name: github
