@@ -188,6 +188,7 @@ impl Manager {
             ProducerMode::Kafka => {
                 let kafka_overrides =
                     HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
+                
                 let kafka_config = KafkaConfig::new_config(
                     config.results_kafka_cluster.to_owned(),
                     Some(kafka_overrides),
