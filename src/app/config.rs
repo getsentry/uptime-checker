@@ -300,7 +300,9 @@ mod tests {
 
     use crate::{app::cli, logging};
 
-    use super::{CheckerMode, Config, ConfigProviderMode, MetricsConfig, ProducerMode};
+    use super::{
+        CheckerMode, Config, ConfigProviderMode, KafkaConfig, MetricsConfig, ProducerMode,
+    };
 
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where

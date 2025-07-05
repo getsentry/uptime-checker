@@ -186,9 +186,56 @@ impl Manager {
                 (sender, handle, results_worker)
             }
             ProducerMode::Kafka => {
-                let kafka_overrides =
+                let mut kafka_overrides =
                     HashMap::from([("compression.type".to_string(), "lz4".to_string())]);
-                
+
+                if let Some(kafka_ssl_ca_location) = &config.kafka_config.kafka_ssl_ca_location {
+                    kafka_overrides.insert(
+                        "ssl.ca.location".to_string(),
+                        kafka_ssl_ca_location.to_owned(),
+                    );
+                }
+
+                if let Some(kafka_ssl_cert_location) = &config.kafka_config.kafka_ssl_cert_location
+                {
+                    kafka_overrides.insert(
+                        "ssl.certificate.location".to_string(),
+                        kafka_ssl_cert_location.to_owned(),
+                    );
+                }
+
+                if let Some(kafka_ssl_key_location) = &config.kafka_config.kafka_ssl_key_location {
+                    kafka_overrides.insert(
+                        "ssl.key.location".to_string(),
+                        kafka_ssl_key_location.to_owned(),
+                    );
+                }
+
+                if let Some(kafka_security_protocol) = &config.kafka_config.kafka_security_protocol
+                {
+                    kafka_overrides.insert(
+                        "security.protocol".to_string(),
+                        kafka_security_protocol.to_owned(),
+                    );
+                }
+
+                if let Some(kafka_sasl_mechanism) = &config.kafka_config.kafka_sasl_mechanism {
+                    kafka_overrides.insert(
+                        "sasl.mechanism".to_string(),
+                        kafka_sasl_mechanism.to_owned(),
+                    );
+                }
+
+                if let Some(kafka_sasl_username) = &config.kafka_config.kafka_sasl_username {
+                    kafka_overrides
+                        .insert("sasl.username".to_string(), kafka_sasl_username.to_owned());
+                }
+
+                if let Some(kafka_sasl_password) = &config.kafka_config.kafka_sasl_password {
+                    kafka_overrides
+                        .insert("sasl.password".to_string(), kafka_sasl_password.to_owned());
+                }
+
                 let kafka_config = KafkaConfig::new_config(
                     config.results_kafka_cluster.to_owned(),
                     Some(kafka_overrides),
