@@ -35,7 +35,7 @@ jobs:
         uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.10
         with:
           context: .
-          cache-from: type=gha
+          cache-from: type=gha,scope=${{ matrix.platform }}
           platforms: linux/${{ matrix.platform }}
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}-${{ matrix.platform }}
           push: false
@@ -105,8 +105,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/${{ matrix.platform }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
           annotations: ${{ steps.meta.outputs.annotations }}
           provenance: mode=max
           sbom: true
