@@ -1,3 +1,14 @@
+## 25.7.0
+
+### Various fixes & improvements
+
+- gha: scope docker cache to platform (#359) by @mdtro
+- fix: remediate dockerfile syntax warning (#358) by @mdtro
+- ci: use gha for cache (#356) by @mdtro
+- ci: craft should wait for "Create multi-platform manifest" job to finish (#354) by @aldy505
+- ci: include image annotations (#353) by @mdtro
+- ci: Fix `latest` tag (#352) by @evanpurkhiser
+
 ## 25.6.1
 
 ### Various fixes & improvements
