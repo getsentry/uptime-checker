@@ -1,0 +1,14 @@
+FROM alpine:3.20
+
+ARG TARGETPLATFORM
+RUN apk add --no-cache tini libgcc curl && \
+    addgroup -S app --gid 1000 && \
+    adduser -S app -G app --uid 1000
+
+# Copy the pre-built binary
+COPY $TARGETPLATFORM/uptime-checker /usr/local/bin/uptime-checker
+RUN chmod +x /usr/local/bin/uptime-checker
+
+USER app
+
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/uptime-checker"]

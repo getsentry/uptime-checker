@@ -20,25 +20,60 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
+            container: rust:1.85-alpin3.20
             platform: amd64
           - os: ubuntu-24.04-arm
+            container: rust:1.85-alpine3.20
             platform: arm64
 
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev protobuf-compiler cmake build-essential
 
-      - name: Build
-        uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.10
+      - name: Build Rust binary
+        run: cargo build --release
+        env:
+          RUSTFLAGS: "-Ctarget-feature=-crt-static"
+          PKG_CONFIG_ALLOW_CROSS: 1
+          UPTIME_CHECKER_GIT_REVISION: ${{ github.pull_request.head.sha || github.sha }}
+
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p "artifacts/${{ matrix.platform }}"
+          cp "uptime-checker" "artifacts/${{ matrix.platform }}"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          context: .
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          platforms: linux/${{ matrix.platform }}
-          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}-${{ matrix.platform }}
-          push: false
+          name: uptime-checker-${{ matrix.platform }}
+          path: "./artifacts/*"
+          retention-days: 1
+
+  build-docker-image:
+    name: build-docker-image
+    needs: build-pr
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download binary artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 #v4.3.0
+        with:
+          pattern: "uptime-checker-*"
+          merge-multiple: true
+
+      - name: Build and push to ghcr.io
+        if: "!github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'"
+        uses: getsentry/action-build-and-push-images@3e678a5b35eb78afec14922aa822c8923a2d2e32
+        with:
+          image_name: uptime-checker
+          platform: linux/amd64, linux/arm64
+          dockerfile_path: "./Dockerfile.prebuilt"
+          ghcr: true
+          google_ar: false
 
   build-main-or-release:
     name: build-${{ matrix.platform }}
