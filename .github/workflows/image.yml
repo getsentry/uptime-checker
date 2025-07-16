@@ -70,7 +70,9 @@ jobs:
         uses: getsentry/action-build-and-push-images@23a755cb61c6c610e5d612ceb1c4c325fed2e9ba
         with:
           image_name: uptime-checker
-          platforms: linux/amd64,linux/arm64
+          platforms:
+            - linux/amd64
+            - linux/arm64
           dockerfile_path: "./Dockerfile.prebuilt"
           ghcr: true
           google_ar: false
