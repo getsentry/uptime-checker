@@ -67,12 +67,10 @@ jobs:
 
       - name: Build and push to ghcr.io
         if: "!github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'"
-        uses: getsentry/action-build-and-push-images@23a755cb61c6c610e5d612ceb1c4c325fed2e9ba
+        uses: getsentry/action-build-and-push-images@8976e0dc83647492ac4664133c6373efd9cda10c
         with:
           image_name: uptime-checker
-          platforms:
-            - linux/amd64
-            - linux/arm64
+          platforms: linux/amd64,linux/arm64
           dockerfile_path: "./Dockerfile.prebuilt"
           ghcr: true
           google_ar: false
