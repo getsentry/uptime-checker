@@ -67,7 +67,7 @@ jobs:
 
       - name: Build and push to ghcr.io
         if: "!github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'"
-        uses: getsentry/action-build-and-push-images@8976e0dc83647492ac4664133c6373efd9cda10c
+        uses: getsentry/action-build-and-push-images@0bae201982d938bfdbec4c1289182dd7ca6d8495
         with:
           image_name: uptime-checker
           platforms: linux/amd64,linux/arm64
