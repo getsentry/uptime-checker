@@ -71,7 +71,7 @@ jobs:
         with:
           image_name: uptime-checker
           platforms: linux/amd64,linux/arm64
-          dockerfile_path: "./Dockerfile.prebuilt"
+          dockerfile_path: "Dockerfile.prebuilt"
           ghcr: true
           google_ar: false
 
