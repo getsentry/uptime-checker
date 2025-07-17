@@ -20,38 +20,37 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            container: rust:1.85-alpine3.20
             platform: amd64
           - os: ubuntu-24.04-arm
-            container: rust:1.85-alpine3.20
             platform: arm64
 
     runs-on: ${{ matrix.os }}
-    container:
-      image: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
-      - name: Install system dependencies
+      - name: Install Rust with musl targets
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 #v1.13.0
+        with:
+          target: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+
+      - name: Install musl tools
         run: |
-          apk add --no-cache \
-            libc-dev \
-            cmake \
-            make \
-            g++ \
-            pkgconfig \
-            openssl-dev \
-            protoc
-          mkdir -p ~/.cargo
-          echo '[registries.crates-io]' > ~/.cargo/config
-          echo 'protocol = "sparse"' >> ~/.cargo/config
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
 
       - name: Build Rust binary
-        run: cargo build --release
+        run: |
+          if [[ "${{ matrix.platform }}" == "amd64" ]]; then
+            cargo build --release --target x86_64-unknown-linux-musl
+            cp target/x86_64-unknown-linux-musl/release/uptime-checker target/release/
+          else
+            cargo build --release --target aarch64-unknown-linux-musl
+            cp target/aarch64-unknown-linux-musl/release/uptime-checker target/release/
+          fi
         env:
-          RUSTFLAGS: "-Ctarget-feature=-crt-static"
-          PKG_CONFIG_ALLOW_CROSS: 1
           UPTIME_CHECKER_GIT_REVISION: ${{ github.pull_request.head.sha || github.sha }}
+          PKG_CONFIG_ALLOW_CROSS: 1
+          RUSTFLAGS: "-Ctarget-feature=+crt-static"
 
       - name: Prepare Artifacts
         run: |
@@ -112,6 +111,50 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
+      - name: Install Rust with musl targets
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.85
+          target: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+          cache: true
+
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+
+      - name: Build Rust binary
+        run: |
+          if [[ "${{ matrix.platform }}" == "amd64" ]]; then
+            cargo build --release --target x86_64-unknown-linux-musl
+            cp target/x86_64-unknown-linux-musl/release/uptime-checker target/release/
+          else
+            cargo build --release --target aarch64-unknown-linux-musl
+            cp target/aarch64-unknown-linux-musl/release/uptime-checker target/release/
+          fi
+        env:
+          UPTIME_CHECKER_GIT_REVISION: ${{ github.sha }}
+          PKG_CONFIG_ALLOW_CROSS: 1
+          RUSTFLAGS: "-Ctarget-feature=-crt-static"
+
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p "artifacts/linux/${{ matrix.platform }}"
+          cp "target/release/uptime-checker" "artifacts/linux/${{ matrix.platform }}"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: uptime-checker-${{ matrix.platform }}-main
+          path: "./artifacts/*"
+          retention-days: 1
+
+      - name: Download binary artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 #v4.3.0
+        with:
+          name: uptime-checker-${{ matrix.platform }}-main
+          path: .
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
@@ -151,6 +194,7 @@ jobs:
         uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.10
         with:
           context: .
+          file: ./Dockerfile.prebuilt
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/${{ matrix.platform }}
