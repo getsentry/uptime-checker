@@ -62,8 +62,8 @@ mod tests {
         },
     };
     use chrono::{TimeDelta, Utc};
-    use sentry_arroyo::backends::kafka::config::KafkaConfig;
     use sentry::protocol::SpanId;
+    use sentry_arroyo::backends::kafka::config::KafkaConfig;
     use uuid::{uuid, Uuid};
 
     pub fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
