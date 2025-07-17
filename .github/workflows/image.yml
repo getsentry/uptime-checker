@@ -44,8 +44,8 @@ jobs:
 
       - name: Prepare Artifacts
         run: |
-          mkdir -p "artifacts/${{ matrix.platform }}"
-          cp "target/release/uptime-checker" "artifacts/${{ matrix.platform }}"
+          mkdir -p "artifacts/linux/${{ matrix.platform }}"
+          cp "target/release/uptime-checker" "artifacts/linux/${{ matrix.platform }}"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -68,7 +68,7 @@ jobs:
           merge-multiple: true
 
       - name: Build and push to ghcr.io
-        if: "!github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'"
+        if: ${{ !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]' }}
         uses: getsentry/action-build-and-push-images@385e520ee06192703f481e9d5273a1f57de2e78d
         with:
           image_name: uptime-checker
