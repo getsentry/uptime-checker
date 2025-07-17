@@ -34,8 +34,17 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          apt-get update
-          apt-get install -y pkg-config libssl-dev protobuf-compiler cmake build-essential
+          apk add --no-cache \
+            libc-dev \
+            cmake \
+            make \
+            g++ \
+            pkgconfig \
+            openssl-dev \
+            protoc
+          mkdir -p ~/.cargo
+          echo '[registries.crates-io]' > ~/.cargo/config
+          echo 'protocol = "sparse"' >> ~/.cargo/config
 
       - name: Build Rust binary
         run: cargo build --release
