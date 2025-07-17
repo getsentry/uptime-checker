@@ -20,8 +20,10 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
+            musl_target: x86_64-unknown-linux-musl
             platform: amd64
           - os: ubuntu-24.04-arm
+            musl_target: aarch64-unknown-linux-musl
             platform: arm64
 
     runs-on: ${{ matrix.os }}
@@ -31,7 +33,7 @@ jobs:
       - name: Install Rust with musl targets
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 #v1.13.0
         with:
-          target: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+          target: ${{ matrix.musl_target }}
 
       - name: Install musl tools and fix OpenSSL headers
         run: |
@@ -126,10 +128,18 @@ jobs:
           target: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
           cache: true
 
-      - name: Install musl tools
+      - name: Install musl tools and cross-compilation toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools musl-dev
+          # Install ARM64 cross-compilation toolchain for musl
+          if [[ "${{ matrix.platform }}" == "arm64" ]]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            # Install musl cross-compilation toolchain
+            wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
+            sudo tar -C /opt -xzf aarch64-linux-musl-cross.tgz
+            echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+          fi
 
       - name: Build Rust binary
         run: |
