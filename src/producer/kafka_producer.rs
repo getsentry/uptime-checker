@@ -1,12 +1,12 @@
-use rust_arroyo::backends::kafka::config::KafkaConfig;
-use rust_arroyo::backends::kafka::producer::KafkaProducer;
-use rust_arroyo::backends::kafka::types::KafkaPayload;
+use sentry_arroyo::backends::kafka::config::KafkaConfig;
+use sentry_arroyo::backends::kafka::producer::KafkaProducer;
+use sentry_arroyo::backends::kafka::types::KafkaPayload;
 
-use rust_arroyo::types::{Topic, TopicOrPartition};
+use sentry_arroyo::types::{Topic, TopicOrPartition};
 use sentry_kafka_schemas::Schema;
 
 use crate::types::result::CheckResult;
-use rust_arroyo::backends::Producer;
+use sentry_arroyo::backends::Producer;
 
 use super::{ExtractCodeError, ResultsProducer};
 
@@ -62,8 +62,8 @@ mod tests {
         },
     };
     use chrono::{TimeDelta, Utc};
-    use rust_arroyo::backends::kafka::config::KafkaConfig;
     use sentry::protocol::SpanId;
+    use sentry_arroyo::backends::kafka::config::KafkaConfig;
     use uuid::{uuid, Uuid};
 
     pub fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {

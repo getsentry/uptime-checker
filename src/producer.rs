@@ -4,7 +4,7 @@ pub mod vector_producer;
 
 use sentry_kafka_schemas::SchemaError;
 
-use rust_arroyo::backends::ProducerError;
+use sentry_arroyo::backends::ProducerError;
 
 use crate::types::result::CheckResult;
 

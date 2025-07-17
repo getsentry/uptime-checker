@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use rust_arroyo::backends::kafka::config::KafkaConfig;
+use sentry_arroyo::backends::kafka::config::KafkaConfig;
 use std::collections::hash_map::Entry::Vacant;
 use std::time::Duration;
 use std::{
