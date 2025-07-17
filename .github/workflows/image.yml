@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            container: rust:1.85-alpin3.20
+            container: rust:1.85-alpine3.20
             platform: amd64
           - os: ubuntu-24.04-arm
             container: rust:1.85-alpine3.20
