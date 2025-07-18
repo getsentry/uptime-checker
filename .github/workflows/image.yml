@@ -30,45 +30,21 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
-      - name: Install Rust with musl targets
+      - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 #v1.13.0
-        with:
-          target: ${{ matrix.musl_target }}
 
-      - name: Install build tools and fix OpenSSL headers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config protobuf-compiler cmake build-essential musl-tools musl-dev
-          # Fix OpenSSL header locations for cross-compilation (platform-specific)
-          if [[ "${{ matrix.platform }}" == "amd64" ]]; then
-            sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
-            sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
-            sudo apt-get install -y clang libc++-dev libc++abi-dev
-          else
-            sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
-            sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
-          fi
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build Rust binary
-        run: |
-          cargo build --release --target ${{ matrix.musl_target }}
-          cp target/${{ matrix.musl_target }}/release/uptime-checker target/release/
+        run: cross build --release --target ${{ matrix.musl_target }}
         env:
           UPTIME_CHECKER_GIT_REVISION: ${{ github.pull_request.head.sha || github.sha }}
-          PKG_CONFIG_ALLOW_CROSS: 1
-          RUSTFLAGS: "-Ctarget-feature=+crt-static"
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CXX_x86_64_unknown_linux_musl: musl-gcc
-          CXXFLAGS: "-std=c++17"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-          CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_musl: aarch64-linux-gnu-g++
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Prepare Artifacts
         run: |
           mkdir -p "artifacts/linux/${{ matrix.platform }}"
-          cp "target/release/uptime-checker" "artifacts/linux/${{ matrix.platform }}"
+          cp "target/${{ matrix.musl_target }}/release/uptime-checker" "artifacts/linux/${{ matrix.platform }}"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
