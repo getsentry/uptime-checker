@@ -38,7 +38,7 @@ jobs:
       - name: Install build tools and fix OpenSSL headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config protobuf-compiler cmake build-essential musl-tools musl-dev
+          sudo apt-get install -y pkg-config protobuf-compiler cmake build-essential musl-tools musl-dev gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           # Fix OpenSSL header locations for cross-compilation (platform-specific)
           if [[ "${{ matrix.platform }}" == "amd64" ]]; then
             sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
