@@ -38,7 +38,7 @@ jobs:
       - name: Install build tools and fix OpenSSL headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config protobuf-compiler cmake build-essential musl-tools musl-dev gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y pkg-config protobuf-compiler cmake build-essential musl-tools musl-dev
           # Fix OpenSSL header locations for cross-compilation (platform-specific)
           if [[ "${{ matrix.platform }}" == "amd64" ]]; then
             sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
@@ -46,6 +46,10 @@ jobs:
           else
             sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
             sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
+            # Create symlink for musl compiler
+            sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            sudo ln -s /usr/bin/aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-musl-gcc
+            sudo ln -s /usr/bin/aarch64-linux-gnu-g++ /usr/bin/aarch64-linux-musl-g++
           fi
 
       - name: Build Rust binary
