@@ -32,14 +32,20 @@ jobs:
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 #v1.13.0
+        with:
+          target: ${{ matrix.musl_target }}
 
-      - name: Install cross
-        run: RUSTFLAGS="" cargo install cross --git https://github.com/cross-rs/cross
+      - name: Install musl tools and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev pkg-config libssl-dev
 
       - name: Build Rust binary
-        run: cross build --release --target ${{ matrix.musl_target }}
+        run: cargo build --release --target ${{ matrix.musl_target }}
         env:
           UPTIME_CHECKER_GIT_REVISION: ${{ github.pull_request.head.sha || github.sha }}
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
 
       - name: Prepare Artifacts
         run: |
