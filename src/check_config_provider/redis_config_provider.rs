@@ -26,8 +26,8 @@ impl RedisPartition {
     pub fn new(number: u16) -> RedisPartition {
         RedisPartition {
             number,
-            config_key: format!("uptime:configs:{number}"),
-            update_key: format!("uptime:updates:{number}"),
+            config_key: format!("uptime:configs:{}", number),
+            update_key: format!("uptime:updates:{}", number),
         }
     }
 }

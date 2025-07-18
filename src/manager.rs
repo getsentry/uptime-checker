@@ -36,7 +36,7 @@ pub struct PartitionedService {
 }
 
 pub fn build_progress_key(partition: u16) -> String {
-    format!("scheduler_process::{partition}").to_string()
+    format!("scheduler_process::{}", partition).to_string()
 }
 
 impl PartitionedService {

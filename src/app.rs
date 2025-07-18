@@ -44,7 +44,7 @@ pub fn execute() -> io::Result<()> {
                         match result {
                             None => panic!("tasks_finished channel unexpectedly closed"),
                             Some(Err(err)) => {
-                                panic!("Error in partition: {err:?}");
+                                panic!("Error in partition: {:?}", err);
                             },
                             _ => panic!("Unexpected end of task"),
                         }
