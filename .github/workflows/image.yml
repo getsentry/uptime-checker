@@ -43,6 +43,7 @@ jobs:
           if [[ "${{ matrix.platform }}" == "amd64" ]]; then
             sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
             sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
+            sudo apt-get install -y clang libc++-dev libc++abi-dev
           else
             sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
             sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
@@ -58,7 +59,7 @@ jobs:
           RUSTFLAGS: "-Ctarget-feature=+crt-static"
           CC_x86_64_unknown_linux_musl: musl-gcc
           CXX_x86_64_unknown_linux_musl: musl-gcc
-          CXXFLAGS: "-I/usr/include/c++/12 -I/usr/include/x86_64-linux-gnu/c++/12"
+          CXXFLAGS: "-stdlib=libc++ -std=c++17"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
           CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
           CXX_aarch64_unknown_linux_musl: aarch64-linux-gnu-g++
