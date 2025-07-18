@@ -243,52 +243,6 @@ impl Checker for ReqwestChecker {
             CheckStatus::Failure
         };
 
-        if let Some(metrics) = match &response {
-            Ok(r) => Some(r.stats()),
-            Err(_) => None,
-        } {
-            if let Some(connect_stats) = metrics.http_stats.connection_stats {
-                if let Some(start) = connect_stats.get_connect_start() {
-                    if let Some(end) = connect_stats.get_connect_end() {
-                        metrics::histogram!("reqwest.connect_time")
-                            .record((end.as_micros() - start.as_micros()) as f64);
-                    }
-                }
-
-                if let Some(start) = connect_stats.get_dns_resolve_start() {
-                    if let Some(end) = connect_stats.get_dns_resolve_end() {
-                        metrics::histogram!("reqwest.name_lookup_time")
-                            .record((end.as_micros() - start.as_micros()) as f64);
-                    }
-                }
-
-                if let Some(start) = connect_stats.get_tls_start() {
-                    if let Some(end) = connect_stats.get_tls_end() {
-                        metrics::histogram!("reqwest.secure_connect_time")
-                            .record((end.as_micros() - start.as_micros()) as f64);
-                    }
-                }
-            }
-
-            if !metrics.redirects.is_empty() {
-                metrics::histogram!("reqwest.num_redirects").record(metrics.redirects.len() as f64);
-            }
-
-            if let Some(redirect_time) = metrics.get_last_redirect_start() {
-                metrics::histogram!("reqwest.redirect_time")
-                    .record(redirect_time.as_micros() as f64);
-            }
-
-            if let Some(ttfb) = metrics.get_header_ttfb() {
-                metrics::histogram!("reqwest.transfer_start_time").record(ttfb.as_micros() as f64);
-                metrics::histogram!("reqwest.transfer_time")
-                    .record((metrics.get_request_end().as_micros() - ttfb.as_micros()) as f64);
-            }
-
-            metrics::histogram!("reqwest.total_time")
-                .record(metrics.get_request_end().as_micros() as f64);
-        }
-
         let http_status_code = match &response {
             Ok(r) => Some(r.status().as_u16()),
             Err(e) => e.status().map(|s| s.as_u16()),
@@ -940,11 +894,14 @@ mod tests {
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
-        assert!(
-            result.status_reason.as_ref().map(|r| r.status_type)
-                == Some(CheckStatusReasonType::ConnectionError)
-                || result.status_reason.as_ref().map(|r| r.status_type)
-                    == Some(CheckStatusReasonType::Failure)
+        assert_eq!(
+            result.status_reason.as_ref().map(|r| r.status_type),
+            Some(CheckStatusReasonType::ConnectionError)
+        );
+        let result_description = result.status_reason.map(|r| r.description).unwrap();
+        assert_eq!(
+            result_description, "connection closed before message completed",
+            "Expected error message about closed connection: {result_description}",
         );
     }
 
