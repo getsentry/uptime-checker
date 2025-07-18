@@ -39,11 +39,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools musl-dev pkg-config libssl-dev
+          # Fix OpenSSL header locations for cross-compilation (platform-specific)
+          if [[ "${{ matrix.platform }}" == "amd64" ]]; then
+            sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
+            sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
+          else
+            sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
+            sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
+          fi
 
       - name: Build Rust binary
         run: cargo build --release --target ${{ matrix.musl_target }}
         env:
           UPTIME_CHECKER_GIT_REVISION: ${{ github.pull_request.head.sha || github.sha }}
+          RUSTFLAGS: "-Ctarget-feature=+crt-static"
           CC_x86_64_unknown_linux_musl: musl-gcc
           CC_aarch64_unknown_linux_musl: musl-gcc
 
