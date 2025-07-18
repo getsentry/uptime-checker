@@ -48,7 +48,6 @@ jobs:
             sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
             # Create symlink for musl compiler
             sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-            sudo ln -s /usr/bin/aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-musl-gcc
             sudo ln -s /usr/bin/aarch64-linux-gnu-g++ /usr/bin/aarch64-linux-musl-g++
           fi
 
