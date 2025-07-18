@@ -50,7 +50,8 @@ jobs:
 
       - name: Build Rust binary
         run: |
-          cargo build --release
+          cargo build --release --target ${{ matrix.musl_target }}
+          cp target/${{ matrix.musl_target }}/release/uptime-checker target/release/
         env:
           UPTIME_CHECKER_GIT_REVISION: ${{ github.pull_request.head.sha || github.sha }}
           PKG_CONFIG_ALLOW_CROSS: 1
