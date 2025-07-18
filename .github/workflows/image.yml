@@ -20,46 +20,27 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            musl_target: x86_64-unknown-linux-musl
             platform: amd64
           - os: ubuntu-24.04-arm
-            musl_target: aarch64-unknown-linux-musl
             platform: arm64
 
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 #v1.13.0
-        with:
-          target: ${{ matrix.musl_target }}
-
-      - name: Install musl tools and dependencies
+      - name: Build Rust binary in Alpine container
         run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev pkg-config libssl-dev
-          # Fix OpenSSL header locations for cross-compilation (platform-specific)
-          if [[ "${{ matrix.platform }}" == "amd64" ]]; then
-            sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
-            sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
-          else
-            sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
-            sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
-          fi
-
-      - name: Build Rust binary
-        run: cargo build --release --target ${{ matrix.musl_target }}
-        env:
-          UPTIME_CHECKER_GIT_REVISION: ${{ github.pull_request.head.sha || github.sha }}
-          RUSTFLAGS: "-Ctarget-feature=+crt-static"
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CC_aarch64_unknown_linux_musl: musl-gcc
+          docker run --rm \
+            -v "$(pwd)":/workspace \
+            -w /workspace \
+            -e UPTIME_CHECKER_GIT_REVISION=${{ github.pull_request.head.sha || github.sha }} \
+            rust:1.85-alpine3.20 \
+            sh -c "apk add --no-cache libc-dev pkgconfig openssl-dev protoc cmake make g++ && export RUSTFLAGS='-Ctarget-feature=-crt-static' && cargo build --release"
 
       - name: Prepare Artifacts
         run: |
           mkdir -p "artifacts/linux/${{ matrix.platform }}"
-          cp "target/${{ matrix.musl_target }}/release/uptime-checker" "artifacts/linux/${{ matrix.platform }}"
+          cp "target/release/uptime-checker" "artifacts/linux/${{ matrix.platform }}"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
