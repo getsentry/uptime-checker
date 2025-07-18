@@ -43,6 +43,8 @@ jobs:
           if [[ "${{ matrix.platform }}" == "amd64" ]]; then
             sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
             sudo ln -sf /usr/include/x86_64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
+            # Create symlinks for musl compiler
+            sudo ln -s /usr/bin/musl-gcc /usr/bin/musl-g++
           else
             sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h
             sudo ln -sf /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h
