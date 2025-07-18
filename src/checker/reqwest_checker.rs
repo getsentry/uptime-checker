@@ -95,7 +95,7 @@ fn dns_error(err: &reqwest::Error) -> Option<String> {
         inner = source;
 
         if let Some(inner_err) = source.downcast_ref::<hickory_resolver::error::ResolveError>() {
-            return Some(format!("{}", inner_err));
+            return Some(format!("{inner_err}"));
         }
     }
     None
@@ -302,7 +302,7 @@ impl Checker for ReqwestChecker {
                     tracing::info!("check_url.error: {:?}", error_msg);
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Failure,
-                        description: format!("{:?}", error_msg),
+                        description: format!("{error_msg:?}"),
                     }
                 }
             }),
@@ -768,26 +768,22 @@ mod tests {
             assert_eq!(
                 result.status,
                 CheckStatus::Failure,
-                "Test case: {:?}",
-                &cert_type
+                "Test case: {cert_type:?}",
             );
             assert_eq!(
                 result.request_info.and_then(|i| i.http_status_code),
                 None,
-                "Test case: {:?}",
-                cert_type
+                "Test case: {cert_type:?}",
             );
             assert_eq!(
                 result.status_reason.as_ref().map(|r| r.status_type),
                 Some(CheckStatusReasonType::TlsError),
-                "Test case: {:?}",
-                cert_type
+                "Test case: {cert_type:?}",
             );
             assert_eq!(
                 result.status_reason.map(|r| r.description).unwrap(),
                 expected_msg,
-                "Test case: {:?}",
-                cert_type
+                "Test case: {cert_type:?}",
             );
         }
     }

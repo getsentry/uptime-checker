@@ -683,10 +683,7 @@ mod tests {
             for other_region in should_run_order.iter().filter(|&&r| r != expected_region) {
                 assert!(
                     !config.should_run(tick, other_region),
-                    "Subscription {} should not run in region {} at tick {}",
-                    subscription_id,
-                    other_region,
-                    tick
+                    "Subscription {subscription_id} should not run in region {other_region} at tick {tick}"
                 );
             }
         }

@@ -15,8 +15,8 @@ fn emit_version() {
             .unwrap_or("unknown-rev".to_string())
     });
 
-    let release_name = format!("{}@{}+{}", package_name, package_version, git_commit_sha);
-    println!("cargo:rustc-env=UPTIME_CHECKER_VERSION={}", release_name);
+    let release_name = format!("{package_name}@{package_version}+{git_commit_sha}");
+    println!("cargo:rustc-env=UPTIME_CHECKER_VERSION={release_name}");
 }
 
 fn main() {
