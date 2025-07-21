@@ -38,7 +38,7 @@ ARG UPTIME_CHECKER_GIT_REVISION
 ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
 
 # Copy the actual source code and build
-COPY . .
+COPY src build.rs ./
 RUN cargo build --release
 
 FROM alpine:3.20
