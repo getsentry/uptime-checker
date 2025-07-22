@@ -61,7 +61,7 @@ iprange = "0.6.7"
 http = "1.2.0"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
-reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "736b8ca01602cf00f4bef363aa1e98c5e56fb3ca" }
+reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "4e2eff129c87ee0b54e665bd294cf4b1a221d3de" }
 # we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
 
 [profile.release]
