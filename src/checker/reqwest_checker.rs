@@ -247,7 +247,7 @@ impl Checker for ReqwestChecker {
             Ok(r) => Some(r.stats()),
             Err(_) => None,
         } {
-            if let Some(connect_stats) = metrics.get_http_stats().connection_stats {
+            if let Some(connect_stats) = metrics.http_stats.connection_stats {
                 if let Some(start) = connect_stats.get_connect_start() {
                     if let Some(end) = connect_stats.get_connect_end() {
                         metrics::histogram!("reqwest.connect_time")
@@ -270,9 +270,8 @@ impl Checker for ReqwestChecker {
                 }
             }
 
-            if !metrics.get_redirects().is_empty() {
-                metrics::histogram!("reqwest.num_redirects")
-                    .record(metrics.get_redirects().len() as f64);
+            if !metrics.redirects.is_empty() {
+                metrics::histogram!("reqwest.num_redirects").record(metrics.redirects.len() as f64);
             }
 
             if let Some(redirect_time) = metrics.get_last_redirect_start() {
