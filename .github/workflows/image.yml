@@ -147,3 +147,15 @@ jobs:
             "${{ github.repository }}" \
             "${{ github.sha }}" \
             "${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}"
+
+  self-hosted-end-to-end:
+    needs: [create-manifest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Run Sentry self-hosted e2e CI
+        uses: getsentry/self-hosted@master
+        with:
+          project_name: uptime_checker
+          image_url: ghcr.io/getsentry/uptime-checker:${{ github.sha }}
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
