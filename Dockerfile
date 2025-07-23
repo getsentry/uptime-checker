@@ -38,6 +38,9 @@ ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
 
 # Copy the actual source code and build
 COPY . .
+
+# Workaround for segfault in newer alipine https://github.com/rust-lang/rust/issues/106982
+ENV RUSTFLAGS='-C target-feature=-crt-static'
 RUN cargo build --release
 
 FROM alpine:3.22.1
