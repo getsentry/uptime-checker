@@ -1,4 +1,4 @@
-FROM rust:1.85-alpine3.20 AS builder
+FROM rust:1.85-alpine3.21 AS builder
 
 # Install system dependencies
 RUN apk add --no-cache \
@@ -40,7 +40,7 @@ ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
 COPY . .
 RUN cargo build --release
 
-FROM alpine:3.20.7
+FROM alpine:3.21.4
 
 RUN apk add --no-cache tini libgcc curl && \
     addgroup -S app --gid 1000 && \
