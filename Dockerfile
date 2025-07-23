@@ -40,7 +40,7 @@ ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
 COPY . .
 RUN cargo build --release
 
-FROM alpine:3.20.6
+FROM alpine:3.20.7
 
 RUN apk add --no-cache tini libgcc curl && \
     addgroup -S app --gid 1000 && \
