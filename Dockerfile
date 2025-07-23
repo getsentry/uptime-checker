@@ -50,4 +50,6 @@ COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-che
 
 USER app
 
+ENV RUST_BACKTRACE=1
+
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/uptime-checker"]
