@@ -1579,7 +1579,7 @@ dependencies = [
 [[package]]
 name = "hyper"
 version = "1.6.0"
-source = "git+https://github.com/getsentry/hyper?rev=f63c131545499b0c32eb1315224ce2823d8d5fda#f63c131545499b0c32eb1315224ce2823d8d5fda"
+source = "git+https://github.com/getsentry/hyper?rev=11a91db433282b4057795e71607f4077d9cd4f18#11a91db433282b4057795e71607f4077d9cd4f18"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1613,7 +1613,7 @@ dependencies = [
 [[package]]
 name = "hyper-tls"
 version = "0.6.0"
-source = "git+https://github.com/getsentry/hyper-tls?rev=ece41a68e5605138d1b77f99284e104efa698892#ece41a68e5605138d1b77f99284e104efa698892"
+source = "git+https://github.com/getsentry/hyper-tls?rev=46b6233904d18b774589440929520eaa9831db62#46b6233904d18b774589440929520eaa9831db62"
 dependencies = [
  "bytes",
  "hyper 1.6.0",
@@ -1646,7 +1646,7 @@ dependencies = [
 [[package]]
 name = "hyper-util"
 version = "0.1.14"
-source = "git+https://github.com/getsentry/hyper-util?rev=577f70dceb65e8e9dff3dc8c19e79ce877a15cbc#577f70dceb65e8e9dff3dc8c19e79ce877a15cbc"
+source = "git+https://github.com/getsentry/hyper-util?rev=fd71b24115c0c190249a5efa0889967382ec66cd#fd71b24115c0c190249a5efa0889967382ec66cd"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -3009,7 +3009,7 @@ dependencies = [
 [[package]]
 name = "reqwest"
 version = "0.12.2"
-source = "git+https://github.com/getsentry/reqwest-uptime?rev=736b8ca01602cf00f4bef363aa1e98c5e56fb3ca#736b8ca01602cf00f4bef363aa1e98c5e56fb3ca"
+source = "git+https://github.com/getsentry/reqwest-uptime?rev=4e2eff129c87ee0b54e665bd294cf4b1a221d3de#4e2eff129c87ee0b54e665bd294cf4b1a221d3de"
 dependencies = [
  "base64 0.22.1",
  "bytes",
