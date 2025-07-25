@@ -56,7 +56,8 @@ mod tests {
         producer::{ExtractCodeError, ResultsProducer},
         types::{
             result::{
-                CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
+                CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType,
+                RequestDurations, RequestInfo,
             },
             shared::RequestMethod,
         },
@@ -68,6 +69,16 @@ mod tests {
 
     pub fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
         let guid = Uuid::new_v4();
+        let ri = RequestInfo {
+            request_type: RequestMethod::Get,
+            http_status_code: Some(200),
+            url: "http://santry.ayo".to_string(),
+            request_body_size_bytes: 0,
+            response_body_size_bytes: 0,
+            request_duration_us: 123456,
+            durations: RequestDurations::default(),
+        };
+
         let result = CheckResult {
             guid,
             subscription_id: uuid!("23d6048d67c948d9a19c0b47979e9a03"),
@@ -81,10 +92,8 @@ mod tests {
             scheduled_check_time: Utc::now(),
             actual_check_time: Utc::now(),
             duration: Some(TimeDelta::seconds(1)),
-            request_info: Some(RequestInfo {
-                request_type: RequestMethod::Get,
-                http_status_code: Some(200),
-            }),
+            request_info: Some(ri.clone()),
+            request_info_list: vec![ri],
             region: "us-west-1",
         };
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since

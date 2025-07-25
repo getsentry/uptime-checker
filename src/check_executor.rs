@@ -133,6 +133,7 @@ impl CheckResult {
             duration: None,
             request_info: None,
             region,
+            request_info_list: vec![],
         }
     }
 }
