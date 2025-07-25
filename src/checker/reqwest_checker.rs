@@ -238,7 +238,7 @@ impl Checker for ReqwestChecker {
 
         let start = Instant::now();
         let response = do_request(&self.client, check.get_config(), &trace_header).await;
-        let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
+        let duration = TimeDelta::from_std(start.elapsed()).unwrap();
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
             CheckStatus::Success
@@ -276,9 +276,9 @@ impl Checker for ReqwestChecker {
                 http_status_code,
                 request_type: check.get_config().request_method,
                 request_body_size_bytes: check.get_config().request_body.len() as u32,
-                url: check.get_config().url.clone().into(),
+                url: check.get_config().url.clone(),
                 response_body_size_bytes: 0,
-                request_duration_us: duration.unwrap().num_microseconds().unwrap() as u64,
+                request_duration_us: duration.num_microseconds().unwrap() as u64,
                 durations: RequestDurations {
                     dns_lookup: default_timing,
                     tcp_connection: default_timing,
@@ -356,7 +356,7 @@ impl Checker for ReqwestChecker {
             span_id,
             scheduled_check_time,
             actual_check_time,
-            duration,
+            duration: Some(duration),
             request_info: Some(final_req),
             region,
             request_info_list: rinfos,

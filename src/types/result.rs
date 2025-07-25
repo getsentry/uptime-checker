@@ -258,8 +258,39 @@ mod tests {
   "duration_ms": 100,
   "request_info": {
     "request_type": "HEAD",
-    "http_status_code": 500
+    "http_status_code": 500,
+    "url": "http://www.santry.ayo",
+    "request_body_size_bytes": 0,
+    "response_body_size_bytes": 0,
+    "request_duration_us": 0,
+    "durations": {
+      "dns_lookup": {
+        "start_us": 0,
+        "duration_us": 0
+      },
+      "tcp_connection": {
+        "start_us": 1,
+        "duration_us": 1
+      },
+      "tls_handshake": {
+        "start_us": 2,
+        "duration_us": 2
+      },
+      "time_to_first_byte": {
+        "start_us": 3,
+        "duration_us": 3
+      },
+      "send_request": {
+        "start_us": 4,
+        "duration_us": 4
+      },
+      "receive_response": {
+        "start_us": 5,
+        "duration_us": 5
+      }
+    }
   },
+  "request_info_list": [],
   "region": "us-west-1"
 }"#;
 
@@ -283,8 +314,39 @@ mod tests {
   "duration_ms": 50,
   "request_info": {
     "request_type": "HEAD",
-    "http_status_code": 200
+    "http_status_code": 200,
+    "url": "http://www.santry.ayo",
+    "request_body_size_bytes": 0,
+    "response_body_size_bytes": 0,
+    "request_duration_us": 0,
+    "durations": {
+      "dns_lookup": {
+        "start_us": 0,
+        "duration_us": 0
+      },
+      "tcp_connection": {
+        "start_us": 1,
+        "duration_us": 1
+      },
+      "tls_handshake": {
+        "start_us": 2,
+        "duration_us": 2
+      },
+      "time_to_first_byte": {
+        "start_us": 3,
+        "duration_us": 3
+      },
+      "send_request": {
+        "start_us": 4,
+        "duration_us": 4
+      },
+      "receive_response": {
+        "start_us": 5,
+        "duration_us": 5
+      }
+    }
   },
+  "request_info_list": [],
   "region": "us-west-1"
 }"#;
 
