@@ -79,6 +79,7 @@ impl Checker for DummyChecker {
             duration,
             request_info,
             region,
+            request_info_list: vec![],
         }
     }
 }

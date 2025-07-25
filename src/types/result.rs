@@ -1,8 +1,11 @@
 use chrono::{DateTime, TimeDelta, Utc};
+use hyper::rt::ConnectionStats;
+use hyper::stats::RequestStats;
 use sentry::protocol::SpanId;
 use serde::{Deserialize, Serialize};
 use serde_with::chrono;
 use serde_with::serde_as;
+use std::time::Instant;
 use uuid::Uuid;
 
 use super::shared::RequestMethod;
@@ -47,7 +50,100 @@ pub struct CheckStatusReason {
     pub description: String,
 }
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
+fn to_timing(
+    reference_ts: &u128,
+    reference_instant: &Instant,
+    start: &Instant,
+    end: &Instant,
+) -> Timing {
+    Timing {
+        start_us: reference_ts + start.duration_since(*reference_instant).as_micros(),
+        duration_us: (*end - *start).as_micros() as u64,
+    }
+}
+
+pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<RequestInfo> {
+    stats
+        .redirects()
+        .iter()
+        .map(|rs| {
+            let conn_stats = if let Some(cstats) = rs.get_http_stats().get_connection_stats() {
+                *cstats
+            } else {
+                // If we don't have a connection stats, then it's a pooled connection.  Just invent a new connection stats, which
+                // start up a connection at the moment we see the request go out.
+                ConnectionStats::new_pooled(
+                    rs.get_request_start(),
+                    rs.get_request_start_timestamp(),
+                )
+            };
+
+            // It's pretty hard to find out when "request goes on the wire" precisely happens,
+            // so for now, we can pretend it happens right after the end of tcp connection or
+            // (if it exists) tls negotiation.
+            let latest_connection_stat = conn_stats
+                .get_tls_end()
+                .unwrap_or(conn_stats.get_connect_end());
+
+            RequestInfo {
+                http_status_code: Some(rs.get_status_code()),
+                request_type: method,
+                request_body_size_bytes: rs.get_request_body_size(),
+                url: rs.get_url().to_string(),
+                response_body_size_bytes: 0,
+                request_duration_us: rs
+                    .get_request_end()
+                    .duration_since(conn_stats.get_start_instant())
+                    .as_micros() as u64,
+                durations: RequestDurations {
+                    dns_lookup: to_timing(
+                        &conn_stats.get_start_timestamp(),
+                        &conn_stats.get_start_instant(),
+                        &conn_stats.get_dns_resolve_start(),
+                        &conn_stats.get_dns_resolve_end(),
+                    ),
+                    tcp_connection: to_timing(
+                        &conn_stats.get_start_timestamp(),
+                        &conn_stats.get_start_instant(),
+                        &conn_stats.get_connect_start(),
+                        &conn_stats.get_connect_end(),
+                    ),
+                    tls_handshake: to_timing(
+                        &conn_stats.get_start_timestamp(),
+                        &conn_stats.get_start_instant(),
+                        &conn_stats
+                            .get_tls_start()
+                            .unwrap_or(conn_stats.get_start_instant()),
+                        &conn_stats
+                            .get_tls_end()
+                            .unwrap_or(conn_stats.get_start_instant()),
+                    ),
+                    time_to_first_byte: to_timing(
+                        &conn_stats.get_start_timestamp(),
+                        &conn_stats.get_start_instant(),
+                        &conn_stats.get_start_instant(),
+                        &rs.get_header_ttfb()
+                            .unwrap_or(conn_stats.get_start_instant()),
+                    ),
+                    send_request: to_timing(
+                        &conn_stats.get_start_timestamp(),
+                        &conn_stats.get_start_instant(),
+                        &conn_stats.get_start_instant(),
+                        &latest_connection_stat,
+                    ),
+                    receive_response: to_timing(
+                        &conn_stats.get_start_timestamp(),
+                        &conn_stats.get_start_instant(),
+                        &conn_stats.get_start_instant(),
+                        &rs.get_request_end(),
+                    ),
+                },
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct RequestInfo {
     /// The type of HTTP method used for the check
@@ -56,6 +152,39 @@ pub struct RequestInfo {
     /// The status code of the response. May be empty when the request did not receive a response
     /// whatsoever.
     pub http_status_code: Option<u16>,
+
+    pub url: String,
+
+    pub request_body_size_bytes: u32,
+
+    pub response_body_size_bytes: u32,
+
+    pub request_duration_us: u64,
+
+    pub durations: RequestDurations,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct RequestDurations {
+    pub dns_lookup: Timing,
+
+    pub tcp_connection: Timing,
+
+    pub tls_handshake: Timing,
+
+    pub time_to_first_byte: Timing,
+
+    pub send_request: Timing,
+
+    pub receive_response: Timing,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Copy, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct Timing {
+    pub start_us: u128,
+    pub duration_us: u64,
 }
 
 #[serde_as]
@@ -101,6 +230,7 @@ pub struct CheckResult {
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,
 
+    pub request_info_list: Vec<RequestInfo>,
     /// Region slug that produced the check result
     pub region: &'static str,
 }

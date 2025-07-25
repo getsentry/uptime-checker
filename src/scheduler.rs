@@ -391,6 +391,7 @@ mod tests {
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
                 region: config.region,
+                request_info_list: vec![],
             })
             .unwrap();
         scheduled_check2
@@ -406,6 +407,7 @@ mod tests {
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
                 region: config.region,
+                request_info_list: vec![],
             })
             .unwrap();
 
@@ -504,6 +506,7 @@ mod tests {
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
                 region: config.region,
+                request_info_list: vec![],
             })
             .unwrap();
 
@@ -607,6 +610,7 @@ mod tests {
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
                 region: config.region,
+                request_info_list: vec![],
             })
             .unwrap();
         scheduled_check2
@@ -622,6 +626,7 @@ mod tests {
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
                 region: config.region,
+                request_info_list: vec![],
             })
             .unwrap();
 
@@ -720,6 +725,7 @@ mod tests {
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
                 region: config.region,
+                request_info_list: vec![],
             })
             .unwrap();
         scheduled_check2
@@ -735,6 +741,7 @@ mod tests {
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
                 region: config.region,
+                request_info_list: vec![],
             })
             .unwrap();
 
@@ -819,6 +826,7 @@ mod tests {
                 duration: Some(Duration::seconds(1)),
                 request_info: None,
                 region: config.region,
+                request_info_list: vec![],
             })
             .unwrap();
 
