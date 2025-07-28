@@ -7,16 +7,17 @@ rust-version = "1.88"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyper = "1.4.1"
-hyper-util = "0.1.10"
+hyper = { git = "https://github.com/getsentry/hyper", rev = "33f3dc16d0e6c926a47194ed7249540d4fadadc3" }
+hyper-util = { git = "https://github.com/getsentry/hyper-util", rev = "501d83ceabad31b1e2b5a29fb398f83b25ef7e66" }
+reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "847e4f460fde419f5b70e0d6e15c4da22159e73e", features = [
+    "hickory-dns",
+] }
 anyhow = "1.0.66"
 clap = { version = "4.4.6", features = ["derive"] }
 chrono = { version = "0.4.31", default-features = false, features = [
   "std",
   "serde",
 ] }
-httpmock = "0.7.0-rc.1"
-reqwest = { version = "0.12.2", features = ["hickory-dns"] }
 openssl = "0.10.72"
 rust_arroyo = { version = "*", git = "https://github.com/getsentry/arroyo", rev = "0b84afc07131d8b8d48abcb7c8de8cfa2a98e526" }
 tokio = { version = "1.43.1", features = [
@@ -61,7 +62,6 @@ iprange = "0.6.7"
 http = "1.2.0"
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
-reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "4e2eff129c87ee0b54e665bd294cf4b1a221d3de" }
 # we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
 
 [profile.release]
@@ -74,3 +74,4 @@ strip = "debuginfo"
 redis-test-macro = { path = "./redis-test-macro" }
 ntest = "0.9.3"
 socket-server-mocker = "0.5.0"
+httpmock = "0.7.0-rc.1"

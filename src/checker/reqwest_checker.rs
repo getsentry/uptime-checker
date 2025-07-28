@@ -1,6 +1,7 @@
 use super::ip_filter::is_external_ip;
 use super::{make_trace_header, make_trace_id, Checker};
 use crate::check_executor::ScheduledCheck;
+use crate::types::result::{to_request_info_list, RequestDurations, Timing};
 use crate::types::{
     check_config::CheckConfig,
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
@@ -182,6 +183,8 @@ impl ReqwestChecker {
             .default_headers(default_headers)
             .pool_idle_timeout(options.pool_idle_timeout);
 
+        builder = builder.tls_info(true);
+
         if options.validate_url {
             builder = builder.ip_filter(is_external_ip);
         }
@@ -235,7 +238,7 @@ impl Checker for ReqwestChecker {
 
         let start = Instant::now();
         let response = do_request(&self.client, check.get_config(), &trace_header).await;
-        let duration = Some(TimeDelta::from_std(start.elapsed()).unwrap());
+        let duration = TimeDelta::from_std(start.elapsed()).unwrap();
 
         let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
             CheckStatus::Success
@@ -243,62 +246,49 @@ impl Checker for ReqwestChecker {
             CheckStatus::Failure
         };
 
-        if let Some(metrics) = match &response {
-            Ok(r) => Some(r.stats()),
-            Err(_) => None,
-        } {
-            if let Some(connect_stats) = metrics.get_http_stats().connection_stats {
-                if let Some(start) = connect_stats.get_connect_start() {
-                    if let Some(end) = connect_stats.get_connect_end() {
-                        metrics::histogram!("reqwest.connect_time")
-                            .record((end.as_micros() - start.as_micros()) as f64);
-                    }
-                }
+        // TODO: this is how to extract the leaf cert from the request we run.
 
-                if let Some(start) = connect_stats.get_dns_resolve_start() {
-                    if let Some(end) = connect_stats.get_dns_resolve_end() {
-                        metrics::histogram!("reqwest.name_lookup_time")
-                            .record((end.as_micros() - start.as_micros()) as f64);
-                    }
-                }
+        // let cert = response
+        //     .as_ref()
+        //     .map(|resp| resp.extensions().get::<reqwest::tls::TlsInfo>());
 
-                if let Some(start) = connect_stats.get_tls_start() {
-                    if let Some(end) = connect_stats.get_tls_end() {
-                        metrics::histogram!("reqwest.secure_connect_time")
-                            .record((end.as_micros() - start.as_micros()) as f64);
-                    }
-                }
-            }
-
-            if !metrics.get_redirects().is_empty() {
-                metrics::histogram!("reqwest.num_redirects")
-                    .record(metrics.get_redirects().len() as f64);
-            }
-
-            if let Some(redirect_time) = metrics.get_last_redirect_start() {
-                metrics::histogram!("reqwest.redirect_time")
-                    .record(redirect_time.as_micros() as f64);
-            }
-
-            if let Some(ttfb) = metrics.get_header_ttfb() {
-                metrics::histogram!("reqwest.transfer_start_time").record(ttfb.as_micros() as f64);
-                metrics::histogram!("reqwest.transfer_time")
-                    .record((metrics.get_request_end().as_micros() - ttfb.as_micros()) as f64);
-            }
-
-            metrics::histogram!("reqwest.total_time")
-                .record(metrics.get_request_end().as_micros() as f64);
-        }
+        // if let Ok(Some(cert)) = cert {
+        //     eprintln!(
+        //         "got a cert: {}",
+        //         cert.peer_certificate().map_or(12345, |bytes| bytes.len())
+        //     );
+        // }
 
         let http_status_code = match &response {
             Ok(r) => Some(r.status().as_u16()),
             Err(e) => e.status().map(|s| s.as_u16()),
         };
 
-        let request_info = Some(RequestInfo {
-            http_status_code,
-            request_type: check.get_config().request_method,
-        });
+        let rinfos = if let Ok(resp) = &response {
+            to_request_info_list(resp.stats(), check.get_config().request_method)
+        } else {
+            // TODO: thread the request timings (as much as we can get) through the error pathway.
+            let default_timing = Timing {
+                start_us: actual_check_time.timestamp_micros() as u128,
+                duration_us: 0,
+            };
+            vec![RequestInfo {
+                http_status_code,
+                request_type: check.get_config().request_method,
+                request_body_size_bytes: check.get_config().request_body.len() as u32,
+                url: check.get_config().url.clone(),
+                response_body_size_bytes: 0,
+                request_duration_us: duration.num_microseconds().unwrap() as u64,
+                durations: RequestDurations {
+                    dns_lookup: default_timing,
+                    tcp_connection: default_timing,
+                    tls_handshake: default_timing,
+                    time_to_first_byte: default_timing,
+                    send_request: default_timing,
+                    receive_response: default_timing,
+                },
+            }]
+        };
 
         let status_reason = match response {
             Ok(r) if r.status().is_success() => None,
@@ -355,6 +345,8 @@ impl Checker for ReqwestChecker {
             }),
         };
 
+        let final_req = rinfos.last().unwrap().clone();
+
         CheckResult {
             guid: trace_id,
             subscription_id: check.get_config().subscription_id,
@@ -364,9 +356,10 @@ impl Checker for ReqwestChecker {
             span_id,
             scheduled_check_time,
             actual_check_time,
-            duration,
-            request_info,
+            duration: Some(duration),
+            request_info: Some(final_req),
             region,
+            request_info_list: rinfos,
         }
     }
 }
