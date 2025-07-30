@@ -42,12 +42,15 @@ RUN cargo build --release
 
 FROM alpine:3.22.1
 
-RUN apk add --no-cache tini libgcc curl ca-certificates && \
-    apk upgrade --no-cache ca-certificates && \
+RUN apk add --no-cache tini libgcc curl && \
     addgroup -S app --gid 1000 && \
     adduser -S app -G app --uid 1000
 
 COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
+
+# Install ca-certificates after COPY so they get updated when the binary changes
+RUN apk add --no-cache ca-certificates && \
+    apk upgrade --no-cache ca-certificates
 
 USER app
 
