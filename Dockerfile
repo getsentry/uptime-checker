@@ -42,7 +42,8 @@ RUN cargo build --release
 
 FROM alpine:3.22.1
 
-RUN apk add --no-cache tini libgcc curl && \
+RUN apk add --no-cache tini libgcc curl ca-certificates && \
+    apk upgrade --no-cache ca-certificates && \
     addgroup -S app --gid 1000 && \
     adduser -S app -G app --uid 1000
 
