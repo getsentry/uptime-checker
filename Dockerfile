@@ -42,15 +42,23 @@ RUN cargo build --release
 
 FROM alpine:3.22.1
 
-RUN apk add --no-cache tini libgcc curl && \
+RUN apk add --no-cache tini libgcc ca-certificates curl && \
     addgroup -S app --gid 1000 && \
     adduser -S app -G app --uid 1000
 
-COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
+# XXX(epurkhiser): Install a missing Intermediary certificate the cloudflare
+# does not seem to serve and expects browsers to use AIA to download the
+# intermediary.
+#
+# Refs https://sentry.zendesk.com/agent/tickets/158451
+#
+# XXX(epurkhiser): I'm not sure why the ca-certificates package on alpine
+# doesn't include this, but maybe with a newer or different distribution we
+# wouldn't need this?
+RUN curl -sSL https://ssl.com/repo/certs/SSL.com-TLS-T-ECC-R2.pem -o /usr/local/share/ca-certificates/SSl.com-TLS-T-ECC-R2.crt && \
+    update-ca-certificates
 
-# Install ca-certificates after COPY so they get updated when the binary changes
-RUN apk add --no-cache ca-certificates && \
-    apk upgrade --no-cache ca-certificates
+COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
 
 USER app
 
