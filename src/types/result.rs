@@ -90,18 +90,18 @@ pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<
             let certificate_info = rs
                 .get_certificate_bytes()
                 .and_then(|cert| X509::from_der(cert).ok())
-                .and_then(|cert| {
+                .map(|cert| {
                     let epoch_start = Asn1Time::from_unix(0).unwrap();
 
                     let not_after_diff = epoch_start.diff(cert.not_after()).unwrap();
                     let not_before_diff = epoch_start.diff(cert.not_before()).unwrap();
 
-                    Some(CertificateInfo {
+                    CertificateInfo {
                         not_after_timestamp_s: not_after_diff.secs as u64
                             + (not_after_diff.days as u64 * 24 * 60 * 60),
                         not_before_timestamp_s: not_before_diff.secs as u64
                             + (not_before_diff.days as u64 * 24 * 60 * 60),
-                    })
+                    }
                 });
 
             RequestInfo {
