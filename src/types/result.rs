@@ -1,6 +1,8 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use hyper::rt::ConnectionStats;
 use hyper::stats::RequestStats;
+use openssl::asn1::Asn1Time;
+use openssl::x509::X509;
 use sentry::protocol::SpanId;
 use serde::{Deserialize, Serialize};
 use serde_with::chrono;
@@ -85,7 +87,25 @@ pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<
                 .get_tls_end()
                 .unwrap_or(conn_stats.get_connect_end());
 
+            let certificate_info = rs
+                .get_certificate_bytes()
+                .and_then(|cert| X509::from_der(cert).ok())
+                .and_then(|cert| {
+                    let epoch_start = Asn1Time::from_unix(0).unwrap();
+
+                    let not_after_diff = epoch_start.diff(cert.not_after()).unwrap();
+                    let not_before_diff = epoch_start.diff(cert.not_before()).unwrap();
+
+                    Some(CertificateInfo {
+                        not_after_timestamp_s: not_after_diff.secs as u64
+                            + (not_after_diff.days as u64 * 24 * 60 * 60),
+                        not_before_timestamp_s: not_before_diff.secs as u64
+                            + (not_before_diff.days as u64 * 24 * 60 * 60),
+                    })
+                });
+
             RequestInfo {
+                certificate_info,
                 http_status_code: Some(rs.get_status_code()),
                 request_type: method,
                 request_body_size_bytes: rs.get_request_body_size(),
@@ -162,6 +182,10 @@ pub struct RequestInfo {
     pub request_duration_us: u64,
 
     pub durations: RequestDurations,
+
+    // Information about the leaf certificate retrieved as part of this
+    // request, if any.
+    pub certificate_info: Option<CertificateInfo>,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize, Clone, Default)]
@@ -185,6 +209,13 @@ pub struct RequestDurations {
 pub struct Timing {
     pub start_us: u128,
     pub duration_us: u64,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Copy, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct CertificateInfo {
+    pub not_before_timestamp_s: u64,
+    pub not_after_timestamp_s: u64,
 }
 
 #[serde_as]
@@ -230,7 +261,10 @@ pub struct CheckResult {
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,
 
+    // Information about all check requests made (as a result of redirections,) including
+    // the final request.
     pub request_info_list: Vec<RequestInfo>,
+
     /// Region slug that produced the check result
     pub region: &'static str,
 }

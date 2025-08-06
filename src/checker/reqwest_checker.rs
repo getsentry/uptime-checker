@@ -287,6 +287,7 @@ impl Checker for ReqwestChecker {
                     send_request: default_timing,
                     receive_response: default_timing,
                 },
+                certificate_info: None,
             }]
         };
 

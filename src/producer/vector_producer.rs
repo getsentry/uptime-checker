@@ -133,6 +133,7 @@ mod tests {
 
     fn create_test_result() -> CheckResult {
         let ri = RequestInfo {
+            certificate_info: None,
             request_type: RequestMethod::Get,
             http_status_code: Some(200),
             url: "http://santry.ayo".to_string(),

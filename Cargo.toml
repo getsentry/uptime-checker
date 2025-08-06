@@ -7,10 +7,10 @@ rust-version = "1.88"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyper = { git = "https://github.com/getsentry/hyper", rev = "33f3dc16d0e6c926a47194ed7249540d4fadadc3" }
-hyper-util = { git = "https://github.com/getsentry/hyper-util", rev = "501d83ceabad31b1e2b5a29fb398f83b25ef7e66" }
-reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "847e4f460fde419f5b70e0d6e15c4da22159e73e", features = [
-    "hickory-dns",
+hyper = { git = "https://github.com/getsentry/hyper", rev = "71f79506ec5b97c756f7c35606cfc862dfee7868" }
+hyper-util = { git = "https://github.com/getsentry/hyper-util", rev = "288134da888b5510f78c9a86471787824407c6a5" }
+reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "220c544bf929d602294643c9c4748c81ac06159a", features = [
+  "hickory-dns",
 ] }
 anyhow = "1.0.66"
 clap = { version = "4.4.6", features = ["derive"] }
