@@ -322,7 +322,8 @@ mod tests {
         "start_us": 5,
         "duration_us": 5
       }
-    }
+    },
+    "certificate_info": null
   },
   "request_info_list": [],
   "region": "us-west-1"
@@ -378,7 +379,8 @@ mod tests {
         "start_us": 5,
         "duration_us": 5
       }
-    }
+    },
+    "certificate_info": null
   },
   "request_info_list": [],
   "region": "us-west-1"
