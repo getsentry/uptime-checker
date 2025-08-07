@@ -70,6 +70,7 @@ mod tests {
     pub fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
         let guid = Uuid::new_v4();
         let ri = RequestInfo {
+            certificate_info: None,
             request_type: RequestMethod::Get,
             http_status_code: Some(200),
             url: "http://santry.ayo".to_string(),
