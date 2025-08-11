@@ -1,6 +1,6 @@
 use std::{borrow::Cow, str::FromStr};
 
-use sentry::types::Dsn;
+use sentry::{integrations::tracing::EventFilter, types::Dsn};
 use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
 
@@ -114,9 +114,17 @@ pub fn init(config: LoggingConfig) {
             .boxed(),
     };
 
+    // Same as the default filter, except it sends everything at or above INFO as logs instead of breadcrumbs.
+    let sentry_layer =
+        sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
+            tracing::Level::ERROR => EventFilter::Event | EventFilter::Log,
+            tracing::Level::WARN | tracing::Level::INFO => EventFilter::Log,
+            tracing::Level::DEBUG | tracing::Level::TRACE => EventFilter::Ignore,
+        });
+
     let logs_subscriber = tracing_subscriber::registry()
         .with(format.with_filter(config.log_level.level_filter()))
-        .with(sentry::integrations::tracing::layer());
+        .with(sentry_layer);
 
     logs_subscriber.init();
 }
