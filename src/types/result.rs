@@ -248,15 +248,24 @@ pub struct CheckResult {
     #[serde_as(as = "serde_with::TimestampMilliSeconds")]
     pub scheduled_check_time: DateTime<Utc>,
 
+    #[serde_as(as = "serde_with::TimestampMicroSeconds")]
+    pub scheduled_check_time_us: DateTime<Utc>,
+
     /// Timestamp in milliseconds of when the check was actually ran
     #[serde(rename = "actual_check_time_ms")]
     #[serde_as(as = "serde_with::TimestampMilliSeconds")]
     pub actual_check_time: DateTime<Utc>,
 
+    #[serde_as(as = "serde_with::TimestampMicroSeconds")]
+    pub actual_check_time_us: DateTime<Utc>,
+
     /// Duration of the check in ms. Will be null when the status is missed_window
     #[serde(rename = "duration_ms")]
     #[serde_as(as = "Option<serde_with::DurationMilliSeconds<i64>>")]
     pub duration: Option<TimeDelta>,
+
+    #[serde_as(as = "Option<serde_with::DurationMicroSeconds<i64>>")]
+    pub duration_us: Option<TimeDelta>,
 
     /// Information about the check request made. Will be empty if the check was missed
     pub request_info: Option<RequestInfo>,
@@ -288,8 +297,11 @@ mod tests {
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
   "span_id": "9c1d886a44bafc94",
   "scheduled_check_time_ms": 1717614062978,
+  "scheduled_check_time_us": 1717614062978000,
   "actual_check_time_ms": 1717614068008,
+  "actual_check_time_us": 1717614068008000,
   "duration_ms": 100,
+  "duration_us": 100000,
   "request_info": {
     "request_type": "HEAD",
     "http_status_code": 500,
@@ -345,8 +357,11 @@ mod tests {
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
   "span_id": "9c1d886a44bafc94",
   "scheduled_check_time_ms": 1717614062978,
+  "scheduled_check_time_us": 1717614062978000,
   "actual_check_time_ms": 1717614068008,
+  "actual_check_time_us": 1717614068008000,
   "duration_ms": 50,
+  "duration_us": 50000,
   "request_info": {
     "request_type": "HEAD",
     "http_status_code": 200,

@@ -121,6 +121,7 @@ impl CheckSender {
 impl CheckResult {
     /// Produce a missed check result from a scheduled check.
     pub fn missed_from(check: &ScheduledCheck, region: &'static str) -> Self {
+        let now = Utc::now();
         Self {
             guid: Uuid::new_v4(),
             subscription_id: check.get_config().subscription_id,
@@ -129,7 +130,10 @@ impl CheckResult {
             trace_id: Default::default(),
             span_id: Default::default(),
             scheduled_check_time: check.get_tick().time(),
-            actual_check_time: Utc::now(),
+            scheduled_check_time_us: check.get_tick().time(),
+            actual_check_time: now,
+            actual_check_time_us: now,
+            duration_us: None,
             duration: None,
             request_info: None,
             region,
