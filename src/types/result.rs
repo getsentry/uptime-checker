@@ -248,6 +248,7 @@ pub struct CheckResult {
     #[serde_as(as = "serde_with::TimestampMilliSeconds")]
     pub scheduled_check_time: DateTime<Utc>,
 
+    /// Timestamp in microseconds of when the check was schedule to run
     #[serde_as(as = "serde_with::TimestampMicroSeconds")]
     pub scheduled_check_time_us: DateTime<Utc>,
 
@@ -256,6 +257,7 @@ pub struct CheckResult {
     #[serde_as(as = "serde_with::TimestampMilliSeconds")]
     pub actual_check_time: DateTime<Utc>,
 
+    /// Timestamp in microseconds of when the check was actually ran
     #[serde_as(as = "serde_with::TimestampMicroSeconds")]
     pub actual_check_time_us: DateTime<Utc>,
 
@@ -264,6 +266,7 @@ pub struct CheckResult {
     #[serde_as(as = "Option<serde_with::DurationMilliSeconds<i64>>")]
     pub duration: Option<TimeDelta>,
 
+    /// Duration of the check in us. Will be null when the status is missed_window
     #[serde_as(as = "Option<serde_with::DurationMicroSeconds<i64>>")]
     pub duration_us: Option<TimeDelta>,
 
