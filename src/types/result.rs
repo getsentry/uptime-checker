@@ -7,6 +7,7 @@ use sentry::protocol::SpanId;
 use serde::{Deserialize, Serialize};
 use serde_with::chrono;
 use serde_with::serde_as;
+use std::fmt::Debug;
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -138,23 +139,23 @@ pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<
                             .get_tls_end()
                             .unwrap_or(conn_stats.get_start_instant()),
                     ),
+                    // This is, now, the same as receive_response.
                     time_to_first_byte: to_timing(
                         &conn_stats.get_start_timestamp(),
                         &conn_stats.get_start_instant(),
-                        &conn_stats.get_start_instant(),
-                        &rs.get_header_ttfb()
-                            .unwrap_or(conn_stats.get_start_instant()),
+                        &rs.get_request_sent(),
+                        &rs.get_response_start(),
                     ),
                     send_request: to_timing(
                         &conn_stats.get_start_timestamp(),
                         &conn_stats.get_start_instant(),
-                        &conn_stats.get_start_instant(),
                         &latest_connection_stat,
+                        &rs.get_request_sent(),
                     ),
                     receive_response: to_timing(
                         &conn_stats.get_start_timestamp(),
                         &conn_stats.get_start_instant(),
-                        &conn_stats.get_start_instant(),
+                        &rs.get_response_start(),
                         &rs.get_request_end(),
                     ),
                 },
@@ -188,7 +189,7 @@ pub struct RequestInfo {
     pub certificate_info: Option<CertificateInfo>,
 }
 
-#[derive(Debug, PartialEq, Deserialize, Serialize, Clone, Default)]
+#[derive(PartialEq, Deserialize, Serialize, Clone, Default)]
 #[serde(rename_all = "snake_case")]
 pub struct RequestDurations {
     pub dns_lookup: Timing,
@@ -199,9 +200,72 @@ pub struct RequestDurations {
 
     pub time_to_first_byte: Timing,
 
+    // The time we spend putting the request on the wire (from right after TLS/TCP hello, to after http payload is sent.)
     pub send_request: Timing,
 
+    // The time we spend receiving the response (from first byte of the header, to end of request.)
     pub receive_response: Timing,
+}
+
+fn to_timings(reference: u128, start: u128, duration: u64) -> (u128, u128) {
+    (start - reference, (start - reference) + duration as u128)
+}
+
+impl Debug for RequestDurations {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let dns_lookup = to_timings(
+            self.dns_lookup.start_us,
+            self.dns_lookup.start_us,
+            self.dns_lookup.duration_us,
+        );
+
+        let tcp_connection = to_timings(
+            self.dns_lookup.start_us,
+            self.tcp_connection.start_us,
+            self.tcp_connection.duration_us,
+        );
+
+        let tls_handshake = to_timings(
+            self.dns_lookup.start_us,
+            self.tls_handshake.start_us,
+            self.tls_handshake.duration_us,
+        );
+
+        let send_request = to_timings(
+            self.dns_lookup.start_us,
+            self.send_request.start_us,
+            self.send_request.duration_us,
+        );
+
+        let receive_response = to_timings(
+            self.dns_lookup.start_us,
+            self.receive_response.start_us,
+            self.receive_response.duration_us,
+        );
+
+        f.debug_struct("RequestDurations")
+            .field(
+                "dns_lookup",
+                &format_args!("{} - {}", dns_lookup.0, dns_lookup.1),
+            )
+            .field(
+                "tcp_connection",
+                &format_args!("{} - {}", tcp_connection.0, tcp_connection.1),
+            )
+            .field(
+                "tls_handshake",
+                &format_args!("{} - {}", tls_handshake.0, tls_handshake.1),
+            )
+            .field(
+                "send_request",
+                &format_args!("{} - {}", send_request.0, send_request.1),
+            )
+            .field(
+                "receive_response",
+                &format_args!("{} - {}", receive_response.0, receive_response.1),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize, Copy, Clone, Default)]
