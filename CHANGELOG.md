@@ -1,3 +1,34 @@
+## 25.8.0
+
+### Various fixes & improvements
+
+- fix(uptime): use the new req and resp timings for better stats (#393) by @klochek
+- feat(uptime): add us timings to CheckResult fields (#392) by @klochek
+- feat(uptime): add CertificateInfo to CheckResult (#391) by @klochek
+- fix(ssl): Install missing intermediary cert (#390) by @evanpurkhiser
+- Optimize ca-certificates layer for better updates (#389) by @gaprl
+- fix(docker): Add ca-certificates to production image (#388) by @gaprl
+- feat(uptime): add durations to request info object (#387) by @klochek
+- Reapply "chore(uptime): Add .envrc (#364)" (#369) (#386) by @evanpurkhiser
+- Bump alpine on Dockerfile.localdev (#385) by @evanpurkhiser
+- Reapply "feat(uptime): add redirect uris and connection start timestamps to stats (#376)" (#381) by @evanpurkhiser
+- Bump to latest alpine + rust 1.88 (#383) by @evanpurkhiser
+- Bump to alpine 3.21.4 (#380) by @evanpurkhiser
+- feat: Make sure 3.20.7 actually breaks things (#379) by @evanpurkhiser
+- Add RUST_BACKTRACE to hopefully get a crash trace (#378) by @evanpurkhiser
+- fix: Pin alpine to 3.20.6 (#377) by @evanpurkhiser
+- Revert "feat(uptime): add redirect uris and connection start timestamps to stats (#376)" (cee0663b)
+- feat(uptime): add redirect uris and connection start timestamps to stats (#376) by @klochek
+- ci: Fix revert bot name (#375) by @evanpurkhiser
+- Revert "Testing reverts (#374)" (36fee1cc) by @MineCraftSpy
+- ci: run self-hosted e2e test (second attempt) (#373) by @aldy505
+- Testing reverts (#374) by @evanpurkhiser
+- ci: Add fast-revert (#370) by @evanpurkhiser
+- Revert "ci: run self-hosted e2e test (#362)" (#372) by @evanpurkhiser
+- Reapply "chore: bump Rust toolchain version to 1.85 (#325)" (#367) (#368) by @evanpurkhiser
+
+_Plus 8 more_
+
 ## 25.7.0
 
 ### Various fixes & improvements
