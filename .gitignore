@@ -10,3 +10,5 @@ target
 # Jsonnet-bundler
 gocd/templates/vendor/
 gocd/generated-pipelines/
+
+__pycache__
