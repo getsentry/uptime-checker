@@ -12,3 +12,15 @@ repos:
       exclude_types: [svg]
     - id: check-added-large-files
       args: ['--maxkb=1024']
+
+- repo: local
+  hooks:
+    - id: rustfmt
+      name: format rust code
+      language: system
+      types: [rust]
+      # keep edition in sync with Cargo.toml
+      # There is no way to run cargo fmt for specific files,
+      # rustfmt can do it but doesn't read Cargo.toml.
+      # https://github.com/rust-lang/rustfmt/issues/4485
+      entry: rustfmt --edition=2021

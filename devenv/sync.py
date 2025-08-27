@@ -1,6 +1,8 @@
 from devenv import constants
 from devenv.lib import brew, config, proc, uv
 
+import shutil
+
 
 def main(context: dict[str, str]) -> int:
     reporoot = context["reporoot"]
@@ -11,6 +13,25 @@ def main(context: dict[str, str]) -> int:
     proc.run(
         (f"{constants.homebrew_bin}/brew", "bundle"),
         cwd=reporoot,
+    )
+
+    if not shutil.which("rustup"):
+        raise SystemExit("rustup not on PATH. Did you run `direnv allow`?")
+
+    proc.run(
+        (
+            "rustup",
+            "toolchain",
+            "install",
+            "stable",
+            "--profile",
+            "minimal",
+            "--component",
+            "rustfmt",
+            "--component",
+            "clippy",
+            "--no-self-update",
+        )
     )
 
     uv.install(
