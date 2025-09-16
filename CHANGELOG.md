@@ -1,3 +1,9 @@
+## 25.9.0
+
+### Various fixes & improvements
+
+- feat: devenv + uv + pre-commit (#394) by @joshuarli
+
 ## 25.8.0
 
 ### Various fixes & improvements
