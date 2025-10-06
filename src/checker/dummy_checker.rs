@@ -30,15 +30,23 @@ impl Default for DummyResult {
 #[derive(Debug)]
 pub struct DummyChecker {
     sender: UnboundedSender<DummyResult>,
+    robots_sender: UnboundedSender<bool>,
+
     results: RwLock<UnboundedReceiver<DummyResult>>,
+    robots_results: RwLock<UnboundedReceiver<bool>>,
 }
 
 impl DummyChecker {
     pub fn new() -> Self {
         let (sender, reciever) = mpsc::unbounded_channel();
+        let (robots_sender, robots_reciever) = mpsc::unbounded_channel();
+
         Self {
             sender,
             results: RwLock::new(reciever),
+
+            robots_sender,
+            robots_results: RwLock::new(robots_reciever),
         }
     }
 
@@ -48,10 +56,21 @@ impl DummyChecker {
             .send(result)
             .expect("Failed to queue dummy result");
     }
+
+    pub fn queue_robots_result(&self, result: bool) {
+        self.robots_sender
+            .send(result)
+            .expect("Failed to queue dummy robots result");
+    }
 }
 
 impl Checker for DummyChecker {
-    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
+    async fn check_url(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+        check_robots: bool,
+    ) -> CheckResult {
         let scheduled_check_time = check.get_tick().time();
         let actual_check_time = Utc::now();
         let trace_id = Uuid::new_v4();
@@ -59,6 +78,31 @@ impl Checker for DummyChecker {
         let duration = None;
         let status_reason = None;
         let request_info = None;
+
+        if check_robots {
+            // By default, return 'true', meaning the robots.txt would allow us.
+            let result = self.robots_results.write().await.try_recv().unwrap_or(true);
+
+            if !result {
+                return CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: check.get_config().subscription_id,
+                    status: CheckStatus::DisallowedByRobots,
+                    status_reason: None,
+                    trace_id,
+                    span_id,
+                    scheduled_check_time,
+                    scheduled_check_time_us: scheduled_check_time,
+                    actual_check_time,
+                    actual_check_time_us: actual_check_time,
+                    duration,
+                    duration_us: duration,
+                    request_info,
+                    region,
+                    request_info_list: vec![],
+                };
+            }
+        }
 
         // Get queued results to yield
         let result = self.results.write().await.recv().await.unwrap_or_default();
