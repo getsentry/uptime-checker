@@ -111,6 +111,9 @@ pub struct Config {
     /// Whether we're using redis in standalone or cluster mode
     pub redis_enable_cluster: bool,
 
+    /// Whether to retry sending results to vector indefinitely
+    pub retry_vector_errors_forever: bool,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -176,6 +179,7 @@ impl Default for Config {
             checker_mode: CheckerMode::Reqwest,
             vector_batch_size: 10,
             vector_endpoint: "http://localhost:8020".to_owned(),
+            retry_vector_errors_forever: false,
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
             config_provider_redis_total_partitions: 128,
@@ -342,6 +346,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        retry_vector_errors_forever: false,
                         failure_retries: 0,
                         http_checker_dns_nameservers: None,
                         thread_cpu_scale_factor: 1,
@@ -431,6 +436,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        retry_vector_errors_forever: false,
                         failure_retries: 2,
                         http_checker_dns_nameservers: Some(vec![
                             IpAddr::from([8, 8, 8, 8]),
