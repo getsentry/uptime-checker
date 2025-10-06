@@ -7,15 +7,16 @@ use crate::types::{
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 use chrono::{TimeDelta, Utc};
+use hyper::body::Bytes;
 use openssl::error::ErrorStack;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::{Client, ClientBuilder, Response};
+use reqwest::{Client, ClientBuilder, Response, Url};
 use sentry::protocol::SpanId;
 use std::error::Error;
 use std::net::IpAddr;
 use std::time::Duration;
+use texting_robots::Robot;
 use tokio::time::Instant;
-
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
 
@@ -229,12 +230,57 @@ impl Checker for ReqwestChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     #[tracing::instrument]
-    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
+    async fn check_url(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+        check_robots: bool,
+    ) -> CheckResult {
         let scheduled_check_time = check.get_tick().time();
         let actual_check_time = Utc::now();
         let span_id = SpanId::default();
         let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
         let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
+
+        if check_robots {
+            if let Ok(url) = check.get_config().url.parse::<Url>() {
+                let mut robots_url = url.clone();
+                robots_url.set_path("robots.txt");
+                let robots_txt = {
+                    let res = self.client.get(robots_url).send().await;
+                    if let Ok(res) = res {
+                        res.bytes().await.unwrap_or_default()
+                    } else {
+                        tracing::debug!("could not retrieve robots.txt");
+                        Bytes::default()
+                    }
+                };
+
+                if let Ok(r) = Robot::new("SentryUptimeBot", &robots_txt) {
+                    if !r.allowed(url.as_str()) {
+                        return CheckResult {
+                            guid: trace_id,
+                            subscription_id: check.get_config().subscription_id,
+                            status: CheckStatus::DisallowedByRobots,
+                            status_reason: None,
+                            trace_id,
+                            span_id,
+                            scheduled_check_time,
+                            scheduled_check_time_us: scheduled_check_time,
+                            actual_check_time,
+                            actual_check_time_us: actual_check_time,
+                            duration: None,
+                            duration_us: None,
+                            request_info: None,
+                            region,
+                            request_info_list: Vec::new(),
+                        };
+                    }
+                } else {
+                    tracing::info!("Could not create Robot");
+                }
+            }
+        }
 
         let start = Instant::now();
         let response = do_request(&self.client, check.get_config(), &trace_header).await;
@@ -428,7 +474,7 @@ mod tests {
         let tick = make_tick();
 
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -474,7 +520,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -515,7 +561,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
@@ -557,7 +603,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(
@@ -593,7 +639,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, localhost_config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -625,7 +671,7 @@ mod tests {
         };
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, restricted_ip_config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -646,7 +692,7 @@ mod tests {
         };
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, restricted_ipv6_config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(
             result.status_reason.map(|r| r.description),
@@ -680,8 +726,8 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west").await;
-        let result_2 = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
+        let result_2 = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(result_2.status, CheckStatus::Success);
@@ -847,7 +893,7 @@ mod tests {
             ..Default::default()
         };
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
@@ -887,7 +933,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -903,6 +949,105 @@ mod tests {
         // Verify that the mock was called at least once
         // The reqwest client follows redirects multiple times before giving up
         redirect_mock.assert_hits(10);
+    }
+
+    #[tokio::test]
+    async fn test_robots_deny_sentry_site() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
+        });
+
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET).path("/robots.txt");
+
+            then.status(200)
+                .body("User-agent: SentryUptimeBot\nDisallow: *\n");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/foo").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west", true).await;
+
+        assert_eq!(result.status, CheckStatus::DisallowedByRobots);
+
+        // Verify that the mock was called once
+        redirect_mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn test_robots_deny_all_site() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
+        });
+
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET).path("/robots.txt");
+
+            then.status(200).body("User-agent: *\nDisallow: *\n");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/foo").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west", true).await;
+
+        assert_eq!(result.status, CheckStatus::DisallowedByRobots);
+
+        // Verify that the mock was called once
+        redirect_mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn test_robots_allow_site() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
+        });
+
+        // Create a redirect loop where each request redirects back to itself
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET).path("/robots.txt");
+
+            then.status(200)
+                .body("User-agent: SentryUptimeBot\nDisallow: /bar/\n");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/foo").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west", true).await;
+
+        assert_ne!(result.status, CheckStatus::DisallowedByRobots);
+
+        // Verify that the mock was called once
+        redirect_mock.assert_hits(1);
     }
 
     #[tokio::test]
@@ -971,7 +1116,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west").await;
+        let result = checker.check_url(&check, "us-west", false).await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
