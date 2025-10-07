@@ -416,7 +416,7 @@ impl Checker for ReqwestChecker {
                 tracing::info!("Could not create Robot");
             }
         }
-        return None;
+        None
     }
 }
 

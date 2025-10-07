@@ -132,6 +132,6 @@ impl Checker for DummyChecker {
             });
         }
 
-        return None;
+        None
     }
 }
