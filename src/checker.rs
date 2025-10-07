@@ -2,11 +2,9 @@ pub mod dummy_checker;
 pub mod ip_filter;
 pub mod reqwest_checker;
 
-use std::future::Future;
-
-use chrono::Timelike;
 use reqwest_checker::ReqwestChecker;
 use sentry::protocol::SpanId;
+use std::future::Future;
 use uuid::Uuid;
 
 use crate::{
@@ -51,8 +49,13 @@ pub trait Checker: Send + Sync {
         &self,
         check: &ScheduledCheck,
         region: &'static str,
-        check_robots: bool,
     ) -> impl Future<Output = CheckResult> + Send;
+
+    fn check_robots(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+    ) -> impl Future<Output = Option<CheckResult>> + Send;
 }
 
 #[derive(Debug)]
@@ -61,26 +64,22 @@ pub enum HttpChecker {
     DummyChecker(DummyChecker),
 }
 
-// Check the robots.txt file every day, per subscription.
-const ROBOTS_TXT_CHECK_INTERVAL_MINUTES: u128 = 60 * 24;
-
 impl HttpChecker {
     pub async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
-        // Trigger a check of the robots.txt every 24 hrs at some particular minute of the day (per subscription).
-        let daily_minute_to_check = (check.get_config().subscription_id.as_u128()
-            % ROBOTS_TXT_CHECK_INTERVAL_MINUTES) as i32;
-        let current_minute =
-            (check.get_tick().time().minute() + check.get_tick().time().hour() * 60) as i32;
-        let interval_in_minutes = check.get_config().interval as i32 / 60;
-
-        // If the checker is really running slow/behind, we could wind up missing a check interval; this should
-        // be rare, and so probably okay.
-        let check_robots = current_minute - interval_in_minutes < daily_minute_to_check
-            && current_minute >= daily_minute_to_check;
-
         match self {
-            HttpChecker::ReqwestChecker(c) => c.check_url(check, region, check_robots).await,
-            HttpChecker::DummyChecker(c) => c.check_url(check, region, check_robots).await,
+            HttpChecker::ReqwestChecker(c) => c.check_url(check, region).await,
+            HttpChecker::DummyChecker(c) => c.check_url(check, region).await,
+        }
+    }
+
+    pub async fn check_robots(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+    ) -> Option<CheckResult> {
+        match self {
+            HttpChecker::ReqwestChecker(c) => c.check_robots(check, region).await,
+            HttpChecker::DummyChecker(c) => c.check_robots(check, region).await,
         }
     }
 }

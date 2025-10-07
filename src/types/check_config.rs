@@ -1,6 +1,6 @@
 use super::shared::{RegionScheduleMode, RequestMethod};
 use crate::config_store::Tick;
-use chrono::TimeDelta;
+use chrono::{TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::serde_as;
@@ -33,6 +33,9 @@ pub const SUBSCRIPTION_SLOT_NAMESPACE: Uuid =
 /// whether a subscription should run in this region.
 pub const SUBSCRIPTION_SHOULD_RUN_NAMESPACE: Uuid =
     Uuid::from_u128(31415926535897932384626433832795u128);
+
+// Check the robots.txt file every day, per subscription.
+const ROBOTS_TXT_CHECK_INTERVAL_MINUTES: u128 = 60 * 24;
 
 /// The CheckConfig represents a configuration for a single check.
 #[serde_as]
@@ -108,6 +111,19 @@ impl CheckConfig {
         (0..pattern_count)
             .map(|c| first_slot + (interval_secs * c))
             .collect()
+    }
+
+    pub fn should_check_robots(&self, tick: Tick) -> bool {
+        // Trigger a check of the robots.txt every 24 hrs at some particular minute of the day (per subscription).
+        let daily_minute_to_check =
+            (self.subscription_id.as_u128() % ROBOTS_TXT_CHECK_INTERVAL_MINUTES) as i32;
+        let current_minute = (tick.time().minute() + tick.time().hour() * 60) as i32;
+        let interval_in_minutes = self.interval as i32 / 60;
+
+        // If the checker is really running slow/behind, we could wind up missing a check interval; this should
+        // be rare, and so probably okay.
+        current_minute - interval_in_minutes < daily_minute_to_check
+            && current_minute >= daily_minute_to_check
     }
 
     pub fn should_run(&self, tick: Tick, current_region: &str) -> bool {
