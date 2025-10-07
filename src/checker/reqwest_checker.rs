@@ -230,57 +230,12 @@ impl Checker for ReqwestChecker {
     /// Makes a request to a url to determine whether it is up.
     /// Up is defined as returning a 2xx within a specific timeframe.
     #[tracing::instrument]
-    async fn check_url(
-        &self,
-        check: &ScheduledCheck,
-        region: &'static str,
-        check_robots: bool,
-    ) -> CheckResult {
+    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
         let scheduled_check_time = check.get_tick().time();
         let actual_check_time = Utc::now();
         let span_id = SpanId::default();
         let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
         let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
-
-        if check_robots {
-            if let Ok(url) = check.get_config().url.parse::<Url>() {
-                let mut robots_url = url.clone();
-                robots_url.set_path("robots.txt");
-                let robots_txt = {
-                    let res = self.client.get(robots_url).send().await;
-                    if let Ok(res) = res {
-                        res.bytes().await.unwrap_or_default()
-                    } else {
-                        tracing::debug!("could not retrieve robots.txt");
-                        Bytes::default()
-                    }
-                };
-
-                if let Ok(r) = Robot::new("SentryUptimeBot", &robots_txt) {
-                    if !r.allowed(url.as_str()) {
-                        return CheckResult {
-                            guid: trace_id,
-                            subscription_id: check.get_config().subscription_id,
-                            status: CheckStatus::DisallowedByRobots,
-                            status_reason: None,
-                            trace_id,
-                            span_id,
-                            scheduled_check_time,
-                            scheduled_check_time_us: scheduled_check_time,
-                            actual_check_time,
-                            actual_check_time_us: actual_check_time,
-                            duration: None,
-                            duration_us: None,
-                            request_info: None,
-                            region,
-                            request_info_list: Vec::new(),
-                        };
-                    }
-                } else {
-                    tracing::info!("Could not create Robot");
-                }
-            }
-        }
 
         let start = Instant::now();
         let response = do_request(&self.client, check.get_config(), &trace_header).await;
@@ -412,6 +367,57 @@ impl Checker for ReqwestChecker {
             request_info_list: rinfos,
         }
     }
+
+    async fn check_robots(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+    ) -> Option<CheckResult> {
+        if let Ok(url) = check.get_config().url.parse::<Url>() {
+            let mut robots_url = url.clone();
+            robots_url.set_path("robots.txt");
+            let robots_txt = {
+                let res = self.client.get(robots_url).send().await;
+                if let Ok(res) = res {
+                    res.bytes().await.unwrap_or_default()
+                } else {
+                    tracing::debug!("could not retrieve robots.txt");
+                    Bytes::default()
+                }
+            };
+
+            if let Ok(r) = Robot::new("SentryUptimeBot", &robots_txt) {
+                if !r.allowed(url.as_str()) {
+                    let scheduled_check_time = check.get_tick().time();
+                    let actual_check_time = Utc::now();
+                    let span_id = SpanId::default();
+                    let trace_id =
+                        make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
+
+                    return Some(CheckResult {
+                        guid: trace_id,
+                        subscription_id: check.get_config().subscription_id,
+                        status: CheckStatus::DisallowedByRobots,
+                        status_reason: None,
+                        trace_id,
+                        span_id,
+                        scheduled_check_time,
+                        scheduled_check_time_us: scheduled_check_time,
+                        actual_check_time,
+                        actual_check_time_us: actual_check_time,
+                        duration: None,
+                        duration_us: None,
+                        request_info: None,
+                        region,
+                        request_info_list: Vec::new(),
+                    });
+                }
+            } else {
+                tracing::info!("Could not create Robot");
+            }
+        }
+        return None;
+    }
 }
 
 #[cfg(test)]
@@ -474,7 +480,7 @@ mod tests {
         let tick = make_tick();
 
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -520,7 +526,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
@@ -561,7 +567,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert!(result.duration.is_some_and(|d| d > timeout));
@@ -603,7 +609,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(
@@ -639,7 +645,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, localhost_config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -671,7 +677,7 @@ mod tests {
         };
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, restricted_ip_config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -692,7 +698,7 @@ mod tests {
         };
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, restricted_ipv6_config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(
             result.status_reason.map(|r| r.description),
@@ -726,8 +732,8 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", false).await;
-        let result_2 = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
+        let result_2 = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(result_2.status, CheckStatus::Success);
@@ -893,7 +899,7 @@ mod tests {
             ..Default::default()
         };
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
         assert_eq!(
@@ -933,7 +939,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
@@ -976,7 +982,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", true).await;
+        let result = checker.check_robots(&check, "us-west").await.unwrap();
 
         assert_eq!(result.status, CheckStatus::DisallowedByRobots);
 
@@ -1008,7 +1014,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", true).await;
+        let result = checker.check_robots(&check, "us-west").await.unwrap();
 
         assert_eq!(result.status, CheckStatus::DisallowedByRobots);
 
@@ -1042,9 +1048,9 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", true).await;
+        let result = checker.check_robots(&check, "us-west").await;
 
-        assert_ne!(result.status, CheckStatus::DisallowedByRobots);
+        assert!(result.is_none());
 
         // Verify that the mock was called once
         redirect_mock.assert_hits(1);
@@ -1116,7 +1122,7 @@ mod tests {
 
         let tick = make_tick();
         let check = ScheduledCheck::new_for_test(tick, config);
-        let result = checker.check_url(&check, "us-west", false).await;
+        let result = checker.check_url(&check, "us-west").await;
 
         assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(

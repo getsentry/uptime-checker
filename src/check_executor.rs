@@ -21,11 +21,18 @@ use crate::types::result::{CheckResult, CheckStatus, CheckStatusReasonType};
 const SLOW_POLL_THRESHOLD: Duration = Duration::from_millis(100);
 const LONG_DELAY_THRESHOLD: Duration = Duration::from_millis(100);
 
+#[derive(Debug, PartialEq)]
+pub enum CheckKind {
+    Uptime,
+    Robots,
+}
+
 #[derive(Debug)]
 pub struct ScheduledCheck {
+    kind: CheckKind,
     tick: Tick,
     config: Arc<CheckConfig>,
-    resolve_tx: Sender<CheckResult>,
+    resolve_tx: Sender<Option<CheckResult>>,
     /// The number of times this scheduled check has been retried
     retry_count: u16,
 }
@@ -35,11 +42,16 @@ impl ScheduledCheck {
     pub fn new_for_test(tick: Tick, config: CheckConfig) -> Self {
         let (resolve_tx, _) = tokio::sync::oneshot::channel();
         ScheduledCheck {
+            kind: CheckKind::Uptime,
             tick,
             config: config.into(),
             resolve_tx,
             retry_count: 0,
         }
+    }
+
+    pub fn get_kind(&self) -> &CheckKind {
+        &self.kind
     }
 
     /// Get the scheduled CheckConfig.
@@ -57,7 +69,7 @@ impl ScheduledCheck {
     }
 
     /// Report the completion of the scheduled check.
-    pub fn record_result(self, result: CheckResult) -> Result<()> {
+    pub fn record_result(self, result: Option<CheckResult>) -> Result<()> {
         self.resolve_tx
             .send(result)
             .map_err(|_| anyhow::anyhow!("Scheduled check send error"))
@@ -91,7 +103,8 @@ impl CheckSender {
         &self,
         tick: Tick,
         config: Arc<CheckConfig>,
-    ) -> anyhow::Result<Receiver<CheckResult>> {
+        check_kind: CheckKind,
+    ) -> anyhow::Result<Receiver<Option<CheckResult>>> {
         let (resolve_tx, resolve_rx) = oneshot::channel();
 
         let scheduled_check = ScheduledCheck {
@@ -99,6 +112,7 @@ impl CheckSender {
             config,
             resolve_tx,
             retry_count: 0,
+            kind: check_kind,
         };
 
         self.queue_size.fetch_add(1, Ordering::Relaxed);
@@ -289,7 +303,22 @@ async fn do_check(
     let check_result = if late_by > interval {
         CheckResult::missed_from(&scheduled_check, job_region)
     } else {
-        job_checker.check_url(&scheduled_check, job_region).await
+        match scheduled_check.kind {
+            CheckKind::Uptime => job_checker.check_url(&scheduled_check, job_region).await,
+
+            // Robots will return None on a passing check, so just return in that case.  We still have to
+            // record the result, though.
+            CheckKind::Robots => match job_checker.check_robots(&scheduled_check, job_region).await
+            {
+                Some(check_result) => check_result,
+                None => {
+                    scheduled_check
+                        .record_result(None)
+                        .expect("Check recording channel should exist");
+                    return;
+                }
+            },
+        }
     };
 
     let will_retry = check_result.status == CheckStatus::Failure
@@ -316,7 +345,7 @@ async fn do_check(
 
     // Expect is necessary here--we need to break out of the stream processing loop.
     scheduled_check
-        .record_result(check_result)
+        .record_result(Some(check_result))
         .expect("Check recording channel should exist");
 }
 
@@ -448,7 +477,7 @@ fn record_task_metrics(interval: tokio_metrics::TaskMetrics, region: &'static st
 mod tests {
     use std::{task::Poll, time::Duration};
 
-    use chrono::{Timelike, Utc};
+    use chrono::Utc;
     use futures::poll;
     use ntest::timeout;
     use similar_asserts::assert_eq;
@@ -491,14 +520,16 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = sender.queue_check(tick, config.clone()).unwrap();
+        let resolve_rx = sender
+            .queue_check(tick, config.clone(), CheckKind::Uptime)
+            .unwrap();
         tokio::pin!(resolve_rx);
 
         // Will not be resolved yet
         time::sleep(Duration::from_millis(100)).await;
         assert_eq!(poll!(resolve_rx.as_mut()), Poll::Pending);
 
-        let result = resolve_rx.await.unwrap();
+        let result = resolve_rx.await.unwrap().unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Success);
     }
@@ -530,14 +561,14 @@ mod tests {
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
         // Send 4 configs into the executor
-        let mut configs: Vec<Receiver<CheckResult>> = (0..4)
+        let mut configs: Vec<Receiver<Option<CheckResult>>> = (0..4)
             .map(|i| {
                 let tick = Tick::from_time(Utc::now());
                 let config = Arc::new(CheckConfig {
                     subscription_id: Uuid::from_u128(i),
                     ..Default::default()
                 });
-                sender.queue_check(tick, config).unwrap()
+                sender.queue_check(tick, config, CheckKind::Uptime).unwrap()
             })
             .collect();
 
@@ -622,9 +653,10 @@ mod tests {
         });
 
         let result = sender
-            .queue_check(tick, config.clone())
+            .queue_check(tick, config.clone(), CheckKind::Uptime)
             .unwrap()
             .await
+            .unwrap()
             .unwrap();
 
         assert_eq!(result.subscription_id, config.subscription_id);
@@ -666,10 +698,10 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = sender.queue_check(tick, config.clone());
+        let resolve_rx = sender.queue_check(tick, config.clone(), CheckKind::Uptime);
 
         // Resolves as success since we will retry
-        let result = resolve_rx.unwrap().await.unwrap();
+        let result = resolve_rx.unwrap().await.unwrap().unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Success);
     }
@@ -712,10 +744,10 @@ mod tests {
             ..Default::default()
         });
 
-        let resolve_rx = sender.queue_check(tick, config.clone());
+        let resolve_rx = sender.queue_check(tick, config.clone(), CheckKind::Uptime);
 
         // Resolves as failure after the two retries
-        let result = resolve_rx.unwrap().await.unwrap();
+        let result = resolve_rx.unwrap().await.unwrap().unwrap();
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::Failure);
     }
@@ -760,89 +792,20 @@ mod tests {
         };
         let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
 
-        let now = Utc::now();
-        let tick = Tick::from_time(now);
+        let tick = Tick::from_time(Utc::now());
         let config = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(now.minute() as u128 + (now.hour() * 60) as u128),
             interval: CheckInterval::OneMinute,
             ..Default::default()
         });
 
         let result = sender
-            .queue_check(tick, config.clone())
+            .queue_check(tick, config.clone(), CheckKind::Robots)
             .unwrap()
             .await
+            .unwrap()
             .unwrap();
 
         assert_eq!(result.subscription_id, config.subscription_id);
         assert_eq!(result.status, CheckStatus::DisallowedByRobots);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn test_robots_deny_once_a_day() {
-        let dummy_checker = DummyChecker::new();
-        dummy_checker.queue_robots_result(false);
-        // Load up a second false result, in case we query for robots again (which we shouldn't).
-        dummy_checker.queue_robots_result(false);
-
-        // For the second part of the test, queue a bunch of successes.
-        for _ in 1..24 * 60 {
-            dummy_checker.queue_result(DummyResult {
-                delay: None,
-                status: CheckStatus::Success,
-            });
-        }
-
-        let checker: Arc<HttpChecker> = Arc::new(dummy_checker.into());
-        let producer = Arc::new(DummyResultsProducer::new("uptime-results"));
-
-        let conf = ExecutorConfig {
-            concurrency: 1,
-            checker_parallel: false,
-            failure_retries: 0,
-            region: "us-west",
-            record_task_metrics: false,
-        };
-        let (sender, _) = run_executor(checker, producer, conf, CancellationToken::new());
-
-        let now = Utc::now();
-        let tick = Tick::from_time(now);
-        let config = Arc::new(CheckConfig {
-            subscription_id: Uuid::from_u128(now.minute() as u128 + (now.hour() * 60) as u128),
-            interval: CheckInterval::OneMinute,
-            ..Default::default()
-        });
-
-        let result = sender
-            .queue_check(tick, config.clone())
-            .unwrap()
-            .await
-            .unwrap();
-
-        // The first test should be disallowed, as we're on the minute where we should check.
-        assert_eq!(result.subscription_id, config.subscription_id);
-        assert_eq!(result.status, CheckStatus::DisallowedByRobots);
-
-        // The result should succeed, as we aren't querying robots.
-        for i in 1..60 * 24 {
-            let now = Utc::now();
-            let tick = Tick::from_time(now);
-            let config = Arc::new(CheckConfig {
-                subscription_id: Uuid::from_u128(
-                    (now.minute() + i) as u128 + (now.hour() * 60) as u128,
-                ),
-                interval: CheckInterval::OneMinute,
-                ..Default::default()
-            });
-
-            let result = sender
-                .queue_check(tick, config.clone())
-                .unwrap()
-                .await
-                .unwrap();
-
-            assert_eq!(result.subscription_id, config.subscription_id);
-            assert_eq!(result.status, CheckStatus::Success);
-        }
     }
 }

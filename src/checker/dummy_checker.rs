@@ -65,12 +65,7 @@ impl DummyChecker {
 }
 
 impl Checker for DummyChecker {
-    async fn check_url(
-        &self,
-        check: &ScheduledCheck,
-        region: &'static str,
-        check_robots: bool,
-    ) -> CheckResult {
+    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
         let scheduled_check_time = check.get_tick().time();
         let actual_check_time = Utc::now();
         let trace_id = Uuid::new_v4();
@@ -78,31 +73,6 @@ impl Checker for DummyChecker {
         let duration = None;
         let status_reason = None;
         let request_info = None;
-
-        if check_robots {
-            // By default, return 'true', meaning the robots.txt would allow us.
-            let result = self.robots_results.write().await.try_recv().unwrap_or(true);
-
-            if !result {
-                return CheckResult {
-                    guid: Uuid::new_v4(),
-                    subscription_id: check.get_config().subscription_id,
-                    status: CheckStatus::DisallowedByRobots,
-                    status_reason: None,
-                    trace_id,
-                    span_id,
-                    scheduled_check_time,
-                    scheduled_check_time_us: scheduled_check_time,
-                    actual_check_time,
-                    actual_check_time_us: actual_check_time,
-                    duration,
-                    duration_us: duration,
-                    request_info,
-                    region,
-                    request_info_list: vec![],
-                };
-            }
-        }
 
         // Get queued results to yield
         let result = self.results.write().await.recv().await.unwrap_or_default();
@@ -128,5 +98,40 @@ impl Checker for DummyChecker {
             region,
             request_info_list: vec![],
         }
+    }
+
+    async fn check_robots(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+    ) -> Option<CheckResult> {
+        // By default, return 'true', meaning the robots.txt would allow us.
+        let result = self.robots_results.write().await.try_recv().unwrap_or(true);
+        let scheduled_check_time = check.get_tick().time();
+        let actual_check_time = Utc::now();
+        let trace_id = Uuid::new_v4();
+        let span_id = SpanId::default();
+
+        if !result {
+            return Some(CheckResult {
+                guid: Uuid::new_v4(),
+                subscription_id: check.get_config().subscription_id,
+                status: CheckStatus::DisallowedByRobots,
+                status_reason: None,
+                trace_id,
+                span_id,
+                scheduled_check_time,
+                scheduled_check_time_us: scheduled_check_time,
+                actual_check_time,
+                actual_check_time_us: actual_check_time,
+                duration: None,
+                duration_us: None,
+                request_info: None,
+                region,
+                request_info_list: vec![],
+            });
+        }
+
+        return None;
     }
 }
