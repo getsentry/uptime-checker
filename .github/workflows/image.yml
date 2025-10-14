@@ -11,6 +11,7 @@ jobs:
   build-image:
     name: build-image-${{ matrix.platform }}
     if: ${{ github.repository_owner == 'getsentry' }}
+    runs-on: ubuntu-latest
 
     permissions:
       contents: read
@@ -48,7 +49,7 @@ jobs:
 
   build-image-production:
     runs-on: ubuntu-24.04
-    if: github.ref_name == github.event.repository.default_branch
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
     name: Build and push production images
     permissions:
       contents: read
