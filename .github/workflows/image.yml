@@ -8,150 +8,34 @@ on:
       - release/**
 
 jobs:
-  build-pr:
-    name: build-pr-${{ matrix.platform }}
-    if: ${{ github.repository_owner == 'getsentry' && github.event_name == 'pull_request' }}
-
-    permissions:
-      contents: read
-      packages: read
-
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            platform: amd64
-          - os: ubuntu-24.04-arm
-            platform: arm64
-
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
-
-      - name: Build image
-        uses: getsentry/action-build-and-push-images@a53f146fc1ea3cb404f2dcf7378f5b60dd98d3ca
-        with:
-          image_name: ${{ github.repository }}
-          platforms: linux/${{ matrix.platform }}
-          dockerfile_path: './Dockerfile'
-          build_args: UPTIME_CHECKER_GIT_REVISION=${{ github.sha }}
-          ghcr: true
-          tag_suffix: -${{ matrix.platform }}
-          publish_on_pr: false
-          google_ar: false
-          tag_nightly: false
-          tag_latest: false
-
-  build-main-or-release:
-    name: build-${{ matrix.platform }}
-    if: |
-      github.repository_owner == 'getsentry'
-      && github.event_name == 'push'
-      && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/'))
-
-    permissions:
-      contents: read
-      packages: write # Needed to push to GHCR
-
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            platform: amd64
-          - os: ubuntu-24.04-arm
-            platform: arm64
-
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
-
-      - name: Login to GHCR
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
-        with:
-          username: sentrybuilder
-          password: ${{ secrets.DOCKER_HUB_RW_TOKEN }}
-
-      - name: Extract metadata for image
-        id: meta
-        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
-        with:
-          images: |
-            ghcr.io/${{ github.repository }}
-            ${{ github.repository }}
-          tags: |
-            type=sha,prefix=,format=long,suffix=-${{ matrix.platform }}
-          labels: |
-            org.opencontainers.image.title=${{ github.event.repository.name }}
-            org.opencontainers.image.description=${{ github.event.repository.description }}
-            org.opencontainers.image.vendor="Sentry"
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.sha }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
-
-      - name: Build & Push
-        id: build_push
-        uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.10
-        with:
-          context: .
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/${{ matrix.platform }}
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
-          annotations: ${{ steps.meta.outputs.annotations }}
-          provenance: mode=max
-          sbom: true
-          push: true
-
-  create-manifest:
-    name: Create multi-platform manifest
-    needs: build-main-or-release
-    if: |
-      github.repository_owner == 'getsentry'
-      && github.event_name == 'push'
-      && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/'))
+  build-image:
+    name: build-image-${{ matrix.platform }}
+    if: ${{ github.repository_owner == 'getsentry' }}
 
     permissions:
       contents: read
       packages: write
 
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
-      - name: Login to GHCR
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+      - name: Build image
+        uses: getsentry/action-build-and-push-images@b172ab61a5f7eabd58bd42ce231b517e79947c01
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
-        with:
-          username: sentrybuilder
-          password: ${{ secrets.DOCKER_HUB_RW_TOKEN }}
-
-      - name: Create and push multi-platform manifest
-        run: |
-          ./scripts/create-manifest.sh \
-            "${{ github.repository }}" \
-            "${{ github.sha }}" \
-            "${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}"
+          image_name: 'uptime-checker'
+          # we aren't testing on linux/arm64 yet but at least make sure it builds
+          platforms: linux/amd64,linux/arm64
+          dockerfile_path: './Dockerfile'
+          build_args: UPTIME_CHECKER_GIT_REVISION=${{ github.event.pull_request.head.sha || github.sha }}
+          publish_on_pr: true  # required for self-hosted-end-to-end runs on pull requests
+          ghcr: true
+          google_ar: false
+          # note: nightly will only be tagged if on default branch
+          tag_nightly: true
+          tag_latest: false
 
   self-hosted-end-to-end:
-    needs: [create-manifest]
+    needs: [build-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -159,10 +43,10 @@ jobs:
         uses: getsentry/self-hosted@master
         with:
           project_name: uptime_checker
-          image_url: ghcr.io/getsentry/uptime-checker:${{ github.sha }}
+          image_url: ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  build-production:
+  build-image-production:
     runs-on: ubuntu-24.04
     if: github.ref_name == github.event.repository.default_branch
     name: Build and push production images
@@ -173,7 +57,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Build and push image
-        uses: getsentry/action-build-and-push-images@a53f146fc1ea3cb404f2dcf7378f5b60dd98d3ca
+        uses: getsentry/action-build-and-push-images@b172ab61a5f7eabd58bd42ce231b517e79947c01
         with:
           image_name: 'uptime-checker'
           platforms: linux/amd64
