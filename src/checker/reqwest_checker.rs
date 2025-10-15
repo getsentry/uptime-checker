@@ -373,50 +373,53 @@ impl Checker for ReqwestChecker {
         check: &ScheduledCheck,
         region: &'static str,
     ) -> Option<CheckResult> {
-        if let Ok(url) = check.get_config().url.parse::<Url>() {
-            let mut robots_url = url.clone();
-            robots_url.set_path("robots.txt");
-            let robots_txt = {
-                let res = self.client.get(robots_url).send().await;
-                if let Ok(res) = res {
-                    res.bytes().await.unwrap_or_default()
-                } else {
-                    tracing::debug!("could not retrieve robots.txt");
-                    Bytes::default()
-                }
-            };
+        let Ok(url) = check.get_config().url.parse::<Url>() else {
+            return None;
+        };
 
-            if let Ok(r) = Robot::new("SentryUptimeBot", &robots_txt) {
-                if !r.allowed(url.as_str()) {
-                    let scheduled_check_time = check.get_tick().time();
-                    let actual_check_time = Utc::now();
-                    let span_id = SpanId::default();
-                    let trace_id =
-                        make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
-
-                    return Some(CheckResult {
-                        guid: trace_id,
-                        subscription_id: check.get_config().subscription_id,
-                        status: CheckStatus::DisallowedByRobots,
-                        status_reason: None,
-                        trace_id,
-                        span_id,
-                        scheduled_check_time,
-                        scheduled_check_time_us: scheduled_check_time,
-                        actual_check_time,
-                        actual_check_time_us: actual_check_time,
-                        duration: None,
-                        duration_us: None,
-                        request_info: None,
-                        region,
-                        request_info_list: Vec::new(),
-                    });
-                }
+        let mut robots_url = url.clone();
+        robots_url.set_path("robots.txt");
+        let robots_txt = {
+            let res = self.client.get(robots_url).send().await;
+            if let Ok(res) = res {
+                res.bytes().await.unwrap_or_default()
             } else {
-                tracing::info!("Could not create Robot");
+                tracing::debug!("could not retrieve robots.txt");
+                Bytes::default()
             }
+        };
+
+        let Ok(r) = Robot::new("SentryUptimeBot", &robots_txt) else {
+            tracing::info!("Could not create Robot");
+            return None;
+        };
+
+        if r.allowed(url.as_str()) {
+            return None;
         }
-        None
+
+        let scheduled_check_time = check.get_tick().time();
+        let actual_check_time = Utc::now();
+        let span_id = SpanId::default();
+        let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
+
+        Some(CheckResult {
+            guid: trace_id,
+            subscription_id: check.get_config().subscription_id,
+            status: CheckStatus::DisallowedByRobots,
+            status_reason: None,
+            trace_id,
+            span_id,
+            scheduled_check_time,
+            scheduled_check_time_us: scheduled_check_time,
+            actual_check_time,
+            actual_check_time_us: actual_check_time,
+            duration: None,
+            duration_us: None,
+            request_info: None,
+            region,
+            request_info_list: Vec::new(),
+        })
     }
 }
 
