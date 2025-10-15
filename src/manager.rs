@@ -174,7 +174,7 @@ impl Manager {
                     config.vector_endpoint.clone(),
                     config.vector_batch_size,
                     config.retry_vector_errors_forever,
-                    config.region.to_owned(),
+                    config.region.clone(),
                 );
                 let producer = Arc::new(results_producer);
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
