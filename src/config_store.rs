@@ -195,7 +195,7 @@ mod tests {
         store.add_config(five_minute_config.clone());
 
         assert_eq!(store.configs.len(), 2);
-        for slot in (0..60).map(|c| 60 * c).collect::<Vec<_>>() {
+        for slot in (0..60).map(|c| (60 * c)).collect::<Vec<_>>() {
             assert!(store.tick_buckets[slot].contains(&config));
             if slot % 300 == 0 {
                 assert_eq!(store.tick_buckets[slot].len(), 2);
@@ -217,7 +217,7 @@ mod tests {
         });
         store.add_config(config.clone());
 
-        for slot in (0..60).map(|c| 60 * c).collect::<Vec<_>>() {
+        for slot in (0..60).map(|c| (60 * c)).collect::<Vec<_>>() {
             assert_eq!(store.tick_buckets[slot].len(), 1);
             assert!(store.tick_buckets[slot].contains(&config));
         }
@@ -229,7 +229,7 @@ mod tests {
         });
         store.add_config(config.clone());
 
-        for slot in (0..60).map(|c| 60 * c).collect::<Vec<_>>() {
+        for slot in (0..60).map(|c| (60 * c)).collect::<Vec<_>>() {
             if slot % 300 == 0 {
                 assert_eq!(store.tick_buckets[slot].len(), 1);
                 assert!(store.tick_buckets[slot].contains(&config));
