@@ -1,3 +1,12 @@
+## 25.10.0
+
+### Various fixes & improvements
+
+- fix(uptime) linter fixes (#399) by @klochek
+- Revert "feat(uptime): check robots.txt once per day, per subscription (#395)" (c10af1b5)
+- feat(uptime): check robots.txt once per day, per subscription (#395) by @klochek
+- feat(vector): implement spooling logic (#229) by @JoshFerge
+
 ## 25.9.0
 
 ### Various fixes & improvements
