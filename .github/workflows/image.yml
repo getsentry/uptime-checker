@@ -11,7 +11,6 @@ jobs:
   build-multiplatform-image:
     name: build-multiplatform-image
     if: ${{ github.repository_owner == 'getsentry' }}
-    runs-on: ubuntu-latest
 
     permissions:
       contents: read
@@ -26,6 +25,8 @@ jobs:
             # we aren't testing on linux/arm64 yet but at least make sure it builds
             platform: arm64
 
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
@@ -33,7 +34,7 @@ jobs:
         uses: getsentry/action-build-and-push-images@b172ab61a5f7eabd58bd42ce231b517e79947c01
         with:
           image_name: 'uptime-checker'
-          platforms: linux/{{ matrix.platform }}
+          platforms: linux/${{ matrix.platform }}
           dockerfile_path: './Dockerfile'
           build_args: UPTIME_CHECKER_GIT_REVISION=${{ github.event.pull_request.head.sha || github.sha }}
           publish_on_pr: true  # required for self-hosted-end-to-end runs on pull requests
