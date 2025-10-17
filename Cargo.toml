@@ -34,7 +34,17 @@ serde = { version = "1.0.159", features = ["derive", "rc"] }
 serde_json = "1.0.93"
 figment = { version = "0.10", features = ["yaml", "env", "test"] }
 similar-asserts = "1.4.2"
-sentry = { version = "0.34.0", features = ["tracing"] }
+sentry = { version = "0.41.0", default-features = false, features = [
+    # default features, except `release-health` is disabled
+    "backtrace",
+    "contexts",
+    "debug-images",
+    "panic",
+    "transport",
+    # additional features
+    "tracing", 
+    "logs"
+] }
 thiserror = "1.0.61"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json"] }
