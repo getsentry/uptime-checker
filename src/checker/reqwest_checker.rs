@@ -7,7 +7,6 @@ use crate::types::{
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 use chrono::{TimeDelta, Utc};
-use hyper::body::Bytes;
 use openssl::error::ErrorStack;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response, Url};
@@ -16,7 +15,7 @@ use std::error::Error;
 use std::net::IpAddr;
 use std::time::Duration;
 use texting_robots::Robot;
-use tokio::time::Instant;
+use tokio::time::{timeout, Instant};
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
 
@@ -380,12 +379,42 @@ impl Checker for ReqwestChecker {
         let mut robots_url = url.clone();
         robots_url.set_path("robots.txt");
         let robots_txt = {
-            let res = self.client.get(robots_url).send().await;
-            if let Ok(res) = res {
-                res.bytes().await.unwrap_or_default()
+            // Request a robots.txt, bounding both the get call as well as the body-stream to a 10 second
+            // window.
+            let start_time = Instant::now();
+            let time_allotment = Duration::from_secs(10);
+            let res = self
+                .client
+                .get(robots_url)
+                .timeout(time_allotment)
+                .send()
+                .await;
+            if let Ok(mut res) = res {
+                let mut all_bytes = vec![];
+                loop {
+                    let maybe_timeout =
+                        timeout(time_allotment - start_time.elapsed(), res.chunk()).await;
+                    let Ok(maybe_conn_err) = maybe_timeout else {
+                        tracing::info!("waited too long for robots.txt");
+                        break all_bytes;
+                    };
+                    let Ok(maybe_chunk) = maybe_conn_err else {
+                        tracing::info!("connection error during robots.txt");
+                        break all_bytes;
+                    };
+                    let Some(chunk) = maybe_chunk else {
+                        break all_bytes;
+                    };
+                    all_bytes.extend_from_slice(&chunk);
+
+                    if all_bytes.len() > 100_000 {
+                        tracing::info!("aborting huge robots.txt");
+                        break all_bytes;
+                    }
+                }
             } else {
                 tracing::debug!("could not retrieve robots.txt");
-                Bytes::default()
+                vec![]
             }
         };
 
