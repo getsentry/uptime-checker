@@ -413,7 +413,7 @@ impl Checker for ReqwestChecker {
                 all_bytes.extend_from_slice(&chunk);
 
                 if all_bytes.len() > 100_000 {
-                    tracing::info!("aborting huge robots.txt");
+                    tracing::info!(url = %url, "aborting huge robots.txt");
                     break all_bytes;
                 }
             }
