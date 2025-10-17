@@ -389,32 +389,33 @@ impl Checker for ReqwestChecker {
                 .timeout(time_allotment)
                 .send()
                 .await;
-            if let Ok(mut res) = res {
-                let mut all_bytes = vec![];
-                loop {
-                    let maybe_timeout =
-                        timeout(time_allotment - start_time.elapsed(), res.chunk()).await;
-                    let Ok(maybe_conn_err) = maybe_timeout else {
-                        tracing::info!("waited too long for robots.txt");
-                        break all_bytes;
-                    };
-                    let Ok(maybe_chunk) = maybe_conn_err else {
-                        tracing::info!("connection error during robots.txt");
-                        break all_bytes;
-                    };
-                    let Some(chunk) = maybe_chunk else {
-                        break all_bytes;
-                    };
-                    all_bytes.extend_from_slice(&chunk);
 
-                    if all_bytes.len() > 100_000 {
-                        tracing::info!("aborting huge robots.txt");
-                        break all_bytes;
-                    }
-                }
-            } else {
+            let Ok(mut res) = res else {
                 tracing::debug!("could not retrieve robots.txt");
-                vec![]
+                return None;
+            };
+
+            let mut all_bytes = vec![];
+            loop {
+                let maybe_timeout =
+                    timeout(time_allotment - start_time.elapsed(), res.chunk()).await;
+                let Ok(maybe_conn_err) = maybe_timeout else {
+                    tracing::info!("waited too long for robots.txt");
+                    break all_bytes;
+                };
+                let Ok(maybe_chunk) = maybe_conn_err else {
+                    tracing::info!("connection error during robots.txt");
+                    break all_bytes;
+                };
+                let Some(chunk) = maybe_chunk else {
+                    break all_bytes;
+                };
+                all_bytes.extend_from_slice(&chunk);
+
+                if all_bytes.len() > 100_000 {
+                    tracing::info!("aborting huge robots.txt");
+                    break all_bytes;
+                }
             }
         };
 
