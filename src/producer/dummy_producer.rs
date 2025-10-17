@@ -17,9 +17,7 @@ impl DummyResultsProducer {
 impl ResultsProducer for DummyResultsProducer {
     fn produce_checker_result(&self, result: &CheckResult) -> Result<(), ExtractCodeError> {
         let json = serde_json::to_vec(result)?;
-
-        // Let's actually blow up here, so that we fail schema validation in tests.
-        self.schema.validate_json(&json).unwrap();
+        self.schema.validate_json(&json)?;
         Ok(())
     }
 }
