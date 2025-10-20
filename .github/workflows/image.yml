@@ -8,8 +8,8 @@ on:
       - release/**
 
 jobs:
-  build-multiplatform-image:
-    name: build-multiplatform-image
+  build-multiplatform-image-ghcr:
+    name: build-multiplatform-image-ghcr
     if: ${{ github.repository_owner == 'getsentry' }}
 
     permissions:
@@ -40,12 +40,36 @@ jobs:
           publish_on_pr: true  # required for self-hosted-end-to-end runs on pull requests
           ghcr: true
           google_ar: false
+          tag_suffix: -${{ matrix.platform }}
           # note: nightly will only be tagged if on default branch
           tag_nightly: true
           tag_latest: false
 
+  assemble-ghcr:
+    needs: [build-multiplatform-image-ghcr]
+    if: ${{ github.repository_owner == 'getsentry' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Docker Login
+        run: docker login --username '${{ github.actor }}' --password-stdin ghcr.io <<< "$GHCR_TOKEN"
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Create multiplatform manifests
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }} \
+            ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}-amd64 \
+            ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}-arm64
+
   self-hosted-end-to-end:
-    needs: [build-multiplatform-image]
+    needs: [build-multiplatform-image-ghcr]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
