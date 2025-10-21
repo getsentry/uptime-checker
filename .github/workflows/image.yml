@@ -68,6 +68,14 @@ jobs:
             ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}-amd64 \
             ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}-arm64
 
+      - name: Tag nightly
+        if: ${{ github.ref_name == github.event.repository.default_branch }}
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/getsentry/uptime-checker:nightly \
+            ghcr.io/getsentry/uptime-checker:${{ github.sha }}-amd64 \
+            ghcr.io/getsentry/uptime-checker:${{ github.sha }}-arm64
+
   self-hosted-end-to-end:
     needs: [build-multiplatform-image-ghcr]
     runs-on: ubuntu-latest
