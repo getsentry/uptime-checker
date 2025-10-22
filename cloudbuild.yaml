@@ -4,28 +4,9 @@ steps:
       [
         'build',
         '-t',
-        'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest',
-        '-t',
-        'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA',
-        '--build-arg',
-        'UPTIME_CHECKER_GIT_REVISION=$COMMIT_SHA',
-        '--cache-from',
-        'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest',
+        'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA-cloudbuild',
         '.',
       ]
-
-  - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        # Only push "latest" tag when building on "main"
-        [ "$BRANCH_NAME" != "main" ] && exit 0
-        docker push us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:latest
-
-images: [
-  'us-central1-docker.pkg.dev/$PROJECT_ID/uptime-checker/image:$COMMIT_SHA',
-]
 
 options:
   machineType: 'E2_HIGHCPU_8'
