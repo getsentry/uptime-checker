@@ -23,3 +23,9 @@ jobs:
           docker buildx imagetools create --tag \
             ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
             ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Tag latest version
+        run: |
+          docker buildx imagetools create --tag \
+            ghcr.io/${{ github.repository }}:latest \
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
