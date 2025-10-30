@@ -264,31 +264,56 @@ impl Checker for ReqwestChecker {
             Err(e) => e.status().map(|s| s.as_u16()),
         };
 
-        let rinfos = if let Ok(resp) = &response {
-            to_request_info_list(resp.stats(), check.get_config().request_method)
-        } else {
-            // TODO: thread the request timings (as much as we can get) through the error pathway.
-            let default_timing = Timing {
-                start_us: actual_check_time.timestamp_micros() as u128,
-                duration_us: 0,
-            };
-            vec![RequestInfo {
-                http_status_code,
-                request_type: check.get_config().request_method,
-                request_body_size_bytes: check.get_config().request_body.len() as u32,
-                url: check.get_config().url.clone(),
-                response_body_size_bytes: 0,
-                request_duration_us: duration.num_microseconds().unwrap() as u64,
-                durations: RequestDurations {
-                    dns_lookup: default_timing,
-                    tcp_connection: default_timing,
-                    tls_handshake: default_timing,
-                    time_to_first_byte: default_timing,
-                    send_request: default_timing,
-                    receive_response: default_timing,
-                },
-                certificate_info: None,
-            }]
+        let rinfos = match &response {
+            Ok(resp) => to_request_info_list(resp.stats(), check.get_config().request_method),
+            Err(err) => {
+                // This is a best-effort at getting timings for the individual bits of a connection-oriented error.
+                // Surfacing the timings for each part of DNS/TCP connect/TLS negotiation _in the event of a
+                // connection error_ will require some effort, so for now, just bill the full time to the part that
+                // we failed on, leaving the others at zero.
+                let zero_timing = Timing {
+                    start_us: actual_check_time.timestamp_micros() as u128,
+                    duration_us: 0,
+                };
+
+                let full_duration = Timing {
+                    start_us: actual_check_time.timestamp_micros() as u128,
+                    duration_us: duration.num_microseconds().unwrap() as u64,
+                };
+
+                let mut dns_timing = zero_timing;
+                let mut connection_timing = zero_timing;
+                let mut tls_timing = zero_timing;
+                let mut send_request_timing = zero_timing;
+
+                if dns_error(err).is_some() {
+                    dns_timing = full_duration
+                } else if connection_error(err).is_some() {
+                    connection_timing = full_duration
+                } else if tls_error(err).is_some() {
+                    tls_timing = full_duration
+                } else {
+                    send_request_timing = full_duration
+                };
+
+                vec![RequestInfo {
+                    http_status_code,
+                    request_type: check.get_config().request_method,
+                    request_body_size_bytes: check.get_config().request_body.len() as u32,
+                    url: check.get_config().url.clone(),
+                    response_body_size_bytes: 0,
+                    request_duration_us: duration.num_microseconds().unwrap() as u64,
+                    durations: RequestDurations {
+                        dns_lookup: dns_timing,
+                        tcp_connection: connection_timing,
+                        tls_handshake: tls_timing,
+                        time_to_first_byte: zero_timing,
+                        send_request: send_request_timing,
+                        receive_response: zero_timing,
+                    },
+                    certificate_info: None,
+                }]
+            }
         };
 
         let status_reason = match response {
