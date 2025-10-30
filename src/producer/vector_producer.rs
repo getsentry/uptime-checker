@@ -32,7 +32,12 @@ impl VectorResultsProducer {
     ) -> (Self, JoinHandle<()>) {
         let schema =
             sentry_kafka_schemas::get_schema(topic_name, None).expect("Schema should exist");
-        let client = Client::new();
+        let client = Client::builder()
+            .pool_max_idle_per_host(0)
+            .connect_timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("Client builder for vector should not fail");
         let pending_items = Arc::new(AtomicUsize::new(0));
 
         let config = VectorRequestWorkerConfig {
