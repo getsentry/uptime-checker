@@ -27,6 +27,7 @@ pub enum CheckStatus {
     Success,
     Failure,
     MissedWindow,
+    DisallowedByRobots,
 }
 
 /// The status reason result of a failed check

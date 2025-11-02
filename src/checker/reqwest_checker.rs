@@ -9,13 +9,13 @@ use crate::types::{
 use chrono::{TimeDelta, Utc};
 use openssl::error::ErrorStack;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::{Client, ClientBuilder, Response};
+use reqwest::{Client, ClientBuilder, Response, Url};
 use sentry::protocol::SpanId;
 use std::error::Error;
 use std::net::IpAddr;
 use std::time::Duration;
-use tokio::time::Instant;
-
+use texting_robots::Robot;
+use tokio::time::{timeout, Instant};
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
 
@@ -365,6 +365,91 @@ impl Checker for ReqwestChecker {
             region,
             request_info_list: rinfos,
         }
+    }
+
+    async fn check_robots(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+    ) -> Option<CheckResult> {
+        let Ok(url) = check.get_config().url.parse::<Url>() else {
+            return None;
+        };
+
+        let mut robots_url = url.clone();
+        robots_url.set_path("robots.txt");
+        let robots_txt = {
+            // Request a robots.txt, bounding both the get call as well as the body-stream to a 10 second
+            // window.
+            let start_time = Instant::now();
+            let time_allotment = Duration::from_secs(10);
+            let res = self
+                .client
+                .get(robots_url)
+                .timeout(time_allotment)
+                .send()
+                .await;
+
+            let Ok(mut res) = res else {
+                tracing::debug!("could not retrieve robots.txt");
+                return None;
+            };
+
+            let mut all_bytes = vec![];
+            loop {
+                let maybe_timeout =
+                    timeout(time_allotment - start_time.elapsed(), res.chunk()).await;
+                let Ok(maybe_conn_err) = maybe_timeout else {
+                    tracing::info!("waited too long for robots.txt");
+                    break all_bytes;
+                };
+                let Ok(maybe_chunk) = maybe_conn_err else {
+                    tracing::info!("connection error during robots.txt");
+                    break all_bytes;
+                };
+                let Some(chunk) = maybe_chunk else {
+                    break all_bytes;
+                };
+                all_bytes.extend_from_slice(&chunk);
+
+                if all_bytes.len() > 100_000 {
+                    tracing::info!(url = %url, "aborting huge robots.txt");
+                    break all_bytes;
+                }
+            }
+        };
+
+        let Ok(r) = Robot::new("SentryUptimeBot", &robots_txt) else {
+            tracing::info!("Could not create Robot");
+            return None;
+        };
+
+        if r.allowed(url.as_str()) {
+            return None;
+        }
+
+        let scheduled_check_time = check.get_tick().time();
+        let actual_check_time = Utc::now();
+        let span_id = SpanId::default();
+        let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
+
+        Some(CheckResult {
+            guid: trace_id,
+            subscription_id: check.get_config().subscription_id,
+            status: CheckStatus::DisallowedByRobots,
+            status_reason: None,
+            trace_id,
+            span_id,
+            scheduled_check_time,
+            scheduled_check_time_us: scheduled_check_time,
+            actual_check_time,
+            actual_check_time_us: actual_check_time,
+            duration: None,
+            duration_us: None,
+            request_info: None,
+            region,
+            request_info_list: Vec::new(),
+        })
     }
 }
 
@@ -903,6 +988,105 @@ mod tests {
         // Verify that the mock was called at least once
         // The reqwest client follows redirects multiple times before giving up
         redirect_mock.assert_hits(10);
+    }
+
+    #[tokio::test]
+    async fn test_robots_deny_sentry_site() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
+        });
+
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET).path("/robots.txt");
+
+            then.status(200)
+                .body("User-agent: SentryUptimeBot\nDisallow: *\n");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/foo").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_robots(&check, "us-west").await.unwrap();
+
+        assert_eq!(result.status, CheckStatus::DisallowedByRobots);
+
+        // Verify that the mock was called once
+        redirect_mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn test_robots_deny_all_site() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
+        });
+
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET).path("/robots.txt");
+
+            then.status(200).body("User-agent: *\nDisallow: *\n");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/foo").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_robots(&check, "us-west").await.unwrap();
+
+        assert_eq!(result.status, CheckStatus::DisallowedByRobots);
+
+        // Verify that the mock was called once
+        redirect_mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn test_robots_allow_site() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(Options {
+            validate_url: false,
+            disable_connection_reuse: true,
+            dns_nameservers: None,
+            pool_idle_timeout: Duration::from_secs(90),
+            interface: None,
+        });
+
+        // Create a redirect loop where each request redirects back to itself
+        let redirect_mock = server.mock(|when, then| {
+            when.method(Method::GET).path("/robots.txt");
+
+            then.status(200)
+                .body("User-agent: SentryUptimeBot\nDisallow: /bar/\n");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/foo").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_robots(&check, "us-west").await;
+
+        assert!(result.is_none());
+
+        // Verify that the mock was called once
+        redirect_mock.assert_hits(1);
     }
 
     #[tokio::test]
