@@ -22,10 +22,12 @@ Run `devservices up` then `make test`.
     SENTRY_EVENTSTREAM = "sentry.eventstream.kafka.KafkaEventStream"
     SENTRY_USE_UPTIME = True
 ```
-
-- Ensure Sentry is started with `ingest` and `workers` flags:
-
+- Start devservices in sentry:
+```sh
+    devservices up --mode=uptime
 ```
+- Ensure Sentry is started with `ingest` and `workers` flags:
+```sh
     sentry devserver --workers --ingest
 ```
 - The Makefile defines a few targets: `run` and `run-verbose` run the server (with additional logging), and `test` for running all tests.

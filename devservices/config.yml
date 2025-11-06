@@ -16,7 +16,13 @@ x-sentry-service-config:
         repo_link: git@github.com:getsentry/sentry-shared-redis.git
   modes:
     default: [redis]
-    sentry: [kafka, redis]
+    # containerized mode is used by sentry's devservices
+    containerized: [kafka, redis]
+
+x-programs:
+  devserver:
+    command: make run
+
 services:
   uptime-checker:
     image: ghcr.io/getsentry/uptime-checker:nightly
