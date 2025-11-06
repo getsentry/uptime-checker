@@ -29,10 +29,8 @@ services:
     image: ghcr.io/getsentry/uptime-checker:nightly
     command:
       - run
-    environment:
-      UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER: 127.0.0.1:9092
-      UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER: 127.0.0.1:9092
-      UPTIME_CHECKER_REDIS_HOST: 'redis://redis-redis-1:6379'
+    # we don't need things like UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER;
+    # results_kafka_cluster default is already 127.0.0.1:9092
     networks:
       - devservices
     extra_hosts:
