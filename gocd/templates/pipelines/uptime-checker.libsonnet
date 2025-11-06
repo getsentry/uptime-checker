@@ -27,20 +27,8 @@ local canary_enabled_pops = {
   s4s: [],
 };
 
-// Map of region -> list of POPs within that region that should enable soak/validation
-// Empty list means POPs use canary for coverage only (scaled up during rollout)
-// POPs in this list will scale up canary, soak/validate, then deploy to production
-local canary_soak_enabled_pops = {
-  de: [],
-  us: [],
-  s4s: [],
-};
-
 // Helper to check if a region/pop should use canary deployment
 local use_canary(region, pop) = std.member(canary_enabled_pops[region], pop);
-
-// Helper to check if a region/pop should enable soak validation
-local use_canary_soak(region, pop) = std.member(canary_soak_enabled_pops[region], pop);
 
 // Filter POPs for canary vs direct deploy
 local canary_pops(region) = std.filter(function(pop) use_canary(region, pop), region_pops[region]);
@@ -140,26 +128,6 @@ local scale_up_canary_stage(pops, fetch_stage) = {
   },
 };
 
-local soak_stage(pops) = {
-  'soak-and-validate': {
-    fetch_materials: true,
-    jobs: {
-      ['soak-' + r]: {
-        elastic_profile_id: 'uptime-checker',
-        tasks: [
-          gocdtasks.script(|||
-            echo "Starting canary soak for 120 seconds..."
-            sleep 120
-            # TODO: Add metric checks here (error rates, latency, etc.)
-            echo "Soak complete - canary validation passed"
-          |||),
-        ],
-      }
-      for r in pops
-    },
-  },
-};
-
 local deploy_primary_stage(pops) = {
   'deploy-primary': {
     fetch_materials: true,
@@ -226,16 +194,10 @@ local scale_down_canary_stage(pops) = {
 local canary_deployment_stages(region) =
   local pops = canary_pops(region);
   if std.length(pops) == 0 then [] else
-    // Check if any POP in this region uses soak
-    local soak_pops = std.filter(function(pop) use_canary_soak(region, pop), pops);
-    local has_soak = std.length(soak_pops) > 0;
-
-    // NOTE: If some POPs have soak enabled and others don't, all will follow the soak flow
     [
       cleanup_canary_stage(pops),
       deploy_canary_stage(pops),
       scale_up_canary_stage(pops, 'deploy-canary'),
-    ] + (if has_soak then [soak_stage(pops)] else []) + [
       deploy_primary_stage(pops),
       wait_rollout_stage(pops),
       scale_down_canary_stage(pops),
