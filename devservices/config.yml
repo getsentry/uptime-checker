@@ -15,7 +15,8 @@ x-sentry-service-config:
         branch: main
         repo_link: git@github.com:getsentry/sentry-shared-redis.git
   modes:
-    default: [kafka, redis]
+    default: [redis]
+    sentry: [kafka, redis]
 services:
   uptime-checker:
     image: ghcr.io/getsentry/uptime-checker:nightly
