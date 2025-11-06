@@ -10,6 +10,9 @@ We have lots of tests that run quickly and will therefore provide you with a qui
 
 Run `devenv sync`.
 
+# Running Tests
+
+Run `devservices up` then `make test`.
 
 # Running with local Sentry
 - Prepare your local development environment by following the guide [here](https://develop.sentry.dev/development-infrastructure/environment/)

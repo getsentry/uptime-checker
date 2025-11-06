@@ -1,0 +1,39 @@
+x-sentry-service-config:
+  version: 0.1
+  service_name: uptime-checker
+  dependencies:
+    kafka:
+      description: Shared instance of kafka used by sentry services
+      remote:
+        repo_name: sentry-shared-kafka
+        branch: main
+        repo_link: git@github.com:getsentry/sentry-shared-kafka.git
+    redis:
+      description: Shared instance of redis used by sentry services
+      remote:
+        repo_name: sentry-shared-redis
+        branch: main
+        repo_link: git@github.com:getsentry/sentry-shared-redis.git
+  modes:
+    default: [kafka, redis]
+services:
+  uptime-checker:
+    image: ghcr.io/getsentry/uptime-checker:nightly
+    command:
+      - run
+    environment:
+      UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER: kafka-kafka-1:9092
+      UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER: kafka-kafka-1:9092
+      UPTIME_CHECKER_REDIS_HOST: 'redis://redis-redis-1:6379'
+    networks:
+      - devservices
+    extra_hosts:
+      host.docker.internal: host-gateway
+    labels:
+      - orchestrator=devservices
+    restart: unless-stopped
+
+networks:
+  devservices:
+    name: devservices
+    external: true
