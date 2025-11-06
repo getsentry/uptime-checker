@@ -62,6 +62,8 @@ hostname = "0.4.0"
 tokio-metrics = "0.4.0"
 iprange = "0.6.7"
 http = "1.2.0"
+regex = "1.12.2"
+
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
 # we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
