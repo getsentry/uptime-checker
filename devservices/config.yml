@@ -30,8 +30,8 @@ services:
     command:
       - run
     environment:
-      UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER: kafka-kafka-1:9092
-      UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER: kafka-kafka-1:9092
+      UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER: 127.0.0.1:9092
+      UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER: 127.0.0.1:9092
       UPTIME_CHECKER_REDIS_HOST: 'redis://redis-redis-1:6379'
     networks:
       - devservices
