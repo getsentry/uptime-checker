@@ -31,11 +31,8 @@ Run `devservices up` then `make test`.
     # to do the opposite (most sentry devs not working on uptime-checker actively will be using this already)
     # devservices toggle uptime-checker containerized
 ```
-- Start devservices in sentry:
+- Inside sentry, run:
 ```sh
     devservices up --mode=uptime
-```
-- Ensure Sentry is started with `ingest` and `workers` flags:
-```sh
     sentry devserver --workers --ingest
 ```
