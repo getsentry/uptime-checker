@@ -22,6 +22,8 @@ x-sentry-service-config:
 
 x-programs:
   devserver:
+    # this doesn't need to specify things like UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER
+    # as locally we can just use the default results_kafka_cluster 127.0.0.1:9092
     command: make run
 
 services:
@@ -29,8 +31,9 @@ services:
     image: ghcr.io/getsentry/uptime-checker:nightly
     command:
       - run
-    # we don't need things like UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER;
-    # results_kafka_cluster default is already 127.0.0.1:9092
+    environment:
+      UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER: 'kafka-kafka-1'
+      UPTIME_CHECKER_REDIS_HOST: 'redis://redis-redis-1:6379'
     networks:
       - devservices
     extra_hosts:
