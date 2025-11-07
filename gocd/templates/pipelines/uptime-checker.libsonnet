@@ -95,7 +95,7 @@ local deploy_canary_stage(pops) = {
   },
 };
 
-local scale_up_canary_stage(pops, fetch_stage) = {
+local scale_up_canary_stage(pops) = {
   'scale-up-canary': {
     fetch_materials: true,
     jobs: {
@@ -105,14 +105,6 @@ local scale_up_canary_stage(pops, fetch_stage) = {
           SENTRY_REGION: r,
         },
         tasks: [
-          {
-            fetch: {
-              stage: fetch_stage,
-              job: fetch_stage + '-' + r,
-              source: 'output',
-              destination: 'artifacts',
-            },
-          },
           gocdtasks.script(|||
             PROD_REPLICAS=$(kubectl get statefulset -l "service=uptime-checker,env!=canary" -o jsonpath='{.items[0].spec.replicas}')
             echo "Scaling canary to ${PROD_REPLICAS} replicas"
@@ -197,7 +189,7 @@ local canary_deployment_stages(region) =
     [
       cleanup_canary_stage(pops),
       deploy_canary_stage(pops),
-      scale_up_canary_stage(pops, 'deploy-canary'),
+      scale_up_canary_stage(pops),
       deploy_primary_stage(pops),
       wait_rollout_stage(pops),
       scale_down_canary_stage(pops),
