@@ -279,8 +279,8 @@ function(region) {
     local has_canary = std.length(canary_pops(region)) > 0;
     [checks_stage] +
     (if has_canary then
-      canary_deployment_stages(region)
-    else
-      direct_deploy_stages(region)) +
+       canary_deployment_stages(region)
+     else
+       direct_deploy_stages(region)) +
     deploy_primary_pops_stage(region),
 }
