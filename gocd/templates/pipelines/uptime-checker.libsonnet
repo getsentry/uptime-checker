@@ -15,6 +15,25 @@ local region_pops = {
   ],
 };
 
+// IMPORTANT: Keep these canary configuration maps in sync between:
+// - uptime-checker/gocd/templates/pipelines/uptime-checker.libsonnet (this file)
+// - ops/gocd/templates/pipelines/uptime-checker-k8s.libsonnet
+
+// Map of region -> list of POPs within that region that should use canary deployment
+// Empty list means all POPs in that region use old direct-deploy flow
+local canary_enabled_pops = {
+  de: [],
+  us: [],
+  s4s: [],
+};
+
+// Helper to check if a region/pop should use canary deployment
+local use_canary(region, pop) = std.member(canary_enabled_pops[region], pop);
+
+// Filter POPs for canary vs direct deploy
+local canary_pops(region) = std.filter(function(pop) use_canary(region, pop), region_pops[region]);
+local direct_deploy_pops(region) = std.filter(function(pop) !use_canary(region, pop), region_pops[region]);
+
 local checks_stage = {
   checks: {
     fetch_materials: true,
@@ -33,46 +52,180 @@ local checks_stage = {
   },
 };
 
-local deploy_canary_stage(region) =
-  if region == 'us' then
-    [
-      {
-        'deploy-canary': {
-          fetch_materials: true,
-          jobs: {
-            deploy: {
-              timeout: 600,
-              elastic_profile_id: 'uptime-checker',
-              environment_variables: {
-                LABEL_SELECTOR: 'service=uptime-checker,env=canary',
-              },
-              tasks: [
-                gocdtasks.script(importstr '../bash/deploy.sh'),
-                gocdtasks.script(importstr '../bash/wait-canary.sh'),
-              ],
-            },
-          },
-        },
-      },
-    ] else [];
-
-local deploy_primary_stage = {
-  'deploy-primary': {
+// Helper stages for canary deployment
+local cleanup_canary_stage(pops) = {
+  'cleanup-canary': {
     fetch_materials: true,
     jobs: {
-      deploy: {
+      ['cleanup-' + r]: {
+        elastic_profile_id: 'uptime-checker',
+        environment_variables: {
+          SENTRY_REGION: r,
+        },
+        tasks: [
+          gocdtasks.script(|||
+            echo "Cleaning up any existing canary from previous runs..."
+            kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
+            echo "Canary cleanup complete"
+          |||),
+        ],
+      }
+      for r in pops
+    },
+  },
+};
+
+local deploy_canary_stage(pops) = {
+  'deploy-canary': {
+    fetch_materials: true,
+    jobs: {
+      ['deploy-canary-' + r]: {
         timeout: 600,
         elastic_profile_id: 'uptime-checker',
         environment_variables: {
+          SENTRY_REGION: r,
+          LABEL_SELECTOR: 'service=uptime-checker,env=canary',
+        },
+        tasks: [
+          gocdtasks.script(importstr '../bash/deploy.sh'),
+        ],
+      }
+      for r in pops
+    },
+  },
+};
+
+local scale_up_canary_stage(pops, fetch_stage) = {
+  'scale-up-canary': {
+    fetch_materials: true,
+    jobs: {
+      ['scale-' + r]: {
+        elastic_profile_id: 'uptime-checker',
+        environment_variables: {
+          SENTRY_REGION: r,
+        },
+        tasks: [
+          {
+            fetch: {
+              stage: fetch_stage,
+              job: fetch_stage + '-' + r,
+              source: 'output',
+              destination: 'artifacts',
+            },
+          },
+          gocdtasks.script(|||
+            PROD_REPLICAS=$(kubectl get statefulset -l "service=uptime-checker,env!=canary" -o jsonpath='{.items[0].spec.replicas}')
+            echo "Scaling canary to ${PROD_REPLICAS} replicas"
+            kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas="${PROD_REPLICAS}"
+            echo "Waiting for canary pods to be ready..."
+            kubectl wait --for=condition=ready pod -l "service=uptime-checker,env=canary" --timeout=600s
+            echo "All canary pods are ready"
+          |||),
+        ],
+      }
+      for r in pops
+    },
+  },
+};
+
+local deploy_primary_stage(pops) = {
+  'deploy-primary': {
+    fetch_materials: true,
+    jobs: {
+      ['deploy-primary-' + r]: {
+        timeout: 600,
+        elastic_profile_id: 'uptime-checker',
+        environment_variables: {
+          SENTRY_REGION: r,
           LABEL_SELECTOR: 'service=uptime-checker',
         },
         tasks: [
           gocdtasks.script(importstr '../bash/deploy.sh'),
         ],
-      },
+      }
+      for r in pops
     },
   },
 };
+
+local wait_rollout_stage(pops) = {
+  'wait-for-rollout': {
+    fetch_materials: true,
+    jobs: {
+      ['wait-' + r]: {
+        elastic_profile_id: 'uptime-checker',
+        environment_variables: {
+          SENTRY_REGION: r,
+        },
+        tasks: [
+          gocdtasks.script(|||
+            kubectl rollout status statefulset -l "service=uptime-checker,env!=canary" --timeout=600s
+          |||),
+        ],
+      }
+      for r in pops
+    },
+  },
+};
+
+local scale_down_canary_stage(pops) = {
+  'scale-down-canary': {
+    fetch_materials: true,
+    jobs: {
+      ['scale-down-' + r]: {
+        elastic_profile_id: 'uptime-checker',
+        environment_variables: {
+          SENTRY_REGION: r,
+        },
+        tasks: [
+          gocdtasks.script(|||
+            echo "Scaling canary back down to 0 replicas..."
+            kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0
+            echo "Canary scaled down"
+          |||),
+        ],
+      }
+      for r in pops
+    },
+  },
+};
+
+// Build canary deployment stages based on configuration
+local canary_deployment_stages(region) =
+  local pops = canary_pops(region);
+  if std.length(pops) == 0 then [] else
+    [
+      cleanup_canary_stage(pops),
+      deploy_canary_stage(pops),
+      scale_up_canary_stage(pops, 'deploy-canary'),
+      deploy_primary_stage(pops),
+      wait_rollout_stage(pops),
+      scale_down_canary_stage(pops),
+    ];
+
+// Direct deploy stage for non-canary POPs (old behavior)
+// This matches the original deploy_primary_stage: single job, no SENTRY_REGION
+local direct_deploy_stages(region) =
+  local pops = direct_deploy_pops(region);
+  if std.length(pops) == 0 then [] else [
+    {
+      'deploy-primary': {
+        fetch_materials: true,
+        jobs: {
+          deploy: {
+            timeout: 600,
+            elastic_profile_id: 'uptime-checker',
+            environment_variables: {
+              LABEL_SELECTOR: 'service=uptime-checker',
+            },
+            tasks: [
+              gocdtasks.script(importstr '../bash/deploy.sh'),
+            ],
+          },
+        },
+      },
+    },
+  ];
 local deploy_pop_job(region) =
   {
     timeout: 600,
@@ -122,5 +275,12 @@ function(region) {
     },
   },
   lock_behavior: 'unlockWhenFinished',
-  stages: [checks_stage] + deploy_canary_stage(region) + [deploy_primary_stage] + deploy_primary_pops_stage(region),
+  stages:
+    local has_canary = std.length(canary_pops(region)) > 0;
+    [checks_stage] +
+    (if has_canary then
+       canary_deployment_stages(region)
+     else
+       direct_deploy_stages(region)) +
+    deploy_primary_pops_stage(region),
 }
