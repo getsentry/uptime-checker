@@ -64,6 +64,9 @@ local cleanup_canary_stage(pops) = {
         },
         tasks: [
           gocdtasks.script(|||
+            eval $(regions-project-env-vars --region="${SENTRY_REGION}")
+            /devinfra/scripts/get-cluster-credentials
+
             echo "Cleaning up any existing canary from previous runs..."
             kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
             echo "Canary cleanup complete"
@@ -106,6 +109,9 @@ local scale_up_canary_stage(pops) = {
         },
         tasks: [
           gocdtasks.script(|||
+            eval $(regions-project-env-vars --region="${SENTRY_REGION}")
+            /devinfra/scripts/get-cluster-credentials
+
             PROD_REPLICAS=$(kubectl get statefulset -l "service=uptime-checker,env!=canary" -o jsonpath='{.items[0].spec.replicas}')
             echo "Scaling canary to ${PROD_REPLICAS} replicas"
             kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas="${PROD_REPLICAS}"
@@ -151,6 +157,9 @@ local wait_rollout_stage(pops) = {
         },
         tasks: [
           gocdtasks.script(|||
+            eval $(regions-project-env-vars --region="${SENTRY_REGION}")
+            /devinfra/scripts/get-cluster-credentials
+
             kubectl rollout status statefulset -l "service=uptime-checker,env!=canary" --timeout=600s
           |||),
         ],
@@ -171,6 +180,9 @@ local scale_down_canary_stage(pops) = {
         },
         tasks: [
           gocdtasks.script(|||
+            eval $(regions-project-env-vars --region="${SENTRY_REGION}")
+            /devinfra/scripts/get-cluster-credentials
+
             echo "Scaling canary back down to 0 replicas..."
             kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0
             echo "Canary scaled down"
