@@ -11,6 +11,7 @@ local region_pops = {
     'us-pop-9',  // pop-sc
   ],
   s4s: [
+    's4s',
     'pop-st-1',
   ],
 };
@@ -235,13 +236,13 @@ local deploy_pop_jobs(regions) =
 
 
 local deploy_primary_pops_stage(region) =
-  [
+  // Only deploy to POPs that are NOT using canary (they're already deployed via canary flow)
+  local pops = direct_deploy_pops(region);
+  if std.length(pops) == 0 then [] else [
     {
       ['deploy-primary-pops-' + region]: {
         fetch_materials: true,
-        jobs+: deploy_pop_jobs(
-          region_pops[region],
-        ),
+        jobs+: deploy_pop_jobs(pops),
       },
     },
   ];
