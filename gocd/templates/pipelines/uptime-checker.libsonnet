@@ -54,31 +54,6 @@ local checks_stage = {
 };
 
 // Helper stages for canary deployment
-local cleanup_canary_stage(pops) = {
-  'cleanup-canary': {
-    fetch_materials: true,
-    jobs: {
-      ['cleanup-' + r]: {
-        elastic_profile_id: 'uptime-checker',
-        environment_variables: {
-          SENTRY_REGION: r,
-        },
-        tasks: [
-          gocdtasks.script(|||
-            eval $(regions-project-env-vars --region="${SENTRY_REGION}")
-            /devinfra/scripts/get-cluster-credentials
-
-            echo "Cleaning up any existing canary from previous runs..."
-            kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
-            echo "Canary cleanup complete"
-          |||),
-        ],
-      }
-      for r in pops
-    },
-  },
-};
-
 local deploy_canary_stage(pops) = {
   'deploy-canary': {
     fetch_materials: true,
@@ -91,6 +66,14 @@ local deploy_canary_stage(pops) = {
           LABEL_SELECTOR: 'service=uptime-checker,env=canary',
         },
         tasks: [
+          gocdtasks.script(|||
+            eval $(regions-project-env-vars --region="${SENTRY_REGION}")
+            /devinfra/scripts/get-cluster-credentials
+
+            echo "Cleaning up any existing canary from previous runs..."
+            kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
+            echo "Canary cleanup complete"
+          |||),
           gocdtasks.script(importstr '../bash/deploy.sh'),
           gocdtasks.script(|||
             eval $(regions-project-env-vars --region="${SENTRY_REGION}")
@@ -160,7 +143,6 @@ local canary_deployment_stages(region) =
   local pops = canary_pops(region);
   if std.length(pops) == 0 then [] else
     [
-      cleanup_canary_stage(pops),
       deploy_canary_stage(pops),
       deploy_primary_stage(pops),
       scale_down_canary_stage(pops),
