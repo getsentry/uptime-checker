@@ -91,23 +91,6 @@ local deploy_canary_stage(pops) = {
         },
         tasks: [
           gocdtasks.script(importstr '../bash/deploy.sh'),
-        ],
-      }
-      for r in pops
-    },
-  },
-};
-
-local scale_up_canary_stage(pops) = {
-  'scale-up-canary': {
-    fetch_materials: true,
-    jobs: {
-      ['scale-' + r]: {
-        elastic_profile_id: 'uptime-checker',
-        environment_variables: {
-          SENTRY_REGION: r,
-        },
-        tasks: [
           gocdtasks.script(|||
             eval $(regions-project-env-vars --region="${SENTRY_REGION}")
             /devinfra/scripts/get-cluster-credentials
@@ -201,7 +184,6 @@ local canary_deployment_stages(region) =
     [
       cleanup_canary_stage(pops),
       deploy_canary_stage(pops),
-      scale_up_canary_stage(pops),
       deploy_primary_stage(pops),
       wait_rollout_stage(pops),
       scale_down_canary_stage(pops),
