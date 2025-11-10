@@ -130,29 +130,6 @@ local deploy_primary_stage(pops) = {
   },
 };
 
-local wait_rollout_stage(pops) = {
-  'wait-for-rollout': {
-    fetch_materials: true,
-    jobs: {
-      ['wait-' + r]: {
-        elastic_profile_id: 'uptime-checker',
-        environment_variables: {
-          SENTRY_REGION: r,
-        },
-        tasks: [
-          gocdtasks.script(|||
-            eval $(regions-project-env-vars --region="${SENTRY_REGION}")
-            /devinfra/scripts/get-cluster-credentials
-
-            kubectl rollout status statefulset -l "service=uptime-checker,env!=canary" --timeout=600s
-          |||),
-        ],
-      }
-      for r in pops
-    },
-  },
-};
-
 local scale_down_canary_stage(pops) = {
   'scale-down-canary': {
     fetch_materials: true,
@@ -186,7 +163,6 @@ local canary_deployment_stages(region) =
       cleanup_canary_stage(pops),
       deploy_canary_stage(pops),
       deploy_primary_stage(pops),
-      wait_rollout_stage(pops),
       scale_down_canary_stage(pops),
     ];
 
