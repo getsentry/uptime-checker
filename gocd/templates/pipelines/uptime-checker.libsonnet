@@ -25,7 +25,7 @@ local region_pops = {
 local canary_enabled_pops = {
   de: [],
   us: [],
-  s4s: ['pop-st-1'],
+  s4s: ['s4s', 'pop-st-1'],
 };
 
 // Helper to check if a region/pop should use canary deployment
