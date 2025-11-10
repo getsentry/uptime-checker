@@ -32,7 +32,6 @@ services:
     command:
       - run
     environment:
-      UPTIME_CHECKER_LOG_LEVEL: info
       UPTIME_CHECKER_RESULTS_KAFKA_CLUSTER: 'kafka-kafka-1'
       UPTIME_CHECKER_REDIS_HOST: 'redis://redis-redis-1:6379'
     networks:
