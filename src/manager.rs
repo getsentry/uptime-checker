@@ -17,6 +17,7 @@ use crate::check_executor::{run_executor, CheckSender, ExecutorConfig};
 use crate::checker::HttpChecker;
 use crate::config_waiter::wait_for_partition_boot;
 use crate::producer::kafka_producer::KafkaResultsProducer;
+use crate::redis::build_redis_client;
 use crate::{
     app::config::Config,
     checker::reqwest_checker::ReqwestChecker,
@@ -61,17 +62,23 @@ impl PartitionedService {
             config.region,
         );
 
+        let client = build_redis_client(
+            &config.redis_host,
+            config.redis_enable_cluster,
+            config.redis_timeouts_ms,
+            config.redis_readonly,
+        )
+        .expect("could not build reddis client");
+
         let scheduler_join_handle = run_scheduler(
             partition,
             config_store.clone(),
             executor_sender,
             shutdown_signal.clone(),
             build_progress_key(partition),
-            config.redis_host.clone(),
+            client,
             config_loaded,
             config.region,
-            config.redis_enable_cluster,
-            config.redis_timeouts_ms,
             tasks_finished_tx,
         );
 

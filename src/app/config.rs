@@ -156,6 +156,9 @@ pub struct Config {
 
     /// Whether to collect connection-level metrics (only available on Isahc)
     pub enable_metrics: bool,
+
+    /// Whether this uptime checker will write to redis or not.
+    pub redis_readonly: bool,
 }
 
 impl Default for Config {
@@ -197,6 +200,7 @@ impl Default for Config {
             thread_cpu_scale_factor: 1,
             redis_timeouts_ms: 30_000,
             enable_metrics: false,
+            redis_readonly: false,
         }
     }
 }
@@ -352,6 +356,7 @@ mod tests {
                         thread_cpu_scale_factor: 1,
                         redis_timeouts_ms: 30_000,
                         enable_metrics: false,
+                        redis_readonly: false,
                     }
                 );
             },
@@ -398,6 +403,7 @@ mod tests {
                     "8.8.8.8,8.8.4.4",
                 ),
                 ("UPTIME_CHECKER_INTERFACE", "eth0"),
+                ("UPTIME_CHECKER_REDIS_READONLY", "true"),
             ],
             |config| {
                 assert_eq!(
@@ -445,6 +451,7 @@ mod tests {
                         thread_cpu_scale_factor: 3,
                         redis_timeouts_ms: 30_000,
                         enable_metrics: false,
+                        redis_readonly: true,
                     }
                 );
             },
