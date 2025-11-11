@@ -2,6 +2,7 @@ local gocdtasks = import 'github.com/getsentry/gocd-jsonnet/libs/gocd-tasks.libs
 
 local region_pops = {
   de: [
+    'de',        // main cluster
     'de-pop-1',  // pop-de
     'de-pop-2',  // pop-nl
   ],
@@ -23,7 +24,7 @@ local region_pops = {
 // Map of region -> list of POPs within that region that should use canary deployment
 // Empty list means all POPs in that region use old direct-deploy flow
 local canary_enabled_pops = {
-  de: [],
+  de: ['de-pop-1'],
   us: [],
   s4s: ['s4s', 'pop-st-1'],
 };
