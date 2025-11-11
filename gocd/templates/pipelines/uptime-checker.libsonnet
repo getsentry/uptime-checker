@@ -80,12 +80,13 @@ local deploy_canary_stage(pops) = {
             eval $(regions-project-env-vars --region="${SENTRY_REGION}")
             /devinfra/scripts/get-cluster-credentials
 
-            PROD_REPLICAS=$(kubectl get statefulset -l "service=uptime-checker,env!=canary" -o jsonpath='{.items[0].spec.replicas}')
+            PROD_REPLICAS=$(kubectl get statefulset -l "service=uptime-checker,env=primary" -o jsonpath='{.items[0].spec.replicas}')
             echo "Scaling canary to ${PROD_REPLICAS} replicas"
-            kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas="${PROD_REPLICAS}"
-            echo "Waiting for canary pods to be ready..."
-            kubectl wait --for=condition=ready pod -l "service=uptime-checker,env=canary" --timeout=600s
-            echo "All canary pods are ready"
+            CANARY_STATEFULSET=$(kubectl get statefulset -l "service=uptime-checker,env=canary" -o jsonpath='{.items[0].metadata.name}')
+            kubectl scale statefulset ${CANARY_STATEFULSET} --replicas="${PROD_REPLICAS}"
+            echo "Waiting for canary rollout to complete..."
+            kubectl rollout status statefulset/${CANARY_STATEFULSET} --timeout=600s
+            echo "Canary rollout complete"
           |||),
         ],
       }
