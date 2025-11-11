@@ -24,8 +24,8 @@ local region_pops = {
 // Map of region -> list of POPs within that region that should use canary deployment
 // Empty list means all POPs in that region use old direct-deploy flow
 local canary_enabled_pops = {
-  de: ['de-pop-1'],
-  us: [],
+  de: ['de', 'de-pop-1', 'de-pop-2'],
+  us: ['us-pop-1'],
   s4s: ['s4s', 'pop-st-1'],
 };
 
