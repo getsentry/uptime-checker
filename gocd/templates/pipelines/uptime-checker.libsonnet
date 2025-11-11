@@ -67,22 +67,14 @@ local deploy_canary_stage(pops) = {
           LABEL_SELECTOR: 'service=uptime-checker,env=canary',
         },
         tasks: [
-          gocdtasks.script(|||
-            eval $(regions-project-env-vars --region="${SENTRY_REGION}")
-            /devinfra/scripts/get-cluster-credentials
-
-            echo "Cleaning up any existing canary from previous runs..."
-            kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
-            echo "Canary cleanup complete"
-          |||),
           gocdtasks.script(importstr '../bash/deploy.sh'),
           gocdtasks.script(|||
             eval $(regions-project-env-vars --region="${SENTRY_REGION}")
             /devinfra/scripts/get-cluster-credentials
 
             PROD_REPLICAS=$(kubectl get statefulset -l "service=uptime-checker,env=primary" -o jsonpath='{.items[0].spec.replicas}')
-            echo "Scaling canary to ${PROD_REPLICAS} replicas"
             CANARY_STATEFULSET=$(kubectl get statefulset -l "service=uptime-checker,env=canary" -o jsonpath='{.items[0].metadata.name}')
+            echo "Scaling ${CANARY_STATEFULSET} to ${PROD_REPLICAS} replicas to match production"
             kubectl scale statefulset ${CANARY_STATEFULSET} --replicas="${PROD_REPLICAS}"
             echo "Waiting for canary rollout to complete..."
             kubectl rollout status statefulset/${CANARY_STATEFULSET} --timeout=600s
