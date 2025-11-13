@@ -2921,7 +2921,7 @@ dependencies = [
 [[package]]
 name = "reqwest"
 version = "0.12.2"
-source = "git+https://github.com/getsentry/reqwest-uptime?rev=4e4b644fc38b62ed2e01060a44344dc660aa8f6d#4e4b644fc38b62ed2e01060a44344dc660aa8f6d"
+source = "git+https://github.com/getsentry/reqwest-uptime?rev=8bd14b043018f366e3e639cc69ec7a27762bc747#8bd14b043018f366e3e639cc69ec7a27762bc747"
 dependencies = [
  "base64 0.22.1",
  "bytes",
