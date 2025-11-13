@@ -208,11 +208,24 @@ async fn send_batch(
                         );
                     }
                     Err(e) => {
+                        // Categorize the error for better diagnostics
+                        let error_type = if e.is_timeout() {
+                            "timeout"
+                        } else if e.is_connect() {
+                            "connection_refused"
+                        } else if e.is_request() {
+                            "request_error"
+                        } else if e.is_body() {
+                            "body_error"
+                        } else if e.is_decode() {
+                            "decode_error"
+                        } else {
+                            "unknown"
+                        };
+
                         tracing::warn!(
                             error = ?e,
-                            retry = num_of_retries,
-                            batch_size = batch.len(),
-                            delay_ms = ?delay.as_millis(),
+                            error_type = error_type,
                             "request.failed_to_vector_retrying"
                         );
                     }
