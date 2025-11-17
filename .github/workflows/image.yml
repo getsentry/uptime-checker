@@ -48,6 +48,7 @@ jobs:
   assemble-ghcr:
     needs: [build-multiplatform-image-ghcr]
     if: ${{ github.repository_owner == 'getsentry' }}
+    name: Create multi-platform manifest
     runs-on: ubuntu-latest
     permissions:
       contents: read
