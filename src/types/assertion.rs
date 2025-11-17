@@ -7,9 +7,7 @@ pub struct Assertion {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "cmp")]
-#[serde(rename_all = "snake_case")]
-
+#[serde(tag = "cmp", rename_all = "snake_case")]
 enum Comparison {
     LessThan,
     GreaterThan,
@@ -18,16 +16,14 @@ enum Comparison {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "header_op")]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "header_op", rename_all = "snake_case")]
 enum HeaderOperand {
     Literal { value: String },
     Regex { value: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "header_cmp")]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "header_cmp", rename_all = "snake_case")]
 enum HeaderComparison {
     Always,
     Never,
@@ -38,8 +34,7 @@ enum HeaderComparison {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "op")]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case")]
 enum Op {
     And {
         children: Vec<Op>,
@@ -67,6 +62,7 @@ enum Op {
 }
 
 pub mod compiled {
+    use crate::types::assertion;
     use http::HeaderValue;
     use regex::{Regex, RegexBuilder};
     use std::str::FromStr;
@@ -77,7 +73,7 @@ pub mod compiled {
 
     #[derive(thiserror::Error, Debug)]
     pub enum Error {
-        #[error("Invalid regex syntax")]
+        #[error("Invalid regex syntax: {0}")]
         InvalidRegex(String),
 
         #[error("Regex is too complicated")]
@@ -108,13 +104,13 @@ pub mod compiled {
         NotEqual,
     }
 
-    impl From<&super::Comparison> for Comparison {
-        fn from(value: &super::Comparison) -> Self {
+    impl From<&assertion::Comparison> for Comparison {
+        fn from(value: &assertion::Comparison) -> Self {
             match *value {
-                super::Comparison::LessThan => Comparison::LessThan,
-                super::Comparison::GreaterThan => Comparison::GreaterThan,
-                super::Comparison::Equal => Comparison::Equal,
-                super::Comparison::NotEqual => Comparison::NotEqual,
+                assertion::Comparison::LessThan => Comparison::LessThan,
+                assertion::Comparison::GreaterThan => Comparison::GreaterThan,
+                assertion::Comparison::Equal => Comparison::Equal,
+                assertion::Comparison::NotEqual => Comparison::NotEqual,
             }
         }
     }
@@ -141,16 +137,14 @@ pub mod compiled {
         }
     }
 
-    impl TryFrom<&super::HeaderOperand> for HeaderOperand {
+    impl TryFrom<&assertion::HeaderOperand> for HeaderOperand {
         type Error = Error;
-        fn try_from(value: &super::HeaderOperand) -> Result<Self, Self::Error> {
+        fn try_from(value: &assertion::HeaderOperand) -> Result<Self, Self::Error> {
             let v = match value {
-                crate::types::assertion::HeaderOperand::Literal { value } => {
-                    HeaderOperand::Literal {
-                        value: value.into(),
-                    }
-                }
-                crate::types::assertion::HeaderOperand::Regex { value } => {
+                assertion::HeaderOperand::Literal { value } => HeaderOperand::Literal {
+                    value: value.into(),
+                },
+                assertion::HeaderOperand::Regex { value } => {
                     let r = RegexBuilder::new(value)
                         .size_limit(REGEX_SIZE_LIMIT)
                         .build();
@@ -207,22 +201,26 @@ pub mod compiled {
         }
     }
 
-    impl TryFrom<&super::HeaderComparison> for HeaderComparison {
+    impl TryFrom<&assertion::HeaderComparison> for HeaderComparison {
         type Error = Error;
-        fn try_from(value: &super::HeaderComparison) -> Result<Self, Self::Error> {
+        fn try_from(value: &assertion::HeaderComparison) -> Result<Self, Self::Error> {
             let v = match value {
-                super::HeaderComparison::Always => HeaderComparison::Always,
-                super::HeaderComparison::Never => HeaderComparison::Never,
-                super::HeaderComparison::Equals { test_value } => HeaderComparison::Equals {
+                assertion::HeaderComparison::Always => HeaderComparison::Always,
+                assertion::HeaderComparison::Never => HeaderComparison::Never,
+                assertion::HeaderComparison::Equals { test_value } => HeaderComparison::Equals {
                     test_value: test_value.try_into()?,
                 },
-                super::HeaderComparison::NotEquals { test_value } => HeaderComparison::NotEquals {
-                    test_value: test_value.try_into()?,
-                },
-                super::HeaderComparison::LessThan { test_value } => HeaderComparison::LessThan {
-                    test_value: test_value.into(),
-                },
-                super::HeaderComparison::GreaterThan { test_value } => {
+                assertion::HeaderComparison::NotEquals { test_value } => {
+                    HeaderComparison::NotEquals {
+                        test_value: test_value.try_into()?,
+                    }
+                }
+                assertion::HeaderComparison::LessThan { test_value } => {
+                    HeaderComparison::LessThan {
+                        test_value: test_value.into(),
+                    }
+                }
+                assertion::HeaderComparison::GreaterThan { test_value } => {
                     HeaderComparison::GreaterThan {
                         test_value: test_value.into(),
                     }
@@ -356,28 +354,28 @@ pub mod compiled {
         }
     }
 
-    pub fn compile(assertion: &super::Assertion) -> Result<Assertion, Error> {
+    pub fn compile(assertion: &assertion::Assertion) -> Result<Assertion, Error> {
         Ok(Assertion {
             root: compile_op(&assertion.root)?,
         })
     }
 
-    fn compile_op(op: &super::Op) -> Result<Op, Error> {
+    fn compile_op(op: &assertion::Op) -> Result<Op, Error> {
         let op = match op {
-            super::Op::And { children } => Op::And {
-                children: fun_name(children)?,
+            assertion::Op::And { children } => Op::And {
+                children: visit_children(children)?,
             },
-            super::Op::Or { children } => Op::Or {
-                children: fun_name(children)?,
+            assertion::Op::Or { children } => Op::Or {
+                children: visit_children(children)?,
             },
-            super::Op::Not { operand } => Op::Not {
+            assertion::Op::Not { operand } => Op::Not {
                 operand: Box::new(compile_op(&**operand)?),
             },
-            super::Op::StatusCodeCheck { value, operator } => Op::StatusCodeCheck {
+            assertion::Op::StatusCodeCheck { value, operator } => Op::StatusCodeCheck {
                 value: *value,
                 operator: operator.into(),
             },
-            super::Op::HeaderCheck { key, value } => Op::HeaderCheck {
+            assertion::Op::HeaderCheck { key, value } => Op::HeaderCheck {
                 key: key.try_into()?,
                 value: value.try_into()?,
             },
@@ -386,7 +384,7 @@ pub mod compiled {
         Ok(op)
     }
 
-    fn fun_name(children: &Vec<super::Op>) -> Result<Vec<Op>, Error> {
+    fn visit_children(children: &Vec<assertion::Op>) -> Result<Vec<Op>, Error> {
         let mut cs = vec![];
         for c in children.iter() {
             cs.push(compile_op(c)?);
@@ -400,8 +398,7 @@ mod tests {
     use http::{HeaderMap, HeaderValue};
 
     use crate::types::assertion::{
-        compiled::{self, compile},
-        Assertion, Comparison, HeaderComparison, HeaderOperand,
+        compiled::compile, Assertion, Comparison, HeaderComparison, HeaderOperand,
     };
 
     use super::Op;
