@@ -1,5 +1,5 @@
 use super::shared::{RegionScheduleMode, RequestMethod};
-use crate::config_store::Tick;
+use crate::{assertions, config_store::Tick};
 use chrono::{TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -78,6 +78,12 @@ pub struct CheckConfig {
 
     #[serde(default)]
     pub region_schedule_mode: Option<RegionScheduleMode>,
+
+    #[serde(default)]
+    pub assertion: Option<assertions::Assertion>,
+
+    #[serde(skip)]
+    pub compiled_assertion: Option<assertions::compiled::Assertion>,
 }
 
 impl Hash for CheckConfig {
@@ -184,6 +190,8 @@ mod tests {
                 trace_sampling: false,
                 active_regions: None,
                 region_schedule_mode: None,
+                assertion: None,
+                compiled_assertion: None,
             }
         }
     }
@@ -228,6 +236,8 @@ mod tests {
                 trace_sampling: false,
                 active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+                assertion: None,
+                compiled_assertion: None,
             }
         );
     }
@@ -283,6 +293,8 @@ mod tests {
                 trace_sampling: false,
                 active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+                assertion: None,
+                compiled_assertion: None,
             }
         );
     }
