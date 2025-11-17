@@ -1,18 +1,14 @@
 use http::HeaderValue;
-use regex::{Regex, RegexBuilder};
 use std::str::FromStr;
 
 // Don't make this any lower--there are some really innoccuous looking regexes (\d, \w) that
 // actually expand to fairly large sizes, owing to large numbers of unicode characters.
-const REGEX_SIZE_LIMIT: usize = 65536;
+const GLOB_COMPLEXITY_LIMIT: u64 = 20;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Invalid regex syntax: {0}")]
-    InvalidRegex(String),
-
-    #[error("Regex is too complicated")]
-    RegexTooBig(usize),
+    #[error("Invalid glob: {0}")]
+    InvalidGlob(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,26 +46,10 @@ impl From<&super::Comparison> for Comparison {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum HeaderOperand {
     Literal { value: Value },
-    Regex { value: Regex },
-}
-
-impl Eq for HeaderOperand {}
-
-impl PartialEq for HeaderOperand {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Literal { value: l_value }, Self::Literal { value: r_value }) => {
-                l_value == r_value
-            }
-            (Self::Regex { value: l_value }, Self::Regex { value: r_value }) => {
-                l_value.as_str() == r_value.as_str()
-            }
-            _ => false,
-        }
-    }
+    Glob { value: relay_pattern::Pattern },
 }
 
 impl TryFrom<&super::HeaderOperand> for HeaderOperand {
@@ -79,20 +59,14 @@ impl TryFrom<&super::HeaderOperand> for HeaderOperand {
             super::HeaderOperand::Literal { value } => HeaderOperand::Literal {
                 value: value.into(),
             },
-            super::HeaderOperand::Regex { value } => {
-                let r = RegexBuilder::new(value)
-                    .size_limit(REGEX_SIZE_LIMIT)
+            super::HeaderOperand::Glob { pattern: value } => {
+                let r = relay_pattern::Pattern::builder(&value.value)
+                    .max_complexity(GLOB_COMPLEXITY_LIMIT)
                     .build();
 
                 match r {
-                    Ok(value) => HeaderOperand::Regex { value },
-                    Err(e) => {
-                        return Err(match e {
-                            regex::Error::Syntax(s) => Error::InvalidRegex(s),
-                            regex::Error::CompiledTooBig(s) => Error::RegexTooBig(s),
-                            _ => panic!("unhandled new error"),
-                        })
-                    }
+                    Ok(value) => HeaderOperand::Glob { value },
+                    Err(e) => return Err(Error::InvalidGlob(e.to_string())),
                 }
             }
         };
@@ -166,7 +140,7 @@ where
 {
     header_value
         .parse::<T>()
-        .and_then(|v| Ok(v == *value))
+        .map(|v| v == *value)
         .unwrap_or(false)
 }
 
@@ -176,7 +150,7 @@ where
 {
     header_value
         .parse::<T>()
-        .and_then(|v| Ok(v < *value))
+        .map(|v| v < *value)
         .unwrap_or(false)
 }
 
@@ -186,7 +160,7 @@ where
 {
     header_value
         .parse::<T>()
-        .and_then(|v| Ok(v > *value))
+        .map(|v| v > *value)
         .unwrap_or(false)
 }
 
@@ -197,7 +171,7 @@ fn cmp_eq_header(header_value: &str, test_value: &HeaderOperand) -> bool {
             Value::F64(value) => cmp_eq(header_value, value),
             Value::String(value) => cmp_eq(header_value, value),
         },
-        HeaderOperand::Regex { value } => value.is_match(header_value),
+        HeaderOperand::Glob { value } => value.is_match(header_value),
     }
 }
 
@@ -255,16 +229,16 @@ impl Op {
         &self,
         status_code: u16,
         headers: &hyper::header::HeaderMap<HeaderValue>,
-        body: &str,
+        _body: &str,
     ) -> bool {
         match self {
             Op::And { children } => children
                 .iter()
-                .all(|op| op.eval(status_code, headers, body)),
+                .all(|op| op.eval(status_code, headers, _body)),
             Op::Or { children } => children
                 .iter()
-                .any(|op| op.eval(status_code, headers, body)),
-            Op::Not { operand } => !operand.eval(status_code, headers, body),
+                .any(|op| op.eval(status_code, headers, _body)),
+            Op::Not { operand } => !operand.eval(status_code, headers, _body),
             Op::StatusCodeCheck { value, operator } => match operator {
                 Comparison::LessThan => status_code < *value,
                 Comparison::GreaterThan => status_code > *value,
@@ -296,7 +270,7 @@ fn compile_op(op: &super::Op) -> Result<Op, Error> {
             children: visit_children(children)?,
         },
         super::Op::Not { operand } => Op::Not {
-            operand: Box::new(compile_op(&**operand)?),
+            operand: Box::new(compile_op(operand)?),
         },
         super::Op::StatusCodeCheck { value, operator } => Op::StatusCodeCheck {
             value: *value,
@@ -311,7 +285,7 @@ fn compile_op(op: &super::Op) -> Result<Op, Error> {
     Ok(op)
 }
 
-fn visit_children(children: &Vec<super::Op>) -> Result<Vec<Op>, Error> {
+fn visit_children(children: &[super::Op]) -> Result<Vec<Op>, Error> {
     let mut cs = vec![];
     for c in children.iter() {
         cs.push(compile_op(c)?);
@@ -324,7 +298,7 @@ mod tests {
     use http::{HeaderMap, HeaderValue};
 
     use crate::assertions::{
-        compiled::compile, Assertion, Comparison, HeaderComparison, HeaderOperand, Op,
+        compiled::compile, Assertion, Comparison, GlobPattern, HeaderComparison, HeaderOperand, Op,
     };
 
     #[test]
@@ -352,11 +326,11 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert_eq!(assert.eval(200, &HeaderMap::new(), ""), true);
-        assert_eq!(assert.eval(105, &HeaderMap::new(), ""), false);
-        assert_eq!(assert.eval(95, &HeaderMap::new(), ""), false);
-        assert_eq!(assert.eval(299, &HeaderMap::new(), ""), false);
-        assert_eq!(assert.eval(305, &HeaderMap::new(), ""), false);
+        assert!(assert.eval(200, &HeaderMap::new(), ""));
+        assert!(!assert.eval(105, &HeaderMap::new(), ""));
+        assert!(!assert.eval(95, &HeaderMap::new(), ""));
+        assert!(!assert.eval(299, &HeaderMap::new(), ""));
+        assert!(!assert.eval(305, &HeaderMap::new(), ""));
     }
 
     #[test]
@@ -380,11 +354,11 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert_eq!(assert.eval(200, &HeaderMap::new(), ""), true);
-        assert_eq!(assert.eval(105, &HeaderMap::new(), ""), false);
-        assert_eq!(assert.eval(95, &HeaderMap::new(), ""), true);
-        assert_eq!(assert.eval(299, &HeaderMap::new(), ""), false);
-        assert_eq!(assert.eval(305, &HeaderMap::new(), ""), true);
+        assert!(assert.eval(200, &HeaderMap::new(), ""));
+        assert!(!assert.eval(105, &HeaderMap::new(), ""));
+        assert!(assert.eval(95, &HeaderMap::new(), ""));
+        assert!(!assert.eval(299, &HeaderMap::new(), ""));
+        assert!(assert.eval(305, &HeaderMap::new(), ""));
     }
 
     #[test]
@@ -430,13 +404,13 @@ mod tests {
         };
 
         let assert = compile(&assert).unwrap();
-        assert_eq!(assert.eval(0, &HeaderMap::new(), ""), false);
-        assert_eq!(assert.eval(15, &HeaderMap::new(), ""), true);
-        assert_eq!(assert.eval(100, &HeaderMap::new(), ""), false);
-        assert_eq!(assert.eval(200, &HeaderMap::new(), ""), true);
-        assert_eq!(assert.eval(201, &HeaderMap::new(), ""), true);
-        assert_eq!(assert.eval(202, &HeaderMap::new(), ""), true);
-        assert_eq!(assert.eval(203, &HeaderMap::new(), ""), false);
+        assert!(!assert.eval(0, &HeaderMap::new(), ""));
+        assert!(assert.eval(15, &HeaderMap::new(), ""));
+        assert!(!assert.eval(100, &HeaderMap::new(), ""));
+        assert!(assert.eval(200, &HeaderMap::new(), ""));
+        assert!(assert.eval(201, &HeaderMap::new(), ""));
+        assert!(assert.eval(202, &HeaderMap::new(), ""));
+        assert!(!assert.eval(203, &HeaderMap::new(), ""));
     }
 
     #[test]
@@ -449,22 +423,26 @@ mod tests {
         let assert = Assertion {
             root: Op::HeaderCheck {
                 key: HeaderComparison::Equals {
-                    test_value: HeaderOperand::Regex {
-                        value: r".*-good-\d".into(),
+                    test_value: HeaderOperand::Glob {
+                        pattern: GlobPattern {
+                            value: r"*-good-[0-9]".into(),
+                        },
                     },
                 },
                 value: HeaderComparison::Always,
             },
         };
         let assert = compile(&assert).unwrap();
-        assert_eq!(assert.eval(200, &hmap, ""), true);
+        assert!(assert.eval(200, &hmap, ""));
 
         let assert = Assertion {
             root: Op::Or {
                 children: vec![Op::HeaderCheck {
                     key: HeaderComparison::Equals {
-                        test_value: HeaderOperand::Regex {
-                            value: r".*-good-\d".into(),
+                        test_value: HeaderOperand::Glob {
+                            pattern: GlobPattern {
+                                value: r"*-good-[0-9]".into(),
+                            },
                         },
                     },
                     value: HeaderComparison::Equals {
@@ -474,23 +452,27 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert_eq!(assert.eval(200, &hmap, ""), true);
+        assert!(assert.eval(200, &hmap, ""));
 
         let assert = Assertion {
             root: Op::HeaderCheck {
                 key: HeaderComparison::Equals {
-                    test_value: HeaderOperand::Regex {
-                        value: r".*-good-\d".into(),
+                    test_value: HeaderOperand::Glob {
+                        pattern: GlobPattern {
+                            value: r"*-good-[0-9]".into(),
+                        },
                     },
                 },
                 value: HeaderComparison::Equals {
-                    test_value: HeaderOperand::Regex {
-                        value: r"\d\d".into(),
+                    test_value: HeaderOperand::Glob {
+                        pattern: GlobPattern {
+                            value: r"[0-9][0-9]".into(),
+                        },
                     },
                 },
             },
         };
         let assert = compile(&assert).unwrap();
-        assert_eq!(assert.eval(200, &hmap, ""), false);
+        assert!(!assert.eval(200, &hmap, ""));
     }
 }

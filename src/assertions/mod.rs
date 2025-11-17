@@ -18,10 +18,16 @@ enum Comparison {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+struct GlobPattern {
+    value: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "header_op", rename_all = "snake_case")]
 enum HeaderOperand {
     Literal { value: String },
-    Regex { value: String },
+    Glob { pattern: GlobPattern },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -81,8 +87,10 @@ mod tests {
             "key": {
               "header_cmp": "equals",
               "test_value": {
-                "header_op": "regex",
-                "value": "x-header-\\w+-\\d+"
+                "header_op": "glob",
+                "pattern": {
+                  "value": "x-header-[a-zA-Z]+-[1-9][0-9]*"
+                }
               }
             },
             "value": {
