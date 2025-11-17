@@ -7,8 +7,8 @@ statusProvider:
   name: github
   config:
     contexts:
-      - 'build-amd64'
-      - 'build-arm64'
+      - 'build-multiplatform-image-ghcr-amd64'
+      - 'build-multiplatform-image-ghcr-arm64'
       - 'Create multi-platform manifest'
 
 targets:

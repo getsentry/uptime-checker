@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-multiplatform-image-ghcr:
-    name: build-multiplatform-image-ghcr
+    name: build-multiplatform-image-ghcr-${{ matrix.os }}
     if: ${{ github.repository_owner == 'getsentry' }}
 
     permissions:
