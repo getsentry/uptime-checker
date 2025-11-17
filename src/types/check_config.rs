@@ -1,5 +1,5 @@
 use super::shared::{RegionScheduleMode, RequestMethod};
-use crate::{config_store::Tick, types::assertion::Assertion};
+use crate::config_store::Tick;
 use chrono::{TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -80,10 +80,10 @@ pub struct CheckConfig {
     pub region_schedule_mode: Option<RegionScheduleMode>,
 
     #[serde(default)]
-    pub assertion: Option<Assertion>,
+    pub assertion: Option<crate::assertions::Assertion>,
 
     #[serde(skip)]
-    pub compiled_assertion: Option<crate::types::assertion::compiled::Assertion>,
+    pub compiled_assertion: Option<crate::assertions::compiled::Assertion>,
 }
 
 impl Hash for CheckConfig {
