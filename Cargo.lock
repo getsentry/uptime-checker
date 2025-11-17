@@ -2921,6 +2921,7 @@ dependencies = [
 [[package]]
 name = "relay-pattern"
 version = "25.10.0"
+source = "git+https://github.com/getsentry/relay?rev=7ba03b5f6ffe95c2429ba315f661d2b8ee3c0efe#7ba03b5f6ffe95c2429ba315f661d2b8ee3c0efe"
 dependencies = [
  "memchr",
  "serde",

@@ -62,7 +62,7 @@ hostname = "0.4.0"
 tokio-metrics = "0.4.0"
 iprange = "0.6.7"
 http = "1.2.0"
-relay-pattern = { path = "../relay/relay-pattern" }
+relay-pattern = { git = "https://github.com/getsentry/relay", rev = "7ba03b5f6ffe95c2429ba315f661d2b8ee3c0efe" }
 
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
