@@ -13,14 +13,14 @@ pub enum Error {
     #[error("Invalid glob: {0}")]
     InvalidGlob(String),
 
-    #[error("JSONPath Parser Error")]
+    #[error("JSONPath Parser Error: {msg}")]
     JSONPathParser {
         msg: String,
         path: String,
         pos: usize,
     },
 
-    #[error("Invalid JSONPath")]
+    #[error("Invalid JSONPath: {msg}")]
     InvalidJsonPath { msg: String },
 
     #[error("Assertion took too long")]
@@ -28,6 +28,23 @@ pub enum Error {
 
     #[error("Invalid Body JSON: {0}")]
     InvalidBodyJson(String),
+}
+
+struct Gas(u32);
+
+impl Gas {
+    fn use_gas(&mut self, amount: u32) -> Result<(), Error> {
+        if amount > self.0 {
+            return Err(Error::TookTooLong);
+        }
+        self.0 -= amount;
+
+        Ok(())
+    }
+
+    fn borrow(&mut self) -> &mut u32 {
+        &mut self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +59,7 @@ impl Assertion {
         headers: &hyper::header::HeaderMap<HeaderValue>,
         body: &[u8],
     ) -> Result<bool, Error> {
-        let mut gas = ASSERTION_MAX_GAS;
+        let mut gas = Gas(ASSERTION_MAX_GAS);
         self.root.eval(status_code, headers, body, &mut gas)
     }
 }
@@ -184,19 +201,10 @@ where
         .unwrap_or(false)
 }
 
-fn use_gas(amount: u32, gas: &mut u32) -> Result<(), Error> {
-    if amount > *gas {
-        return Err(Error::TookTooLong);
-    }
-    *gas -= amount;
-
-    Ok(())
-}
-
 fn cmp_eq_header(
     header_value: &str,
     test_value: &HeaderOperand,
-    gas: &mut u32,
+    gas: &mut Gas,
 ) -> Result<bool, Error> {
     let result = match test_value {
         HeaderOperand::Literal { value } => match value {
@@ -206,7 +214,7 @@ fn cmp_eq_header(
         },
         HeaderOperand::Glob { value } => {
             // TODO: either expose, or copy, the complexity metric from relay-pattern.
-            use_gas(5, gas)?;
+            gas.use_gas(5)?;
             value.is_match(header_value)
         }
     };
@@ -215,7 +223,7 @@ fn cmp_eq_header(
 }
 
 impl HeaderComparison {
-    fn eval(&self, header_value: &str, gas: &mut u32) -> Result<bool, Error> {
+    fn eval(&self, header_value: &str, gas: &mut Gas) -> Result<bool, Error> {
         let result = match self {
             HeaderComparison::Always => true,
             HeaderComparison::Never => false,
@@ -274,7 +282,7 @@ impl Op {
         status_code: u16,
         headers: &hyper::header::HeaderMap<HeaderValue>,
         body: &[u8],
-        gas: &mut u32,
+        gas: &mut Gas,
     ) -> Result<bool, Error> {
         let result = match self {
             Op::And { children } => {
@@ -299,7 +307,7 @@ impl Op {
             }
             Op::Not { operand } => !operand.eval(status_code, headers, body, gas)?,
             Op::StatusCodeCheck { value, operator } => {
-                use_gas(1, gas)?;
+                gas.use_gas(1)?;
                 match operator {
                     Comparison::LessThan => status_code < *value,
                     Comparison::GreaterThan => status_code > *value,
@@ -327,7 +335,7 @@ impl Op {
             Op::JsonPath { value } => {
                 let json: serde_json::Value = serde_json::from_slice(body)
                     .map_err(|e| Error::InvalidBodyJson(e.to_string()))?;
-                let result = js_path_process(value, &json, gas)?;
+                let result = js_path_process(value, &json, gas.borrow())?;
                 !result.is_empty()
             }
         };
