@@ -1,3 +1,34 @@
+## 25.11.0
+
+### Various fixes & improvements
+
+- fix(release): Add name to assemble step (#433) by @hubertdeng123
+- fix(self-hosted): Release Fix (#432) by @hubertdeng123
+- feat(uptime): add uptime assertions data model + basic compiler (#416) by @klochek
+- Revert "chore(uptime): Add in better logging around vector (#431)" (77a626b3)
+- chore(uptime): Add in better logging around vector (#431) by @wedamija
+- chore(uptime): Enable canary for all us uptime_regions (#430) by @wedamija
+- chore(uptime): Enable canary for all DE regions, and test in one US region (#429) by @wedamija
+- chore(uptime): Remove canary pre-cleanup step (#428) by @wedamija
+- feat: devservices (#415) by @joshuarli
+- fix(uptime): Properly wait for all canary pods to deploy (#427) by @wedamija
+- chore(uptime): Try canary deploy in one DE pop (#426) by @wedamija
+- feat(uptime): add config and read-only mode for redis client (#413) by @klochek
+- chore(uptime): Consolidate the canary cleanup and deploy stages (#424) by @wedamija
+- chore(uptime): Properly enable all s4s uptime-regions to use the new canary deploy system (#423) by @wedamija
+- feat(uptime): Remove duplicate wait stage (#422) by @wedamija
+- chore(uptime): Tidy up deploy stages. Make sure we deploy to both s4s regions (#421) by @wedamija
+- chore(uptime): Consolidate the deploy/scale canary steps (#420) by @wedamija
+- fix(uptime): Add kubectl authentication to canary stages (#419) by @wedamija
+- fix(uptime): Fix the canary deploy (#418) by @wedamija
+- chore(uptime): Try new deploy pipeline in s4s (#417) by @wedamija
+- feat(uptime): Implement new uptime-checker deploy pipeline (#414) by @wedamija
+- fix(uptime): add better connection-related error stats (#412) by @klochek
+- fix(uptime): disable connection pools to vector (#410) by @klochek
+- feat(uptime): add connection-related vector stats (#409) by @klochek
+
+_Plus 6 more_
+
 ## 25.10.0
 
 ### Various fixes & improvements
