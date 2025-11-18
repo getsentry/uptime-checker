@@ -3,7 +3,10 @@ use jsonpath_rust::{
     parser::{errors::JsonPathError, model::JpQuery, parse_json_path},
     query::js_path_process,
 };
-use std::str::FromStr;
+use std::{
+    borrow::{Borrow, BorrowMut},
+    str::FromStr,
+};
 
 const GLOB_COMPLEXITY_LIMIT: u64 = 20;
 const ASSERTION_MAX_GAS: u32 = 100;
@@ -41,8 +44,16 @@ impl Gas {
 
         Ok(())
     }
+}
 
-    fn borrow(&mut self) -> &mut u32 {
+impl Borrow<u32> for Gas {
+    fn borrow(&self) -> &u32 {
+        &self.0
+    }
+}
+
+impl BorrowMut<u32> for Gas {
+    fn borrow_mut(&mut self) -> &mut u32 {
         &mut self.0
     }
 }
@@ -335,7 +346,7 @@ impl Op {
             Op::JsonPath { value } => {
                 let json: serde_json::Value = serde_json::from_slice(body)
                     .map_err(|e| Error::InvalidBodyJson(e.to_string()))?;
-                let result = js_path_process(value, &json, gas.borrow())?;
+                let result = js_path_process(value, &json, gas.borrow_mut())?;
                 !result.is_empty()
             }
         };
