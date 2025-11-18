@@ -7,6 +7,7 @@ mod check_executor;
 mod checker;
 mod config_store;
 mod config_waiter;
+mod endpoint;
 mod logging;
 mod manager;
 mod metrics;

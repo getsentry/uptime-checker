@@ -16,6 +16,7 @@ use crate::check_config_provider::redis_config_provider::run_config_provider;
 use crate::check_executor::{run_executor, CheckSender, ExecutorConfig};
 use crate::checker::HttpChecker;
 use crate::config_waiter::wait_for_partition_boot;
+use crate::endpoint::start_endpoint;
 use crate::producer::kafka_producer::KafkaResultsProducer;
 use crate::redis::build_redis_client;
 use crate::{
@@ -117,20 +118,24 @@ pub struct Manager {
     tasks_finished_tx: tokio::sync::mpsc::UnboundedSender<Result<(), anyhow::Error>>,
 }
 
-pub struct ManagerShutdown {
+pub struct ManagerHandle {
     tasks_finished_rx: mpsc::UnboundedReceiver<Result<(), anyhow::Error>>,
     shutdown_signal: CancellationToken,
     consumer_join_handle: JoinHandle<()>,
     results_worker: JoinHandle<()>,
     services_join_handle: JoinHandle<()>,
     executor_join_handle: JoinHandle<()>,
+    endpoint_join_handle: JoinHandle<()>,
 }
 
-impl ManagerShutdown {
+impl ManagerHandle {
     pub async fn stop(self) {
         self.shutdown_signal.cancel();
         // Unwrapping here because we're just shutting down; it's okay to fail badly
         // at this point.
+
+        self.endpoint_join_handle.await.unwrap();
+
         self.consumer_join_handle.await.unwrap();
 
         self.results_worker.await.unwrap();
@@ -152,7 +157,7 @@ impl Manager {
     ///
     /// The returned shutdown function may be called to stop the consumer and thus shutdown all
     /// PartitionedService's, stopping check execution.
-    pub fn start(config: Arc<Config>) -> ManagerShutdown {
+    pub fn start(config: Arc<Config>) -> ManagerHandle {
         let checker: Arc<HttpChecker> = Arc::new(match config.checker_mode {
             CheckerMode::Reqwest => ReqwestChecker::new(
                 !config.allow_internal_ips,
@@ -222,7 +227,7 @@ impl Manager {
         let (tasks_finished_tx, tasks_finished_rx) = mpsc::unbounded_channel();
 
         let manager = Arc::new(Self {
-            config,
+            config: config.clone(),
             services: RwLock::new(HashMap::new()),
             executor_sender,
             shutdown_sender,
@@ -249,13 +254,17 @@ impl Manager {
                 .await
         });
 
-        ManagerShutdown {
+        let endpoint_join_handle =
+            start_endpoint(&config, shutdown_signal.clone(), checker.clone());
+
+        ManagerHandle {
             tasks_finished_rx,
             shutdown_signal,
             consumer_join_handle,
             results_worker,
             services_join_handle,
             executor_join_handle,
+            endpoint_join_handle,
         }
     }
 
