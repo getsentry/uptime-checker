@@ -1,14 +1,33 @@
 use http::HeaderValue;
+use jsonpath_rust::{
+    parser::{errors::JsonPathError, model::JpQuery, parse_json_path},
+    query::js_path_process,
+};
 use std::str::FromStr;
 
-// Don't make this any lower--there are some really innoccuous looking regexes (\d, \w) that
-// actually expand to fairly large sizes, owing to large numbers of unicode characters.
 const GLOB_COMPLEXITY_LIMIT: u64 = 20;
+const ASSERTION_MAX_GAS: u32 = 100;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Invalid glob: {0}")]
     InvalidGlob(String),
+
+    #[error("JSONPath Parser Error")]
+    JSONPathParser {
+        msg: String,
+        path: String,
+        pos: usize,
+    },
+
+    #[error("Invalid JSONPath")]
+    InvalidJsonPath { msg: String },
+
+    #[error("Assertion took too long")]
+    TookTooLong,
+
+    #[error("Invalid Body JSON: {0}")]
+    InvalidBodyJson(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,9 +40,10 @@ impl Assertion {
         &self,
         status_code: u16,
         headers: &hyper::header::HeaderMap<HeaderValue>,
-        body: &str,
-    ) -> bool {
-        self.root.eval(status_code, headers, body)
+        body: &[u8],
+    ) -> Result<bool, Error> {
+        let mut gas = ASSERTION_MAX_GAS;
+        self.root.eval(status_code, headers, body, &mut gas)
     }
 }
 
@@ -164,24 +184,47 @@ where
         .unwrap_or(false)
 }
 
-fn cmp_eq_header(header_value: &str, test_value: &HeaderOperand) -> bool {
-    match test_value {
+fn use_gas(amount: u32, gas: &mut u32) -> Result<(), Error> {
+    if amount > *gas {
+        return Err(Error::TookTooLong);
+    }
+    *gas -= amount;
+
+    Ok(())
+}
+
+fn cmp_eq_header(
+    header_value: &str,
+    test_value: &HeaderOperand,
+    gas: &mut u32,
+) -> Result<bool, Error> {
+    let result = match test_value {
         HeaderOperand::Literal { value } => match value {
             Value::I64(value) => cmp_eq(header_value, value),
             Value::F64(value) => cmp_eq(header_value, value),
             Value::String(value) => cmp_eq(header_value, value),
         },
-        HeaderOperand::Glob { value } => value.is_match(header_value),
-    }
+        HeaderOperand::Glob { value } => {
+            // TODO: either expose, or copy, the complexity metric from relay-pattern.
+            use_gas(5, gas)?;
+            value.is_match(header_value)
+        }
+    };
+
+    Ok(result)
 }
 
 impl HeaderComparison {
-    fn eval(&self, header_value: &str) -> bool {
-        match self {
+    fn eval(&self, header_value: &str, gas: &mut u32) -> Result<bool, Error> {
+        let result = match self {
             HeaderComparison::Always => true,
             HeaderComparison::Never => false,
-            HeaderComparison::Equals { test_value } => cmp_eq_header(header_value, test_value),
-            HeaderComparison::NotEquals { test_value } => !cmp_eq_header(header_value, test_value),
+            HeaderComparison::Equals { test_value } => {
+                cmp_eq_header(header_value, test_value, gas)?
+            }
+            HeaderComparison::NotEquals { test_value } => {
+                !cmp_eq_header(header_value, test_value, gas)?
+            }
 
             HeaderComparison::LessThan { test_value } => match test_value {
                 Value::I64(value) => cmp_lt(header_value, value),
@@ -193,11 +236,13 @@ impl HeaderComparison {
                 Value::F64(value) => cmp_gt(header_value, value),
                 Value::String(value) => cmp_gt(header_value, value),
             },
-        }
+        };
+
+        Ok(result)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Op {
     And {
         children: Vec<Op>,
@@ -212,46 +257,82 @@ enum Op {
         value: u16,
         operator: Comparison,
     },
-    // JsonPath {
-    //     value: JsonPathThingy,
-    // },
-    // XmlPath {
-    //     value: XmlPathThingy,
-    // },
+    JsonPath {
+        value: JpQuery,
+    },
     HeaderCheck {
         key: HeaderComparison,
         value: HeaderComparison,
     },
 }
 
+impl Eq for Op {}
+
 impl Op {
     fn eval(
         &self,
         status_code: u16,
         headers: &hyper::header::HeaderMap<HeaderValue>,
-        _body: &str,
-    ) -> bool {
-        match self {
-            Op::And { children } => children
-                .iter()
-                .all(|op| op.eval(status_code, headers, _body)),
-            Op::Or { children } => children
-                .iter()
-                .any(|op| op.eval(status_code, headers, _body)),
-            Op::Not { operand } => !operand.eval(status_code, headers, _body),
-            Op::StatusCodeCheck { value, operator } => match operator {
-                Comparison::LessThan => status_code < *value,
-                Comparison::GreaterThan => status_code > *value,
-                Comparison::Equal => *value == status_code,
-                Comparison::NotEqual => *value != status_code,
-            },
+        body: &[u8],
+        gas: &mut u32,
+    ) -> Result<bool, Error> {
+        let result = match self {
+            Op::And { children } => {
+                let mut result = true;
+                for child in children.iter() {
+                    result &= child.eval(status_code, headers, body, gas)?;
+                    if !result {
+                        break;
+                    }
+                }
+                result
+            }
+            Op::Or { children } => {
+                let mut result = false;
+                for child in children.iter() {
+                    result |= child.eval(status_code, headers, body, gas)?;
+                    if result {
+                        break;
+                    }
+                }
+                result
+            }
+            Op::Not { operand } => !operand.eval(status_code, headers, body, gas)?,
+            Op::StatusCodeCheck { value, operator } => {
+                use_gas(1, gas)?;
+                match operator {
+                    Comparison::LessThan => status_code < *value,
+                    Comparison::GreaterThan => status_code > *value,
+                    Comparison::Equal => *value == status_code,
+                    Comparison::NotEqual => *value != status_code,
+                }
+            }
             Op::HeaderCheck { key, value } => {
                 // Find any header that passes key.  Then, see if it's value passes value.
-                headers
-                    .iter()
-                    .any(|(k, v)| key.eval(k.as_str()) && value.eval(v.to_str().unwrap()))
+                let mut result = false;
+
+                for (k, v) in headers {
+                    if key.eval(k.as_str(), gas)? {
+                        if let Ok(value_str) = v.to_str() {
+                            if value.eval(value_str, gas)? {
+                                result = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                result
             }
-        }
+            Op::JsonPath { value } => {
+                let json: serde_json::Value = serde_json::from_slice(body)
+                    .map_err(|e| Error::InvalidBodyJson(e.to_string()))?;
+                let result = js_path_process(value, &json, gas)?;
+                !result.is_empty()
+            }
+        };
+
+        Ok(result)
     }
 }
 
@@ -280,9 +361,35 @@ fn compile_op(op: &super::Op) -> Result<Op, Error> {
             key: key.try_into()?,
             value: value.try_into()?,
         },
+        super::Op::JsonPath { value } => Op::JsonPath {
+            value: parse_json_path(value)?,
+        },
     };
 
     Ok(op)
+}
+
+impl From<JsonPathError> for Error {
+    fn from(value: JsonPathError) -> Self {
+        match value {
+            JsonPathError::PestError(error) => {
+                let pos = match error.location {
+                    pest::error::InputLocation::Pos(pos) => pos,
+                    pest::error::InputLocation::Span((start, _)) => start,
+                };
+                Error::JSONPathParser {
+                    msg: error.to_string(),
+                    path: error.line().to_owned(),
+                    pos,
+                }
+            }
+            JsonPathError::TookTooLong => Error::TookTooLong,
+            JsonPathError::InvalidGlob(s) => Error::InvalidGlob(s),
+            rest => Error::InvalidJsonPath {
+                msg: rest.to_string(),
+            },
+        }
+    }
 }
 
 fn visit_children(children: &[super::Op]) -> Result<Vec<Op>, Error> {
@@ -325,12 +432,13 @@ mod tests {
                 ],
             },
         };
+
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &HeaderMap::new(), ""));
-        assert!(!assert.eval(105, &HeaderMap::new(), ""));
-        assert!(!assert.eval(95, &HeaderMap::new(), ""));
-        assert!(!assert.eval(299, &HeaderMap::new(), ""));
-        assert!(!assert.eval(305, &HeaderMap::new(), ""));
+        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(105, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(95, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(299, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(305, &HeaderMap::new(), b"").unwrap());
     }
 
     #[test]
@@ -354,11 +462,11 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &HeaderMap::new(), ""));
-        assert!(!assert.eval(105, &HeaderMap::new(), ""));
-        assert!(assert.eval(95, &HeaderMap::new(), ""));
-        assert!(!assert.eval(299, &HeaderMap::new(), ""));
-        assert!(assert.eval(305, &HeaderMap::new(), ""));
+        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(105, &HeaderMap::new(), b"").unwrap());
+        assert!(assert.eval(95, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(299, &HeaderMap::new(), b"").unwrap());
+        assert!(assert.eval(305, &HeaderMap::new(), b"").unwrap());
     }
 
     #[test]
@@ -404,13 +512,146 @@ mod tests {
         };
 
         let assert = compile(&assert).unwrap();
-        assert!(!assert.eval(0, &HeaderMap::new(), ""));
-        assert!(assert.eval(15, &HeaderMap::new(), ""));
-        assert!(!assert.eval(100, &HeaderMap::new(), ""));
-        assert!(assert.eval(200, &HeaderMap::new(), ""));
-        assert!(assert.eval(201, &HeaderMap::new(), ""));
-        assert!(assert.eval(202, &HeaderMap::new(), ""));
-        assert!(!assert.eval(203, &HeaderMap::new(), ""));
+        assert!(!assert.eval(0, &HeaderMap::new(), b"").unwrap());
+        assert!(assert.eval(15, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(100, &HeaderMap::new(), b"").unwrap());
+        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap());
+        assert!(assert.eval(201, &HeaderMap::new(), b"").unwrap());
+        assert!(assert.eval(202, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(203, &HeaderMap::new(), b"").unwrap());
+    }
+
+    #[test]
+    fn test_gas_exhaustion() {
+        let mut hmap = HeaderMap::new();
+        hmap.append("x-header-good", HeaderValue::from_static("0"));
+        hmap.append("x-header-good-a", HeaderValue::from_static("1"));
+        hmap.append("x-header-good-1", HeaderValue::from_static("2"));
+        hmap.append("x-header-good-2", HeaderValue::from_static("0"));
+        hmap.append("x-header-good-b", HeaderValue::from_static("1"));
+        hmap.append("x-header-good-3", HeaderValue::from_static("2"));
+
+        let body = r#"
+  [
+    {
+      "prop1": "aaaaa"
+    },
+    {
+      "prop1": "aa"
+    },
+    {
+      "prop1": "aaaa"
+    },
+    {
+      "prop1": "aaaa"
+    },
+    {
+      "prop1": "aa"
+    },
+    {
+      "prop1": "aaaa"
+    },
+    {
+      "prop1": "aaaaa"
+    }
+  ]
+"#;
+
+        let jsonpath = Op::JsonPath {
+            value: "$[?length(@.prop1) > 4]".to_owned(),
+        };
+        let headercheck = Op::HeaderCheck {
+            key: HeaderComparison::Equals {
+                test_value: HeaderOperand::Glob {
+                    pattern: GlobPattern {
+                        value: "*-good*".to_owned(),
+                    },
+                },
+            },
+            value: HeaderComparison::Always,
+        };
+
+        let assert = Assertion {
+            root: Op::And {
+                children: vec![
+                    jsonpath.clone(),
+                    jsonpath.clone(),
+                    jsonpath.clone(),
+                    jsonpath.clone(),
+                    jsonpath.clone(),
+                    headercheck.clone(),
+                    headercheck.clone(),
+                    headercheck.clone(),
+                    headercheck.clone(),
+                    headercheck.clone(),
+                    headercheck.clone(),
+                ],
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        let result = assert.eval(200, &hmap, body.as_bytes()).err().unwrap();
+        assert!(matches!(result, super::Error::TookTooLong));
+    }
+
+    #[test]
+    fn test_json_path() {
+        let body = r#"
+  [
+    {
+      "prop1": "a"
+    },
+    {
+      "prop1": "aa"
+    },
+    {
+      "prop1": "aaaa"
+    },
+    {
+      "prop1": "aaaaa"
+    }
+  ]
+"#;
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[?length(@.prop1) > 4]".to_owned(),
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap());
+
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[?length(@.prop1) > 10]".to_owned(),
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap());
+
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[?glob(@.prop1, \"a[a-z]*\")]".to_owned(),
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap());
+
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[?glob(@.prop1, \"A[A-Z]*\")]".to_owned(),
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap());
     }
 
     #[test]
@@ -433,7 +674,7 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &hmap, ""));
+        assert!(assert.eval(200, &hmap, b"").unwrap());
 
         let assert = Assertion {
             root: Op::Or {
@@ -452,7 +693,7 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &hmap, ""));
+        assert!(assert.eval(200, &hmap, b"").unwrap());
 
         let assert = Assertion {
             root: Op::HeaderCheck {
@@ -473,6 +714,6 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert!(!assert.eval(200, &hmap, ""));
+        assert!(!assert.eval(200, &hmap, b"").unwrap());
     }
 }
