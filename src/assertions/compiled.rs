@@ -33,7 +33,7 @@ pub enum Error {
 struct Gas(u32);
 
 impl Gas {
-    fn use_gas(&mut self, amount: u32) -> Result<(), Error> {
+    fn consume(&mut self, amount: u32) -> Result<(), Error> {
         if amount > self.0 {
             return Err(Error::TookTooLong);
         }
@@ -214,7 +214,7 @@ fn cmp_eq_header(
         },
         HeaderOperand::Glob { value } => {
             // TODO: either expose, or copy, the complexity metric from relay-pattern.
-            gas.use_gas(5)?;
+            gas.consume(5)?;
             value.is_match(header_value)
         }
     };
@@ -307,7 +307,7 @@ impl Op {
             }
             Op::Not { operand } => !operand.eval(status_code, headers, body, gas)?,
             Op::StatusCodeCheck { value, operator } => {
-                gas.use_gas(1)?;
+                gas.consume(1)?;
                 match operator {
                     Comparison::LessThan => status_code < *value,
                     Comparison::GreaterThan => status_code > *value,
