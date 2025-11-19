@@ -57,12 +57,9 @@ enum Op {
         value: u16,
         operator: Comparison,
     },
-    // JsonPath {
-    //     value: JsonPathThingy,
-    // },
-    // XmlPath {
-    //     value: XmlPathThingy,
-    // },
+    JsonPath {
+        value: String,
+    },
     HeaderCheck {
         key: HeaderComparison,
         value: HeaderComparison,
@@ -82,6 +79,10 @@ mod tests {
       {
         "op": "and",
         "children": [
+          {
+            "op": "json_path",
+            "value": "$[?length(@.prop1) > 4]"
+          },
           {
             "op": "header_check",
             "key": {
