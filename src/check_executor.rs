@@ -38,6 +38,21 @@ pub struct ScheduledCheck {
 }
 
 impl ScheduledCheck {
+    pub fn new(
+        kind: CheckKind,
+        tick: Tick,
+        config: Arc<CheckConfig>,
+        resolve_tx: Sender<Option<CheckResult>>,
+    ) -> ScheduledCheck {
+        ScheduledCheck {
+            kind,
+            tick,
+            config,
+            resolve_tx,
+            retry_count: 0,
+        }
+    }
+
     #[cfg(test)]
     pub fn new_for_test(tick: Tick, config: CheckConfig) -> Self {
         let (resolve_tx, _) = tokio::sync::oneshot::channel();
@@ -284,7 +299,7 @@ async fn executor_loop(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn do_check(
+pub(crate) async fn do_check(
     failure_retries: u16,
     scheduled_check: ScheduledCheck,
     job_checker: Arc<HttpChecker>,
@@ -367,13 +382,15 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
         CheckStatus::MissedWindow => "missed_window",
         CheckStatus::DisallowedByRobots => "disallowed_by_robots",
     };
-    let failure_reason = match status_reason.as_ref().map(|r| r.status_type) {
+    let failure_reason = match status_reason.as_ref().map(|r| &r.status_type) {
         Some(CheckStatusReasonType::Failure) => Some("failure"),
         Some(CheckStatusReasonType::DnsError) => Some("dns_error"),
         Some(CheckStatusReasonType::Timeout) => Some("timeout"),
         Some(CheckStatusReasonType::TlsError) => Some("tls_error"),
         Some(CheckStatusReasonType::ConnectionError) => Some("connection_error"),
         Some(CheckStatusReasonType::RedirectError) => Some("redirect_error"),
+        Some(CheckStatusReasonType::AssertionFailure) => Some("assertion_failure"),
+        Some(CheckStatusReasonType::AssertionError) => Some("assertion_error"),
         None => None,
     };
     let status_code = match request_info.as_ref().and_then(|a| a.http_status_code) {

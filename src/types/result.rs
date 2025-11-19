@@ -31,7 +31,7 @@ pub enum CheckStatus {
 }
 
 /// The status reason result of a failed check
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatusReasonType {
     Timeout,
@@ -40,6 +40,8 @@ pub enum CheckStatusReasonType {
     ConnectionError,
     RedirectError,
     Failure,
+    AssertionError,
+    AssertionFailure,
 }
 
 /// Captures the reason for a check's given status

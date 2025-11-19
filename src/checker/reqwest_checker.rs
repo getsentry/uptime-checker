@@ -6,7 +6,7 @@ use crate::types::{
     check_config::CheckConfig,
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
-use chrono::{TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use openssl::error::ErrorStack;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response, Url};
@@ -16,8 +16,12 @@ use std::net::IpAddr;
 use std::time::Duration;
 use texting_robots::Robot;
 use tokio::time::{timeout, Instant};
+
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
+const ROBOTS_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_ROBOTS_BYTES: usize = 10_000;
+const MAX_BODY_BYTES: usize = 10_000;
 
 /// Responsible for making HTTP requests to check if a domain is up.
 #[derive(Clone, Debug)]
@@ -225,104 +229,82 @@ impl ReqwestChecker {
     }
 }
 
-impl Checker for ReqwestChecker {
-    /// Makes a request to a url to determine whether it is up.
-    /// Up is defined as returning a 2xx within a specific timeframe.
-    #[tracing::instrument]
-    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
-        let scheduled_check_time = check.get_tick().time();
-        let actual_check_time = Utc::now();
-        let span_id = SpanId::default();
-        let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
-        let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
-
-        let start = Instant::now();
-        let response = do_request(&self.client, check.get_config(), &trace_header).await;
-        let duration = TimeDelta::from_std(start.elapsed()).unwrap();
-
-        let status = if response.as_ref().is_ok_and(|r| r.status().is_success()) {
-            CheckStatus::Success
-        } else {
-            CheckStatus::Failure
+async fn read_body_bounded(
+    time_allotment: Duration,
+    max_bytes: usize,
+    start_time: Instant,
+    res: &mut Response,
+) -> Vec<u8> {
+    let mut all_bytes = vec![];
+    loop {
+        let maybe_timeout = timeout(time_allotment - start_time.elapsed(), res.chunk()).await;
+        let Ok(maybe_conn_err) = maybe_timeout else {
+            tracing::info!("waited too long for body");
+            break all_bytes;
         };
-
-        // TODO: this is how to extract the leaf cert from the request we run.
-
-        // let cert = response
-        //     .as_ref()
-        //     .map(|resp| resp.extensions().get::<reqwest::tls::TlsInfo>());
-
-        // if let Ok(Some(cert)) = cert {
-        //     eprintln!(
-        //         "got a cert: {}",
-        //         cert.peer_certificate().map_or(12345, |bytes| bytes.len())
-        //     );
-        // }
-
-        let http_status_code = match &response {
-            Ok(r) => Some(r.status().as_u16()),
-            Err(e) => e.status().map(|s| s.as_u16()),
+        let Ok(maybe_chunk) = maybe_conn_err else {
+            tracing::info!("connection error during body");
+            break all_bytes;
         };
+        let Some(chunk) = maybe_chunk else {
+            break all_bytes;
+        };
+        all_bytes.extend_from_slice(&chunk);
 
-        let rinfos = match &response {
-            Ok(resp) => to_request_info_list(resp.stats(), check.get_config().request_method),
-            Err(err) => {
-                // This is a best-effort at getting timings for the individual bits of a connection-oriented error.
-                // Surfacing the timings for each part of DNS/TCP connect/TLS negotiation _in the event of a
-                // connection error_ will require some effort, so for now, just bill the full time to the part that
-                // we failed on, leaving the others at zero.
-                let zero_timing = Timing {
-                    start_us: actual_check_time.timestamp_micros() as u128,
-                    duration_us: 0,
-                };
+        if all_bytes.len() > max_bytes {
+            tracing::info!("aborting huge body");
+            break all_bytes;
+        }
+    }
+}
 
-                let full_duration = Timing {
-                    start_us: actual_check_time.timestamp_micros() as u128,
-                    duration_us: duration.num_microseconds().unwrap() as u64,
-                };
+fn to_check_status_and_reason(
+    response: Result<Response, reqwest::Error>,
+    check: &ScheduledCheck,
+    body_bytes: &[u8],
+) -> (CheckStatus, Option<CheckStatusReason>) {
+    match response {
+        Ok(r) => match r.status().is_success() {
+            true => {
+                if let Some(assertion) = &check.get_config().compiled_assertion {
+                    let result = assertion.eval(r.status().as_u16(), r.headers(), body_bytes);
 
-                let mut dns_timing = zero_timing;
-                let mut connection_timing = zero_timing;
-                let mut tls_timing = zero_timing;
-                let mut send_request_timing = zero_timing;
-
-                if dns_error(err).is_some() {
-                    dns_timing = full_duration
-                } else if connection_error(err).is_some() {
-                    connection_timing = full_duration
-                } else if tls_error(err).is_some() {
-                    tls_timing = full_duration
+                    match result {
+                        Ok(result) => {
+                            if result {
+                                (CheckStatus::Success, None)
+                            } else {
+                                (
+                                    CheckStatus::Failure,
+                                    Some(CheckStatusReason {
+                                        status_type: CheckStatusReasonType::AssertionFailure,
+                                        description: "Assertion failed".to_string(),
+                                    }),
+                                )
+                            }
+                        }
+                        Err(err) => (
+                            CheckStatus::Failure,
+                            Some(CheckStatusReason {
+                                status_type: CheckStatusReasonType::AssertionError,
+                                description: format!("Assertion errored: {:?}", err).to_string(),
+                            }),
+                        ),
+                    }
                 } else {
-                    send_request_timing = full_duration
-                };
-
-                vec![RequestInfo {
-                    http_status_code,
-                    request_type: check.get_config().request_method,
-                    request_body_size_bytes: check.get_config().request_body.len() as u32,
-                    url: check.get_config().url.clone(),
-                    response_body_size_bytes: 0,
-                    request_duration_us: duration.num_microseconds().unwrap() as u64,
-                    durations: RequestDurations {
-                        dns_lookup: dns_timing,
-                        tcp_connection: connection_timing,
-                        tls_handshake: tls_timing,
-                        time_to_first_byte: zero_timing,
-                        send_request: send_request_timing,
-                        receive_response: zero_timing,
-                    },
-                    certificate_info: None,
-                }]
+                    (CheckStatus::Success, None)
+                }
             }
-        };
-
-        let status_reason = match response {
-            Ok(r) if r.status().is_success() => None,
-            Ok(r) => Some(CheckStatusReason {
-                status_type: CheckStatusReasonType::Failure,
-                description: format!("Got non 2xx status: {}", r.status()),
-            }),
-            Err(e) => Some({
+            false => (
+                CheckStatus::Failure,
+                Some(CheckStatusReason {
+                    status_type: CheckStatusReasonType::Failure,
+                    description: format!("Got non 2xx status: {}", r.status()),
+                }),
+            ),
+        },
+        Err(e) => {
+            let reason = {
                 if e.is_timeout() {
                     CheckStatusReason {
                         status_type: CheckStatusReasonType::Timeout,
@@ -368,8 +350,126 @@ impl Checker for ReqwestChecker {
                         description: format!("{error_msg:?}"),
                     }
                 }
-            }),
+            };
+            (CheckStatus::Failure, Some(reason))
+        }
+    }
+}
+
+fn to_errored_request_infos(
+    actual_check_time: &DateTime<Utc>,
+    start: Instant,
+    err: &reqwest::Error,
+    check: &ScheduledCheck,
+) -> Vec<RequestInfo> {
+    // This is a best-effort at getting timings for the individual bits of a connection-oriented error.
+    // Surfacing the timings for each part of DNS/TCP connect/TLS negotiation _in the event of a
+    // connection error_ will require some effort, so for now, just bill the full time to the part that
+    // we failed on, leaving the others at zero.
+
+    let request_duration =
+        TimeDelta::from_std(start.elapsed()).expect("duration shouldn't be large");
+    let zero_timing = Timing {
+        start_us: actual_check_time.timestamp_micros() as u128,
+        duration_us: 0,
+    };
+
+    let full_duration = Timing {
+        start_us: actual_check_time.timestamp_micros() as u128,
+        duration_us: request_duration.num_microseconds().unwrap() as u64,
+    };
+
+    let mut dns_timing = zero_timing;
+    let mut connection_timing = zero_timing;
+    let mut tls_timing = zero_timing;
+    let mut send_request_timing = zero_timing;
+
+    if dns_error(err).is_some() {
+        dns_timing = full_duration
+    } else if connection_error(err).is_some() {
+        connection_timing = full_duration
+    } else if tls_error(err).is_some() {
+        tls_timing = full_duration
+    } else {
+        send_request_timing = full_duration
+    };
+
+    let http_status_code = err.status().map(|s| s.as_u16());
+
+    vec![RequestInfo {
+        http_status_code,
+        request_type: check.get_config().request_method,
+        request_body_size_bytes: check.get_config().request_body.len() as u32,
+        url: check.get_config().url.clone(),
+        response_body_size_bytes: 0,
+        request_duration_us: request_duration.num_microseconds().unwrap() as u64,
+        durations: RequestDurations {
+            dns_lookup: dns_timing,
+            tcp_connection: connection_timing,
+            tls_handshake: tls_timing,
+            time_to_first_byte: zero_timing,
+            send_request: send_request_timing,
+            receive_response: zero_timing,
+        },
+        certificate_info: None,
+    }]
+}
+
+impl Checker for ReqwestChecker {
+    /// Makes a request to a url to determine whether it is up.
+    /// Up is defined as returning a 2xx within a specific timeframe, along with executing
+    /// an optional user-defined assert that is specified by the user which can use
+    /// the result json, status code, and response header values.
+    #[tracing::instrument]
+    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
+        let scheduled_check_time = check.get_tick().time();
+        let actual_check_time = Utc::now();
+        let span_id = SpanId::default();
+        let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
+        let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
+
+        let start = Instant::now();
+        let mut response: Result<Response, reqwest::Error> =
+            do_request(&self.client, check.get_config(), &trace_header).await;
+
+        // Only wait for the body bytes if we have an assertion that we will be processing.
+        let body_bytes = if check.get_config().compiled_assertion.is_some() && response.is_ok() {
+            let Ok(resp) = &mut response else {
+                unreachable!("enclosing if-statement means this cannot happen");
+            };
+            read_body_bounded(
+                Duration::from_millis(check.get_config().timeout.num_milliseconds() as u64),
+                MAX_BODY_BYTES,
+                start,
+                resp,
+            )
+            .await
+        } else {
+            vec![]
         };
+
+        // TODO: this is how to extract the leaf cert from the request we run.
+
+        // let cert = response
+        //     .as_ref()
+        //     .map(|resp| resp.extensions().get::<reqwest::tls::TlsInfo>());
+
+        // if let Ok(Some(cert)) = cert {
+        //     eprintln!(
+        //         "got a cert: {}",
+        //         cert.peer_certificate().map_or(12345, |bytes| bytes.len())
+        //     );
+        // }
+
+        let rinfos = match &response {
+            Ok(resp) => to_request_info_list(resp.stats(), check.get_config().request_method),
+            Err(err) => to_errored_request_infos(&actual_check_time, start, err, check),
+        };
+
+        let (status, status_reason) = to_check_status_and_reason(response, check, &body_bytes);
+
+        // Our total duration includes the additional processing time, including running the assert.
+        let duration = TimeDelta::from_std(start.elapsed()).expect("duration shouldn't be large");
 
         let final_req = rinfos.last().unwrap().clone();
 
@@ -407,7 +507,7 @@ impl Checker for ReqwestChecker {
             // Request a robots.txt, bounding both the get call as well as the body-stream to a 10 second
             // window.
             let start_time = Instant::now();
-            let time_allotment = Duration::from_secs(10);
+            let time_allotment = ROBOTS_TIMEOUT;
             let res = self
                 .client
                 .get(robots_url)
@@ -420,28 +520,7 @@ impl Checker for ReqwestChecker {
                 return None;
             };
 
-            let mut all_bytes = vec![];
-            loop {
-                let maybe_timeout =
-                    timeout(time_allotment - start_time.elapsed(), res.chunk()).await;
-                let Ok(maybe_conn_err) = maybe_timeout else {
-                    tracing::info!("waited too long for robots.txt");
-                    break all_bytes;
-                };
-                let Ok(maybe_chunk) = maybe_conn_err else {
-                    tracing::info!("connection error during robots.txt");
-                    break all_bytes;
-                };
-                let Some(chunk) = maybe_chunk else {
-                    break all_bytes;
-                };
-                all_bytes.extend_from_slice(&chunk);
-
-                if all_bytes.len() > 100_000 {
-                    tracing::info!(url = %url, "aborting huge robots.txt");
-                    break all_bytes;
-                }
-            }
+            read_body_bounded(time_allotment, MAX_ROBOTS_BYTES, start_time, &mut res).await
         };
 
         let Ok(r) = Robot::new("SentryUptimeBot", &robots_txt) else {
@@ -674,14 +753,9 @@ mod tests {
             result.request_info.and_then(|i| i.http_status_code),
             Some(400)
         );
-        assert_eq!(
-            result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::Failure)
-        );
-        assert_eq!(
-            result.status_reason.map(|r| r.description),
-            Some("Got non 2xx status: 400 Bad Request".to_string())
-        );
+        let reason = result.status_reason.unwrap();
+        assert_eq!(reason.status_type, CheckStatusReasonType::Failure);
+        assert_eq!(reason.description, "Got non 2xx status: 400 Bad Request");
 
         head_mock.assert();
     }
@@ -707,15 +781,9 @@ mod tests {
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
-
-        assert_eq!(
-            result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::DnsError)
-        );
-        assert_eq!(
-            result.status_reason.map(|r| r.description),
-            Some("destination is restricted".to_string())
-        );
+        let reason = result.status_reason.unwrap();
+        assert_eq!(reason.status_type, CheckStatusReasonType::DnsError);
+        assert_eq!(reason.description, "destination is restricted");
     }
 
     #[tokio::test]
@@ -739,15 +807,9 @@ mod tests {
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
-
-        assert_eq!(
-            result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::DnsError)
-        );
-        assert_eq!(
-            result.status_reason.map(|r| r.description),
-            Some("destination is restricted".to_string())
-        );
+        let reason = result.status_reason.unwrap();
+        assert_eq!(reason.status_type, CheckStatusReasonType::DnsError);
+        assert_eq!(reason.description, "destination is restricted");
 
         // Unique Local Address
         let restricted_ipv6_config = CheckConfig {
@@ -960,14 +1022,9 @@ mod tests {
         let result = checker.check_url(&check, "us-west").await;
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
-        assert_eq!(
-            result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::ConnectionError)
-        );
-        assert_eq!(
-            result.status_reason.map(|r| r.description),
-            Some("Connection refused".to_string())
-        );
+        let reason = result.status_reason.unwrap();
+        assert_eq!(reason.status_type, CheckStatusReasonType::ConnectionError);
+        assert_eq!(reason.description, "Connection refused");
     }
 
     #[tokio::test]
@@ -1001,14 +1058,9 @@ mod tests {
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
-        assert_eq!(
-            result.status_reason.as_ref().map(|r| r.status_type),
-            Some(CheckStatusReasonType::RedirectError)
-        );
-        assert_eq!(
-            result.status_reason.map(|r| r.description),
-            Some("Too many redirects".to_string())
-        );
+        let reason = result.status_reason.unwrap();
+        assert_eq!(reason.status_type, CheckStatusReasonType::RedirectError);
+        assert_eq!(reason.description, "Too many redirects");
 
         // Verify that the mock was called at least once
         // The reqwest client follows redirects multiple times before giving up

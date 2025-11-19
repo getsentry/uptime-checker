@@ -3,6 +3,7 @@ use jsonpath_rust::{
     parser::{errors::JsonPathError, model::JpQuery, parse_json_path},
     query::js_path_process,
 };
+use serde::Serialize;
 use std::{
     borrow::{Borrow, BorrowMut},
     str::FromStr,
@@ -11,7 +12,7 @@ use std::{
 const GLOB_COMPLEXITY_LIMIT: u64 = 20;
 const ASSERTION_MAX_GAS: u32 = 100;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Serialize)]
 pub enum Error {
     #[error("Invalid glob: {0}")]
     InvalidGlob(String),
