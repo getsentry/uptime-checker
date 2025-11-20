@@ -65,6 +65,7 @@ iprange = "0.6.7"
 http = "1.2.0"
 relay-pattern = { git = "https://github.com/getsentry/relay", rev = "7ba03b5f6ffe95c2429ba315f661d2b8ee3c0efe" }
 pest = "2.7.15"
+axum = "0.8.6"
 
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }

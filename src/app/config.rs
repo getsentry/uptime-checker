@@ -159,6 +159,8 @@ pub struct Config {
 
     /// Whether this uptime checker will write to redis or not.
     pub redis_readonly: bool,
+
+    pub webserver_port: u16,
 }
 
 impl Default for Config {
@@ -201,6 +203,7 @@ impl Default for Config {
             redis_timeouts_ms: 30_000,
             enable_metrics: false,
             redis_readonly: false,
+            webserver_port: 12345,
         }
     }
 }
@@ -357,6 +360,7 @@ mod tests {
                         redis_timeouts_ms: 30_000,
                         enable_metrics: false,
                         redis_readonly: false,
+                        webserver_port: 12345,
                     }
                 );
             },
@@ -404,6 +408,7 @@ mod tests {
                 ),
                 ("UPTIME_CHECKER_INTERFACE", "eth0"),
                 ("UPTIME_CHECKER_REDIS_READONLY", "true"),
+                ("UPTIME_CHECKER_WEBSERVER_PORT", "81"),
             ],
             |config| {
                 assert_eq!(
@@ -452,6 +457,7 @@ mod tests {
                         redis_timeouts_ms: 30_000,
                         enable_metrics: false,
                         redis_readonly: true,
+                        webserver_port: 81,
                     }
                 );
             },
