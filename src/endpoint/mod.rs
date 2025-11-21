@@ -123,12 +123,14 @@ mod tests {
     async fn test_bad_assertion() {
         let checker = Arc::new(HttpChecker::DummyChecker(DummyChecker::new()));
         let app = new_router(checker.clone(), "region");
-        let mut config = CheckConfig::default();
-        config.assertion = Some(Assertion {
-            root: Op::JsonPath {
-                value: "%&@!#()".to_owned(),
-            },
-        });
+        let config = CheckConfig {
+            assertion: Some(Assertion {
+                root: Op::JsonPath {
+                    value: "%&@!#()".to_owned(),
+                },
+            }),
+            ..Default::default()
+        };
 
         let response = app
             .oneshot(
