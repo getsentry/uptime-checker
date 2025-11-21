@@ -122,13 +122,7 @@ impl CheckSender {
     ) -> anyhow::Result<Receiver<Option<CheckResult>>> {
         let (resolve_tx, resolve_rx) = oneshot::channel();
 
-        let scheduled_check = ScheduledCheck {
-            tick,
-            config,
-            resolve_tx,
-            retry_count: 0,
-            kind: check_kind,
-        };
+        let scheduled_check = ScheduledCheck::new(check_kind, tick, config, resolve_tx);
 
         self.queue_size.fetch_add(1, Ordering::Relaxed);
 

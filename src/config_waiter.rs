@@ -140,7 +140,7 @@ mod tests {
         config_store
             .write()
             .unwrap()
-            .add_config(Arc::new(CheckConfig::default()));
+            .add_config(CheckConfig::default());
 
         // Move time forward to the BOOT_MAX_IDLE. This will NOT mark the boot as complete sicne we
         // just produced a config. We will need to wait another 400ms for it to complete
@@ -152,7 +152,7 @@ mod tests {
         config_store
             .write()
             .unwrap()
-            .add_config(Arc::new(CheckConfig::default()));
+            .add_config(CheckConfig::default());
 
         // Advance past the BOOT_IDLE_TIMEOUT, we will now have finished
         sleep(BOOT_IDLE_TIMEOUT + Duration::from_millis(100)).await;
@@ -182,7 +182,7 @@ mod tests {
         config_store
             .write()
             .unwrap()
-            .add_config(Arc::new(CheckConfig::default()));
+            .add_config(CheckConfig::default());
 
         // Move time forward to the BOOT_MAX_IDLE. This will NOT mark the boot as complete sicne we
         // just produced a config. We will need to wait another 400ms for it to complete
