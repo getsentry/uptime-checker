@@ -5,12 +5,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Assertion {
-    root: Op,
+    pub(crate) root: Op,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "cmp", rename_all = "snake_case")]
-enum Comparison {
+pub(crate) enum Comparison {
     LessThan,
     GreaterThan,
     Equal,
@@ -19,20 +19,20 @@ enum Comparison {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-struct GlobPattern {
-    value: String,
+pub(crate) struct GlobPattern {
+    pub(crate) value: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "header_op", rename_all = "snake_case")]
-enum HeaderOperand {
+pub(crate) enum HeaderOperand {
     Literal { value: String },
     Glob { pattern: GlobPattern },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "header_cmp", rename_all = "snake_case")]
-enum HeaderComparison {
+pub(crate) enum HeaderComparison {
     Always,
     Never,
     Equals { test_value: HeaderOperand },
@@ -43,7 +43,7 @@ enum HeaderComparison {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "snake_case")]
-enum Op {
+pub(crate) enum Op {
     And {
         children: Vec<Op>,
     },

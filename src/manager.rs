@@ -253,7 +253,6 @@ impl Manager {
                 .for_each_concurrent(None, |service| service.stop())
                 .await
         });
-
         let endpoint_join_handle =
             start_endpoint(&config, shutdown_signal.clone(), checker.clone());
 

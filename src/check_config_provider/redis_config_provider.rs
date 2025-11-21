@@ -168,7 +168,7 @@ impl RedisConfigProvider {
                     .get_config_store()
                     .write()
                     .unwrap()
-                    .add_config(Arc::new(config));
+                    .add_config(config);
             }
             let partition_loading_time = partition_start_loading.elapsed().as_secs_f64();
             metrics::histogram!(
@@ -267,7 +267,7 @@ impl RedisConfigProvider {
                         .get_config_store()
                         .write()
                         .unwrap()
-                        .add_config(Arc::new(config));
+                        .add_config(config);
                 }
                 let partition_update_duration = partition_update_start.elapsed().as_secs_f64();
                 metrics::histogram!(
