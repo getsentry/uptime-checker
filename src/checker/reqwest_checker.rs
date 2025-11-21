@@ -991,16 +991,13 @@ mod tests {
                 None,
                 "Test case: {cert_type:?}",
             );
+            let reason = result.status_reason.unwrap();
             assert_eq!(
-                result.status_reason.as_ref().map(|r| r.status_type),
-                Some(CheckStatusReasonType::TlsError),
+                reason.status_type,
+                CheckStatusReasonType::TlsError,
                 "Test case: {cert_type:?}",
             );
-            assert_eq!(
-                result.status_reason.map(|r| r.description).unwrap(),
-                expected_msg,
-                "Test case: {cert_type:?}",
-            );
+            assert_eq!(reason.description, expected_msg, "Test case: {cert_type:?}",);
         }
     }
 
@@ -1199,11 +1196,10 @@ mod tests {
 
         assert_eq!(result.status, CheckStatus::Failure);
         assert_eq!(result.request_info.and_then(|i| i.http_status_code), None);
+        let reason = result.status_reason.unwrap();
         assert!(
-            result.status_reason.as_ref().map(|r| r.status_type)
-                == Some(CheckStatusReasonType::ConnectionError)
-                || result.status_reason.as_ref().map(|r| r.status_type)
-                    == Some(CheckStatusReasonType::Failure)
+            reason.status_type == CheckStatusReasonType::ConnectionError
+                || reason.status_type == CheckStatusReasonType::Failure
         );
     }
 
