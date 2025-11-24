@@ -237,7 +237,11 @@ async fn read_body_bounded(
 ) -> Vec<u8> {
     let mut all_bytes = vec![];
     loop {
-        let maybe_timeout = timeout(time_allotment - start_time.elapsed(), res.chunk()).await;
+        let maybe_timeout = timeout(
+            time_allotment.saturating_sub(start_time.elapsed()),
+            res.chunk(),
+        )
+        .await;
         let Ok(maybe_conn_err) = maybe_timeout else {
             tracing::info!("waited too long for body");
             break all_bytes;
