@@ -35,6 +35,9 @@ pub struct ScheduledCheck {
     resolve_tx: Sender<Option<CheckResult>>,
     /// The number of times this scheduled check has been retried
     retry_count: u16,
+
+    // The utc timestamp this check was sent to the executor queue.
+    enqueue_ms: i64,
 }
 
 impl ScheduledCheck {
@@ -47,6 +50,7 @@ impl ScheduledCheck {
             config: config.into(),
             resolve_tx,
             retry_count: 0,
+            enqueue_ms: 0,
         }
     }
 
@@ -106,13 +110,14 @@ impl CheckSender {
         check_kind: CheckKind,
     ) -> anyhow::Result<Receiver<Option<CheckResult>>> {
         let (resolve_tx, resolve_rx) = oneshot::channel();
-
+        let enqueue_ms = chrono::Utc::now().timestamp_millis();
         let scheduled_check = ScheduledCheck {
             tick,
             config,
             resolve_tx,
             retry_count: 0,
             kind: check_kind,
+            enqueue_ms,
         };
 
         self.queue_size.fetch_add(1, Ordering::Relaxed);
@@ -324,7 +329,12 @@ async fn do_check(
     let will_retry = check_result.status == CheckStatus::Failure
         && scheduled_check.retry_count < failure_retries;
 
-    record_result_metrics(&check_result, scheduled_check.retry_count > 0, will_retry);
+    record_result_metrics(
+        &check_result,
+        scheduled_check.retry_count > 0,
+        will_retry,
+        scheduled_check.enqueue_ms,
+    );
 
     // re-queue for execution again
     if will_retry {
@@ -349,7 +359,7 @@ async fn do_check(
         .expect("Check recording channel should exist");
 }
 
-fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool) {
+fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool, enqueue_ms: i64) {
     // Record metrics
     let CheckResult {
         status,
@@ -398,6 +408,26 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
         )
         .record(duration.to_std().unwrap_or_default().as_secs_f64());
     }
+
+    // The difference between when a check was enqueued to the executor, and the start of the tick.
+    let schedule_delay = enqueue_ms - scheduled_check_time.timestamp_millis();
+
+    // The difference between when a check began executing, and when it was enqueued to the executor.
+    let executor_delay = actual_check_time.timestamp_millis() - enqueue_ms;
+
+    metrics::histogram!(
+        "check_result.schedule_delay",
+        "histogram" => "timer",
+        "uptime_region" => result.region,
+    )
+    .record(schedule_delay as f64);
+
+    metrics::histogram!(
+        "check_result.executor_delay",
+        "histogram" => "timer",
+        "uptime_region" => result.region,
+    )
+    .record(executor_delay as f64);
 
     // Record time between scheduled and actual check
     let delay = (*actual_check_time - *scheduled_check_time)
