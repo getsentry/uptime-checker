@@ -1021,13 +1021,16 @@ mod tests {
             format!("https://localhost:{}", addr.port())
         }
 
-        let checker = ReqwestChecker::new_internal(Options {
-            validate_url: false,
-            disable_connection_reuse: true,
-            dns_nameservers: None,
-            pool_idle_timeout: Duration::from_secs(90),
-            interface: None,
-        });
+        let checker = ReqwestChecker::new_internal(
+            Options {
+                validate_url: false,
+                disable_connection_reuse: true,
+                dns_nameservers: None,
+                pool_idle_timeout: Duration::from_secs(90),
+                interface: None,
+            },
+            assertions::cache::Cache::new(),
+        );
         let tick = make_tick();
 
         // Test various SSL certificate errors
@@ -1260,13 +1263,16 @@ mod tests {
             }
         });
 
-        let checker = ReqwestChecker::new_internal(Options {
-            validate_url: false,
-            disable_connection_reuse: true,
-            dns_nameservers: None,
-            pool_idle_timeout: Duration::from_secs(90),
-            interface: None,
-        });
+        let checker = ReqwestChecker::new_internal(
+            Options {
+                validate_url: false,
+                disable_connection_reuse: true,
+                dns_nameservers: None,
+                pool_idle_timeout: Duration::from_secs(90),
+                interface: None,
+            },
+            assertions::cache::Cache::new(),
+        );
         let tick = make_tick();
         let config = CheckConfig {
             url: format!("http://localhost:{}", addr.port()),
