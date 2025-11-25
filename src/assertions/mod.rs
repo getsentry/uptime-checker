@@ -1,14 +1,15 @@
+pub mod cache;
 pub mod compiled;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub struct Assertion {
     pub(crate) root: Op,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "cmp", rename_all = "snake_case")]
 pub(crate) enum Comparison {
     LessThan,
@@ -17,20 +18,20 @@ pub(crate) enum Comparison {
     NotEqual,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct GlobPattern {
     pub(crate) value: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "header_op", rename_all = "snake_case")]
 pub(crate) enum HeaderOperand {
     Literal { value: String },
     Glob { pattern: GlobPattern },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "header_cmp", rename_all = "snake_case")]
 pub(crate) enum HeaderComparison {
     Always,
@@ -41,7 +42,7 @@ pub(crate) enum HeaderComparison {
     GreaterThan { test_value: String },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub(crate) enum Op {
     And {

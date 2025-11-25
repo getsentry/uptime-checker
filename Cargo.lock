@@ -142,6 +142,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "associative-cache"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b993cd767a2bc7307dd87622311ca22c44329cc7a21366206bfa0896827b2bad"
+
+[[package]]
 name = "async-attributes"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1757,7 +1763,7 @@ dependencies = [
  "hyper 1.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.1",
  "tokio",
  "tower-service",
  "tracing",
@@ -4717,6 +4723,7 @@ name = "uptime-checker"
 version = "25.11.0"
 dependencies = [
  "anyhow",
+ "associative-cache",
  "axum 0.8.7",
  "chrono",
  "clap",

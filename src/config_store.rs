@@ -1,4 +1,3 @@
-use crate::assertions::compiled::compile;
 use crate::types::check_config::{CheckConfig, MAX_CHECK_INTERVAL_SECS};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
@@ -97,20 +96,9 @@ impl ConfigStore {
     }
 
     /// Insert a new Check Configuration into the store.
-    pub fn add_config(&mut self, mut config: CheckConfig) {
+    pub fn add_config(&mut self, config: CheckConfig) {
         if self.configs.contains_key(&config.subscription_id) {
             self.remove_config(config.subscription_id);
-        }
-
-        if let Some(assertion) = &config.assertion {
-            match compile(assertion) {
-                Ok(compiled) => config.compiled_assertion = Some(compiled),
-                Err(err) => tracing::warn!(
-                    "A bad assertion made it to compilation: {} : {:?}",
-                    err.to_string(),
-                    config
-                ),
-            }
         }
 
         let config = Arc::new(config);

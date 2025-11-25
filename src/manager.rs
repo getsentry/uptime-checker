@@ -12,6 +12,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::app::config::{CheckerMode, ConfigProviderMode, ProducerMode};
+use crate::assertions;
 use crate::check_config_provider::redis_config_provider::run_config_provider;
 use crate::check_executor::{run_executor, CheckSender, ExecutorConfig};
 use crate::checker::HttpChecker;
@@ -165,6 +166,7 @@ impl Manager {
                 Duration::from_secs(config.pool_idle_timeout_secs),
                 config.http_checker_dns_nameservers.clone(),
                 config.interface.to_owned(),
+                assertions::cache::Cache::new(),
             )
             .into(),
         });
