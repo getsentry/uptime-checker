@@ -280,116 +280,125 @@ fn to_check_status_and_reason(
     subscription_id: &Uuid,
 ) -> (CheckStatus, Option<CheckStatusReason>) {
     match response {
-        Ok(r) => match r.status().is_success() {
-            true => {
-                if let Some(assertion) = &check.get_config().assertion {
-                    let comp_assert = assert_cache.get_or_compile(assertion);
-
-                    match comp_assert {
-                        Ok(assertion) => {
-                            let result =
-                                assertion.eval(r.status().as_u16(), r.headers(), body_bytes);
-
-                            match result {
-                                Ok(result) => {
-                                    if result {
-                                        (CheckStatus::Success, None)
-                                    } else {
-                                        (
-                                            CheckStatus::Failure,
-                                            Some(CheckStatusReason {
-                                                status_type:
-                                                    CheckStatusReasonType::AssertionFailure,
-                                                description: "Assertion failed".to_string(),
-                                            }),
-                                        )
-                                    }
-                                }
-                                Err(err) => (
-                                    CheckStatus::Failure,
-                                    Some(CheckStatusReason {
-                                        status_type: CheckStatusReasonType::AssertionError,
-                                        description: err.to_string(),
-                                    }),
-                                ),
-                            }
-                        }
-                        Err(err) => {
-                            tracing::warn!(
-                                "a bad assertion made it to compile from {} : {}",
-                                subscription_id,
-                                err.to_string(),
-                            );
-                            (
-                                CheckStatus::Failure,
-                                Some(CheckStatusReason {
-                                    status_type: CheckStatusReasonType::AssertionError,
-                                    description: err.to_string(),
-                                }),
-                            )
-                        }
-                    }
-                } else {
-                    (CheckStatus::Success, None)
+        Ok(r) => {
+            if let Some(assertion) = &check.get_config().assertion {
+                run_assertion(assert_cache, body_bytes, subscription_id, &r, assertion)
+            } else {
+                match r.status().is_success() {
+                    true => (CheckStatus::Success, None),
+                    false => (
+                        CheckStatus::Failure,
+                        Some(CheckStatusReason {
+                            status_type: CheckStatusReasonType::Failure,
+                            description: format!("Got non 2xx status: {}", r.status()),
+                        }),
+                    ),
                 }
             }
-            false => (
-                CheckStatus::Failure,
-                Some(CheckStatusReason {
-                    status_type: CheckStatusReasonType::Failure,
-                    description: format!("Got non 2xx status: {}", r.status()),
-                }),
-            ),
-        },
+        }
         Err(e) => {
-            let reason = {
-                if e.is_timeout() {
-                    CheckStatusReason {
-                        status_type: CheckStatusReasonType::Timeout,
-                        description: "Request timed out".to_string(),
-                    }
-                } else if e.is_redirect() {
-                    CheckStatusReason {
-                        status_type: CheckStatusReasonType::RedirectError,
-                        description: "Too many redirects".to_string(),
-                    }
-                } else if let Some(message) = dns_error(&e) {
-                    CheckStatusReason {
-                        status_type: CheckStatusReasonType::DnsError,
-                        description: message,
-                    }
-                } else if let Some(message) = tls_error(&e) {
-                    CheckStatusReason {
-                        status_type: CheckStatusReasonType::TlsError,
-                        description: message,
-                    }
-                } else if let Some(message) = connection_error(&e) {
-                    CheckStatusReason {
-                        status_type: CheckStatusReasonType::ConnectionError,
-                        description: message,
-                    }
-                } else if let Some((status_type, message)) = hyper_error(&e) {
-                    CheckStatusReason {
-                        status_type,
-                        description: message,
-                    }
-                } else if let Some((status_type, message)) = hyper_util_error(&e) {
-                    CheckStatusReason {
-                        status_type,
-                        description: message,
-                    }
-                } else {
-                    // if any error falls through we should log it,
-                    // none should fall through.
-                    let error_msg = e.without_url();
-                    tracing::info!("check_url.error: {:?}", error_msg);
-                    CheckStatusReason {
-                        status_type: CheckStatusReasonType::Failure,
-                        description: format!("{error_msg:?}"),
-                    }
-                }
-            };
+            let reason: CheckStatusReason = e.into();
             (CheckStatus::Failure, Some(reason))
+        }
+    }
+}
+
+fn run_assertion(
+    assert_cache: &assertions::cache::Cache,
+    body_bytes: &[u8],
+    subscription_id: &Uuid,
+    r: &Response,
+    assertion: &assertions::Assertion,
+) -> (CheckStatus, Option<CheckStatusReason>) {
+    let comp_assert = assert_cache.get_or_compile(assertion);
+
+    if let Err(err) = comp_assert {
+        tracing::warn!(
+            "a bad assertion made it to compile from {} : {}",
+            subscription_id,
+            err.to_string(),
+        );
+        return (
+            CheckStatus::Failure,
+            Some(CheckStatusReason {
+                status_type: CheckStatusReasonType::AssertionError,
+                description: err.to_string(),
+            }),
+        );
+    }
+    let assertion = comp_assert.expect("already tested above");
+
+    let result = assertion.eval(r.status().as_u16(), r.headers(), body_bytes);
+    match result {
+        Ok(result) => {
+            if result {
+                (CheckStatus::Success, None)
+            } else {
+                (
+                    CheckStatus::Failure,
+                    Some(CheckStatusReason {
+                        status_type: CheckStatusReasonType::AssertionFailure,
+                        description: "Assertion failed".to_string(),
+                    }),
+                )
+            }
+        }
+        Err(err) => (
+            CheckStatus::Failure,
+            Some(CheckStatusReason {
+                status_type: CheckStatusReasonType::AssertionError,
+                description: err.to_string(),
+            }),
+        ),
+    }
+}
+
+impl From<reqwest::Error> for CheckStatusReason {
+    fn from(e: reqwest::Error) -> Self {
+        if e.is_timeout() {
+            CheckStatusReason {
+                status_type: CheckStatusReasonType::Timeout,
+                description: "Request timed out".to_string(),
+            }
+        } else if e.is_redirect() {
+            CheckStatusReason {
+                status_type: CheckStatusReasonType::RedirectError,
+                description: "Too many redirects".to_string(),
+            }
+        } else if let Some(message) = dns_error(&e) {
+            CheckStatusReason {
+                status_type: CheckStatusReasonType::DnsError,
+                description: message,
+            }
+        } else if let Some(message) = tls_error(&e) {
+            CheckStatusReason {
+                status_type: CheckStatusReasonType::TlsError,
+                description: message,
+            }
+        } else if let Some(message) = connection_error(&e) {
+            CheckStatusReason {
+                status_type: CheckStatusReasonType::ConnectionError,
+                description: message,
+            }
+        } else if let Some((status_type, message)) = hyper_error(&e) {
+            CheckStatusReason {
+                status_type,
+                description: message,
+            }
+        } else if let Some((status_type, message)) = hyper_util_error(&e) {
+            CheckStatusReason {
+                status_type,
+                description: message,
+            }
+        } else {
+            // if any error falls through we should log it,
+            // none should fall through.
+            let error_msg = e.without_url();
+            tracing::info!("check_url.error: {:?}", error_msg);
+            CheckStatusReason {
+                status_type: CheckStatusReasonType::Failure,
+                description: format!("{error_msg:?}"),
+            }
         }
     }
 }

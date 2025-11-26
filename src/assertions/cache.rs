@@ -51,13 +51,10 @@ impl Cache {
         &self,
         key: &assertions::Assertion,
     ) -> Result<Arc<compiled::Assertion>, compiled::Error> {
-        {
-            let rl = self.compiled.read().expect("not poisoned");
-
-            if let Some(entry) = rl.get(key) {
-                return Ok(entry.assertion.clone());
-            }
+        if let Some(entry) = self.compiled.read().expect("not poisoned").get(key) {
+            return Ok(entry.assertion.clone());
         }
+
         let comp = compiled::compile(key);
         match comp {
             Ok(comp) => {
