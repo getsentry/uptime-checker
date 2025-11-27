@@ -31,7 +31,7 @@ pub enum CheckStatus {
 }
 
 /// The status reason result of a failed check
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatusReasonType {
     Timeout,
@@ -40,6 +40,23 @@ pub enum CheckStatusReasonType {
     ConnectionError,
     RedirectError,
     Failure,
+    AssertionError,
+    AssertionFailure,
+}
+
+impl CheckStatusReasonType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CheckStatusReasonType::Timeout => "timeout",
+            CheckStatusReasonType::DnsError => "dns_error",
+            CheckStatusReasonType::TlsError => "tls_error",
+            CheckStatusReasonType::ConnectionError => "connection_error",
+            CheckStatusReasonType::RedirectError => "redirect_error",
+            CheckStatusReasonType::Failure => "failure",
+            CheckStatusReasonType::AssertionError => "assertion_error",
+            CheckStatusReasonType::AssertionFailure => "assertion_failure",
+        }
+    }
 }
 
 /// Captures the reason for a check's given status

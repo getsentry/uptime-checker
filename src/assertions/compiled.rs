@@ -3,6 +3,7 @@ use jsonpath_rust::{
     parser::{errors::JsonPathError, model::JpQuery, parse_json_path},
     query::js_path_process,
 };
+use serde::Serialize;
 use std::{
     borrow::{Borrow, BorrowMut},
     str::FromStr,
@@ -11,7 +12,7 @@ use std::{
 const GLOB_COMPLEXITY_LIMIT: u64 = 20;
 const ASSERTION_MAX_GAS: u32 = 100;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Serialize)]
 pub enum Error {
     #[error("Invalid glob: {0}")]
     InvalidGlob(String),
@@ -58,7 +59,7 @@ impl BorrowMut<u32> for Gas {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Assertion {
     root: Op,
 }
@@ -75,7 +76,7 @@ impl Assertion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum Comparison {
     LessThan,
     GreaterThan,
@@ -94,7 +95,7 @@ impl From<&super::Comparison> for Comparison {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum HeaderOperand {
     Literal { value: Value },
     Glob { value: relay_pattern::Pattern },
@@ -123,7 +124,7 @@ impl TryFrom<&super::HeaderOperand> for HeaderOperand {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Value {
     I64(i64),
     F64(f64),
@@ -132,7 +133,7 @@ enum Value {
 
 impl Eq for Value {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum HeaderComparison {
     Always,
     Never,
@@ -261,7 +262,7 @@ impl HeaderComparison {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Op {
     And {
         children: Vec<Op>,

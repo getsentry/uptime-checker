@@ -81,9 +81,6 @@ pub struct CheckConfig {
 
     #[serde(default)]
     pub assertion: Option<assertions::Assertion>,
-
-    #[serde(skip)]
-    pub compiled_assertion: Option<assertions::compiled::Assertion>,
 }
 
 impl Hash for CheckConfig {
@@ -191,7 +188,6 @@ mod tests {
                 active_regions: None,
                 region_schedule_mode: None,
                 assertion: None,
-                compiled_assertion: None,
             }
         }
     }
@@ -237,7 +233,6 @@ mod tests {
                 active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
                 assertion: None,
-                compiled_assertion: None,
             }
         );
     }
@@ -294,7 +289,6 @@ mod tests {
                 active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
                 assertion: None,
-                compiled_assertion: None,
             }
         );
     }
