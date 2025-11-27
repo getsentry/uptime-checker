@@ -364,11 +364,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(*scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(*scheduled_check2.get_config().clone(), config2);
+        assert_eq!(**scheduled_check2.get_config(), config2);
 
         // The second tick should have been scheduled two seconds after the first tick since it is
         // two buckets after the first tick.
@@ -501,7 +501,7 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(*scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         // Record results for both to complete both ticks
         scheduled_check1
@@ -599,11 +599,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(*scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(*scheduled_check2.get_config().clone(), config2);
+        assert_eq!(**scheduled_check2.get_config(), config2);
 
         // The second tick should have been scheduled 62 seconds after the first tick since it is
         // two buckets after the first tick, but in an alternating region
@@ -725,11 +725,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(*scheduled_check1.get_config().clone(), config2);
+        assert_eq!(**scheduled_check1.get_config(), config2);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(*scheduled_check2.get_config().clone(), config1);
+        assert_eq!(**scheduled_check2.get_config(), config1);
 
         // The second tick should have been scheduled 58 seconds after the first tick since it is
         // 58 buckets after the first tick.
@@ -848,7 +848,7 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(*scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         // Record results for both to complete both ticks
         scheduled_check1
@@ -936,11 +936,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(*scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(*scheduled_check2.get_config().clone(), config2);
+        assert_eq!(**scheduled_check2.get_config(), config2);
 
         // The second tick should have been scheduled two seconds after the first tick since it is
         // two buckets after the first tick.
