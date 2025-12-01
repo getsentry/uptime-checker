@@ -1,3 +1,11 @@
+## 25.11.1
+
+### New Features ✨
+
+- feat(uptime): add assertion checks to check_executor by @klochek in [#437](https://github.com/getsentry/uptime-checker/pull/437)
+- feat(uptime): basic http endpoint by @klochek in [#435](https://github.com/getsentry/uptime-checker/pull/435)
+- feat(uptime): add jsonpath to assertion; add "gas" concept to assertion by @klochek in [#434](https://github.com/getsentry/uptime-checker/pull/434)
+
 ## 25.11.0
 
 ### Various fixes & improvements
