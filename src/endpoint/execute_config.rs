@@ -16,9 +16,9 @@ use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-// We need a trivial result producer to pass into the checker; we're not recording
-// anything from it (we're using the other channel we send results to, normally
-// for setting the redis high-water mark), so it's okay to just make it a no-op.
+/// We need a trivial result producer to pass into the checker; we're not recording
+/// anything from it (we're using the other channel we send results to, normally
+/// for setting the redis high-water mark), so it's okay to just make it a no-op.
 pub struct EndpointResultProducer {}
 
 impl EndpointResultProducer {
