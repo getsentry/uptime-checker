@@ -1,5 +1,6 @@
 pub mod dummy_producer;
 pub mod kafka_producer;
+pub mod noop_producer;
 pub mod vector_producer;
 
 use sentry_kafka_schemas::SchemaError;

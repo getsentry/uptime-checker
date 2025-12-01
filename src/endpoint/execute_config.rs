@@ -2,7 +2,7 @@ use crate::{
     check_executor::{do_check, CheckSender, ScheduledCheck},
     config_store::Tick,
     endpoint::EndpointState,
-    producer::{ExtractCodeError, ResultsProducer},
+    producer::noop_producer::NoopResultsProducer,
     types::{check_config::CheckConfig, result::CheckResult},
 };
 use axum::{
@@ -15,23 +15,6 @@ use http::StatusCode;
 use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-
-/// We need a trivial result producer to pass into the checker; we're not recording
-/// anything from it (we're using the other channel we send results to, normally
-/// for setting the redis high-water mark), so it's okay to just make it a no-op.
-pub struct EndpointResultProducer {}
-
-impl EndpointResultProducer {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl ResultsProducer for EndpointResultProducer {
-    fn produce_checker_result(&self, _: &CheckResult) -> Result<(), ExtractCodeError> {
-        Ok(())
-    }
-}
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "error")]
@@ -92,7 +75,10 @@ pub(crate) async fn execute_config(
         Arc::new(check_config),
         resolve_tx,
     );
-    let producer = Arc::new(EndpointResultProducer::new());
+
+    // We aren't going to produce the result to anything; we'll use the resolve_rx channel
+    // to await the CheckResult here in the endpoint.
+    let producer = Arc::new(NoopResultsProducer::new());
 
     do_check(
         0,
