@@ -326,14 +326,14 @@ mod tests {
 
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(435),
             ..Default::default()
-        });
-        let config2 = Arc::new(CheckConfig {
+        };
+        let config2 = CheckConfig {
             subscription_id: Uuid::from_u128(14),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -364,11 +364,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(scheduled_check2.get_config().clone(), config2);
+        assert_eq!(**scheduled_check2.get_config(), config2);
 
         // The second tick should have been scheduled two seconds after the first tick since it is
         // two buckets after the first tick.
@@ -467,12 +467,12 @@ mod tests {
             .expect("Couldn't save progress of scheduler");
 
         let config_store = Arc::new(ConfigStore::new_rw());
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(2500),
             active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -501,7 +501,7 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         // Record results for both to complete both ticks
         scheduled_check1
@@ -558,18 +558,18 @@ mod tests {
         // `<val> % active_regions.length() == 1` so that it's in us_east.
         // Note: These numbers are chosen so that the uuid5 we generate for them modulos to 1/3
         // respectively, and places them in the same slot.
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(2500),
             active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
-        });
-        let config2 = Arc::new(CheckConfig {
+        };
+        let config2 = CheckConfig {
             subscription_id: Uuid::from_u128(1317),
             active_regions: Some(vec!["us_east".to_string(), "us_west".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -599,11 +599,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(scheduled_check2.get_config().clone(), config2);
+        assert_eq!(**scheduled_check2.get_config(), config2);
 
         // The second tick should have been scheduled 62 seconds after the first tick since it is
         // two buckets after the first tick, but in an alternating region
@@ -687,14 +687,14 @@ mod tests {
 
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(435),
             ..Default::default()
-        });
-        let config2 = Arc::new(CheckConfig {
+        };
+        let config2 = CheckConfig {
             subscription_id: Uuid::from_u128(14),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -725,11 +725,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config2);
+        assert_eq!(**scheduled_check1.get_config(), config2);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(scheduled_check2.get_config().clone(), config1);
+        assert_eq!(**scheduled_check2.get_config(), config1);
 
         // The second tick should have been scheduled 58 seconds after the first tick since it is
         // 58 buckets after the first tick.
@@ -815,10 +815,10 @@ mod tests {
 
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(1),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -848,7 +848,7 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         // Record results for both to complete both ticks
         scheduled_check1
@@ -898,14 +898,14 @@ mod tests {
 
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(435),
             ..Default::default()
-        });
-        let config2 = Arc::new(CheckConfig {
+        };
+        let config2 = CheckConfig {
             subscription_id: Uuid::from_u128(14),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -936,11 +936,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(scheduled_check2.get_config().clone(), config2);
+        assert_eq!(**scheduled_check2.get_config(), config2);
 
         // The second tick should have been scheduled two seconds after the first tick since it is
         // two buckets after the first tick.

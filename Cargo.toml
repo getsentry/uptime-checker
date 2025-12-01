@@ -65,7 +65,8 @@ iprange = "0.6.7"
 http = "1.2.0"
 relay-pattern = { git = "https://github.com/getsentry/relay", rev = "7ba03b5f6ffe95c2429ba315f661d2b8ee3c0efe" }
 pest = "2.7.15"
-axum = "0.8.6"
+axum = { version = "0.8.6", features = ["macros"] }
+associative-cache = "2.0.0"
 
 [patch.crates-io]
 rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
@@ -82,3 +83,5 @@ redis-test-macro = { path = "./redis-test-macro" }
 ntest = "0.9.3"
 socket-server-mocker = "0.5.0"
 httpmock = "0.7.0-rc.1"
+tower = { version = "0.5.2", features = ["util"] }
+http-body-util = "0.1.0"

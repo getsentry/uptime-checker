@@ -142,6 +142,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "associative-cache"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b993cd767a2bc7307dd87622311ca22c44329cc7a21366206bfa0896827b2bad"
+
+[[package]]
 name = "async-attributes"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -424,6 +430,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b098575ebe77cb6d14fc7f32749631a6e44edbef6b796f89b020e99ba20d425"
 dependencies = [
  "axum-core 0.5.5",
+ "axum-macros",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -487,6 +494,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "604fde5e028fea851ce1d8570bbdc034bec850d157f7569d10f347d06808c05c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
 ]
 
 [[package]]
@@ -1745,7 +1763,7 @@ dependencies = [
  "hyper 1.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.1",
  "tokio",
  "tower-service",
  "tracing",
@@ -4705,6 +4723,7 @@ name = "uptime-checker"
 version = "25.11.0"
 dependencies = [
  "anyhow",
+ "associative-cache",
  "axum 0.8.7",
  "chrono",
  "clap",
@@ -4715,6 +4734,7 @@ dependencies = [
  "hickory-resolver",
  "hostname 0.4.0",
  "http 1.2.0",
+ "http-body-util",
  "httpmock",
  "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=ea400d80174114b12cf5078462e1cdd75d1627a8)",
  "hyper-util 0.1.14",
@@ -4750,6 +4770,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-stream",
  "tokio-util",
+ "tower 0.5.2",
  "tracing",
  "tracing-subscriber",
  "tracing-test",

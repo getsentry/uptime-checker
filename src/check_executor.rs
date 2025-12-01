@@ -16,7 +16,7 @@ use crate::checker::HttpChecker;
 use crate::config_store::Tick;
 use crate::producer::ResultsProducer;
 use crate::types::check_config::CheckConfig;
-use crate::types::result::{CheckResult, CheckStatus, CheckStatusReasonType};
+use crate::types::result::{CheckResult, CheckStatus};
 
 const SLOW_POLL_THRESHOLD: Duration = Duration::from_millis(100);
 const LONG_DELAY_THRESHOLD: Duration = Duration::from_millis(100);
@@ -38,6 +38,21 @@ pub struct ScheduledCheck {
 }
 
 impl ScheduledCheck {
+    pub fn new(
+        kind: CheckKind,
+        tick: Tick,
+        config: Arc<CheckConfig>,
+        resolve_tx: Sender<Option<CheckResult>>,
+    ) -> ScheduledCheck {
+        ScheduledCheck {
+            kind,
+            tick,
+            config,
+            resolve_tx,
+            retry_count: 0,
+        }
+    }
+
     #[cfg(test)]
     pub fn new_for_test(tick: Tick, config: CheckConfig) -> Self {
         let (resolve_tx, _) = tokio::sync::oneshot::channel();
@@ -107,13 +122,7 @@ impl CheckSender {
     ) -> anyhow::Result<Receiver<Option<CheckResult>>> {
         let (resolve_tx, resolve_rx) = oneshot::channel();
 
-        let scheduled_check = ScheduledCheck {
-            tick,
-            config,
-            resolve_tx,
-            retry_count: 0,
-            kind: check_kind,
-        };
+        let scheduled_check = ScheduledCheck::new(check_kind, tick, config, resolve_tx);
 
         self.queue_size.fetch_add(1, Ordering::Relaxed);
 
@@ -284,7 +293,7 @@ async fn executor_loop(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn do_check(
+pub(crate) async fn do_check(
     failure_retries: u16,
     scheduled_check: ScheduledCheck,
     job_checker: Arc<HttpChecker>,
@@ -367,15 +376,7 @@ fn record_result_metrics(result: &CheckResult, is_retry: bool, will_retry: bool)
         CheckStatus::MissedWindow => "missed_window",
         CheckStatus::DisallowedByRobots => "disallowed_by_robots",
     };
-    let failure_reason = match status_reason.as_ref().map(|r| r.status_type) {
-        Some(CheckStatusReasonType::Failure) => Some("failure"),
-        Some(CheckStatusReasonType::DnsError) => Some("dns_error"),
-        Some(CheckStatusReasonType::Timeout) => Some("timeout"),
-        Some(CheckStatusReasonType::TlsError) => Some("tls_error"),
-        Some(CheckStatusReasonType::ConnectionError) => Some("connection_error"),
-        Some(CheckStatusReasonType::RedirectError) => Some("redirect_error"),
-        None => None,
-    };
+    let failure_reason = status_reason.as_ref().map(|r| r.status_type.as_str());
     let status_code = match request_info.as_ref().and_then(|a| a.http_status_code) {
         None => "none".to_string(),
         Some(status) => status.to_string(),
