@@ -160,6 +160,7 @@ pub struct Config {
     /// Whether this uptime checker will write to redis or not.
     pub redis_readonly: bool,
 
+    /// The port on which to run the checker webserver.
     pub webserver_port: u16,
 }
 
