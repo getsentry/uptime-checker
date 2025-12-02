@@ -438,6 +438,7 @@ fn to_errored_request_infos(
     } else if tls_error(err).is_some() {
         tls_timing = full_duration
     } else {
+        tracing::info!("unknown reqwest error during check: {}", err.to_string());
         send_request_timing = full_duration
     };
 
