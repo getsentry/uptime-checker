@@ -2068,7 +2068,7 @@ dependencies = [
 [[package]]
 name = "jsonpath-ast"
 version = "0.1.0"
-source = "git+https://github.com/getsentry/jsonpath-rust?rev=55530b5bcbada21d467a2f6329fe7c742b2c329f#55530b5bcbada21d467a2f6329fe7c742b2c329f"
+source = "git+https://github.com/getsentry/jsonpath-rust?rev=5c9907d14da0e100da1176426a67e77f11dbb4d2#5c9907d14da0e100da1176426a67e77f11dbb4d2"
 dependencies = [
  "derive-new",
  "from-pest",
@@ -2084,7 +2084,7 @@ dependencies = [
 [[package]]
 name = "jsonpath-rust"
 version = "1.0.4"
-source = "git+https://github.com/getsentry/jsonpath-rust?rev=55530b5bcbada21d467a2f6329fe7c742b2c329f#55530b5bcbada21d467a2f6329fe7c742b2c329f"
+source = "git+https://github.com/getsentry/jsonpath-rust?rev=5c9907d14da0e100da1176426a67e77f11dbb4d2#5c9907d14da0e100da1176426a67e77f11dbb4d2"
 dependencies = [
  "jsonpath-ast",
  "pest",
