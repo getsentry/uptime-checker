@@ -4,7 +4,7 @@ local region_pops = {
   de: [
     'de',        // main cluster
     'de-pop-1',  // pop-de
-    'de-pop-2',  // pop-nl
+    'de-west-nl',  // uptime-nl
   ],
   us: [
     'us-pop-1',  // pop-va
