@@ -4,7 +4,7 @@ local region_pops = {
   de: [
     'de',        // main cluster
     'de-pop-1',  // pop-de
-    'de-pop-2',  // pop-nl
+    'de-west-nl',  // uptime-nl
   ],
   us: [
     'us-pop-1',  // pop-va
@@ -24,7 +24,7 @@ local region_pops = {
 // Map of region -> list of POPs within that region that should use canary deployment
 // Empty list means all POPs in that region use old direct-deploy flow
 local canary_enabled_pops = {
-  de: ['de', 'de-pop-1', 'de-pop-2'],
+  de: ['de', 'de-pop-1', 'de-west-nl'],
   us: ['us-pop-1', 'us-pop-2', 'us-pop-9'],
   s4s: ['s4s', 'pop-st-1'],
 };
