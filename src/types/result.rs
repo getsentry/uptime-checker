@@ -1,4 +1,7 @@
+use crate::assertions::compiled;
+use crate::assertions::compiled::EvalPath;
 use chrono::{DateTime, TimeDelta, Utc};
+use http::StatusCode;
 use hyper::rt::ConnectionStats;
 use hyper::stats::RequestStats;
 use openssl::asn1::Asn1Time;
@@ -40,8 +43,8 @@ pub enum CheckStatusReasonType {
     ConnectionError,
     RedirectError,
     Failure,
-    AssertionError,
-    AssertionFailure,
+    AssertionCompilationError,
+    AssertionEvaluationError,
 }
 
 impl CheckStatusReasonType {
@@ -53,8 +56,8 @@ impl CheckStatusReasonType {
             CheckStatusReasonType::ConnectionError => "connection_error",
             CheckStatusReasonType::RedirectError => "redirect_error",
             CheckStatusReasonType::Failure => "failure",
-            CheckStatusReasonType::AssertionError => "assertion_error",
-            CheckStatusReasonType::AssertionFailure => "assertion_failure",
+            CheckStatusReasonType::AssertionCompilationError => "assertion_compilation_error",
+            CheckStatusReasonType::AssertionEvaluationError => "assertion_evaluation_error",
         }
     }
 }
@@ -361,6 +364,93 @@ pub struct CheckResult {
 
     /// Region slug that produced the check result
     pub region: &'static str,
+
+    /// If an assertion was present, executed successfully, and didn't pass, this contains
+    /// the parts of the assertion that led to the failed status.
+    pub assertion_failure_data: Option<EvalPath>,
+}
+
+pub(crate) struct Check {
+    pub(crate) result: CheckStatus,
+    pub(crate) reason: Option<CheckStatusReason>,
+    pub(crate) assert_path: Option<EvalPath>,
+}
+
+impl Check {
+    pub fn success() -> Self {
+        Check {
+            result: CheckStatus::Success,
+            reason: None,
+            assert_path: None,
+        }
+    }
+
+    pub fn code_failure(status: StatusCode) -> Self {
+        Self {
+            result: CheckStatus::Failure,
+            reason: Some(CheckStatusReason {
+                status_type: CheckStatusReasonType::Failure,
+                description: format!("Got non 2xx status: {}", status),
+            }),
+            assert_path: None,
+        }
+    }
+
+    pub fn other_failure(reason: CheckStatusReason) -> Self {
+        Self {
+            result: CheckStatus::Failure,
+            reason: Some(reason),
+            assert_path: None,
+        }
+    }
+
+    pub fn assert_compile_failure(err: &compiled::CompilationError) -> Self {
+        Self {
+            result: CheckStatus::Failure,
+            reason: Some(CheckStatusReason {
+                status_type: CheckStatusReasonType::AssertionCompilationError,
+                description: err.to_string(),
+            }),
+            assert_path: None,
+        }
+    }
+
+    pub fn assert_evaluation_failure(err: &compiled::RuntimeError) -> Self {
+        Self {
+            result: CheckStatus::Failure,
+            reason: Some(CheckStatusReason {
+                status_type: CheckStatusReasonType::AssertionEvaluationError,
+                description: err.to_string(),
+            }),
+            assert_path: None,
+        }
+    }
+
+    pub fn assert_failure(path: EvalPath) -> Self {
+        Self {
+            result: CheckStatus::Failure,
+            reason: Some(CheckStatusReason {
+                status_type: CheckStatusReasonType::Failure,
+                description: "Assertion failed".to_string(),
+            }),
+            assert_path: Some(path),
+        }
+    }
+}
+
+impl From<Result<compiled::EvalResult, compiled::RuntimeError>> for Check {
+    fn from(value: Result<compiled::EvalResult, compiled::RuntimeError>) -> Self {
+        match value {
+            Ok(e) => {
+                if e.result {
+                    Check::success()
+                } else {
+                    Check::assert_failure(e.reason_path)
+                }
+            }
+            Err(err) => Check::assert_evaluation_failure(&err),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -423,7 +513,8 @@ mod tests {
     "certificate_info": null
   },
   "request_info_list": [],
-  "region": "us-west-1"
+  "region": "us-west-1",
+  "assertion_failure_data": null
 }"#;
 
         let check_result = serde_json::from_str::<CheckResult>(json).unwrap();
@@ -483,7 +574,8 @@ mod tests {
     "certificate_info": null
   },
   "request_info_list": [],
-  "region": "us-west-1"
+  "region": "us-west-1",
+  "assertion_failure_data": null
 }"#;
 
         let check_result = serde_json::from_str::<CheckResult>(json).unwrap();

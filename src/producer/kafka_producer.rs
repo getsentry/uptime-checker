@@ -99,6 +99,7 @@ mod tests {
             request_info: Some(ri.clone()),
             request_info_list: vec![ri],
             region: "us-west-1",
+            assertion_failure_data: None,
         };
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since
         // it will fail async
