@@ -72,12 +72,19 @@ impl VectorResultsProducer {
             // Avoid cloning this string over and over again.
             let region: &'static str = config.region.clone().leak();
             let mut batch = Vec::with_capacity(config.vector_batch_size);
+            let mut batch_element_count = 0;
 
             while receiver
-                .recv_many(&mut batch, config.vector_batch_size)
+                .recv_many(&mut batch, config.vector_batch_size - batch_element_count)
                 .await
                 > 0
             {
+                if batch.len() < config.vector_batch_size {
+                    batch_element_count = batch.len();
+                    continue;
+                }
+                batch_element_count = 0;
+
                 let new_count = pending_items.fetch_sub(batch.len(), Ordering::Relaxed);
                 metrics::gauge!("producer.pending_items", "uptime_region" => region)
                     .set(new_count as f64);
