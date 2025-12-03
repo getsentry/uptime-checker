@@ -188,7 +188,8 @@ impl ReqwestChecker {
         let mut builder = ClientBuilder::new()
             .hickory_dns(true)
             .default_headers(default_headers)
-            .pool_idle_timeout(options.pool_idle_timeout);
+            .pool_idle_timeout(options.pool_idle_timeout)
+            .cookie_store(true);
 
         builder = builder.tls_info(true);
 
