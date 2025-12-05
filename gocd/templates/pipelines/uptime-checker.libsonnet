@@ -155,6 +155,7 @@ local direct_deploy_stages(region) =
             timeout: 600,
             elastic_profile_id: 'uptime-checker',
             environment_variables: {
+              SENTRY_REGION: region,
               LABEL_SELECTOR: 'service=uptime-checker,env=primary',
             },
             tasks: [
