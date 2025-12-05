@@ -29,6 +29,14 @@ local canary_enabled_pops = {
   s4s: ['s4s', 'pop-st-1'],
 };
 
+// TEMPORARY: Map of region -> POPs that have been decommissioned and need canary statefulsets scaled down
+// Remove this once old POPs are fully migrated/removed
+local decommissioned_pops = {
+  de: ['de-pop-1'],
+  us: ['us-pop-2'],
+  s4s: [],
+};
+
 // Helper to check if a region/pop should use canary deployment
 local use_canary(region, pop) = std.member(canary_enabled_pops[region], pop);
 
@@ -53,6 +61,35 @@ local checks_stage = {
     },
   },
 };
+
+// TEMPORARY: Stage to scale down all pods in decommissioned POPs for a specific region
+// Remove this once old POPs are fully migrated/removed
+local cleanup_decommissioned_stage(region) =
+  local pops = decommissioned_pops[region];
+  if std.length(pops) == 0 then [] else [{
+    'cleanup-decommissioned': {
+      fetch_materials: true,
+      jobs: {
+        ['cleanup-' + pop]: {
+          elastic_profile_id: 'uptime-checker',
+          environment_variables: {
+            SENTRY_REGION: pop,
+          },
+          tasks: [
+            gocdtasks.script(|||
+              eval $(regions-project-env-vars --region="${SENTRY_REGION}")
+              /devinfra/scripts/get-cluster-credentials
+
+              echo "Scaling down all uptime-checker statefulsets in decommissioned POP ${SENTRY_REGION}..."
+              kubectl scale statefulset -l "service=uptime-checker" --replicas=0 || true
+              echo "Cleanup complete for ${SENTRY_REGION}"
+            |||),
+          ],
+        }
+        for pop in pops
+      },
+    },
+  }];
 
 // Helper stages for canary deployment
 local deploy_canary_stage(pops) = {
@@ -237,6 +274,7 @@ function(region) {
   lock_behavior: 'unlockWhenFinished',
   stages:
     local has_canary = std.length(canary_pops(region)) > 0;
+    cleanup_decommissioned_stage(region) +
     [checks_stage] +
     (if has_canary then
        canary_deployment_stages(region)
