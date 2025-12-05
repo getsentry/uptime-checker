@@ -25,7 +25,7 @@ local region_pops = {
 // Empty list means all POPs in that region use old direct-deploy flow
 local canary_enabled_pops = {
   de: ['de', 'de-west-de', 'de-west-nl'],
-  us: ['us-pop-1', 'us-pop-9', 'us-west-or'],
+  us: ['us-west-or'],
   s4s: ['s4s', 'pop-st-1'],
 };
 
