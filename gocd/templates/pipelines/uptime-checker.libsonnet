@@ -155,10 +155,21 @@ local direct_deploy_stages(region) =
             timeout: 600,
             elastic_profile_id: 'uptime-checker',
             environment_variables: {
-              LABEL_SELECTOR: 'service=uptime-checker',
+              SENTRY_REGION: region,
+              LABEL_SELECTOR: 'service=uptime-checker,env=primary',
             },
             tasks: [
               gocdtasks.script(importstr '../bash/deploy.sh'),
+              // TEMPORARY: Scale down canary statefulsets for old POPs that used to use canary.
+              // Can be removed once old POPs are migrated/removed.
+              gocdtasks.script(|||
+                eval $(regions-project-env-vars --region="${SENTRY_REGION}")
+                /devinfra/scripts/get-cluster-credentials
+
+                echo "Scaling down any canary statefulsets..."
+                kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
+                echo "Canary cleanup complete"
+              |||),
             ],
           },
         },
@@ -171,11 +182,21 @@ local deploy_pop_job(region) =
     elastic_profile_id: 'uptime-checker',
     environment_variables: {
       SENTRY_REGION: region,
-      LABEL_SELECTOR: 'service=uptime-checker',
+      LABEL_SELECTOR: 'service=uptime-checker,env=primary',
 
     },
     tasks: [
       gocdtasks.script(importstr '../bash/deploy.sh'),
+      // TEMPORARY: Scale down canary statefulsets for old POPs that used to use canary.
+      // Can be removed once old POPs are migrated/removed.
+      gocdtasks.script(|||
+        eval $(regions-project-env-vars --region="${SENTRY_REGION}")
+        /devinfra/scripts/get-cluster-credentials
+
+        echo "Scaling down any canary statefulsets..."
+        kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
+        echo "Canary cleanup complete"
+      |||),
     ],
   };
 
