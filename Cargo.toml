@@ -51,7 +51,12 @@ metrics-exporter-statsd = "0.8.0"
 metrics = "0.23.0"
 futures = "0.3.30"
 tokio-stream = "0.1.15"
-redis = { version = "0.30.0", features = ["cluster-async", "tokio-comp"] }
+redis = { version = "0.30.0", features = [
+  "cluster-async",
+  "tokio-comp",
+  "tls-rustls",
+  "tokio-rustls-comp"
+] }
 ipnet = "2.11.0"
 hickory-resolver = "0.24.1"
 tokio-rustls = "0.26.1"
