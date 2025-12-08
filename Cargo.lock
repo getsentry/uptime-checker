@@ -939,6 +939,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1667,10 +1681,11 @@ dependencies = [
 [[package]]
 name = "hyper"
 version = "1.6.0"
-source = "git+https://github.com/getsentry/hyper?rev=ea400d80174114b12cf5078462e1cdd75d1627a8#ea400d80174114b12cf5078462e1cdd75d1627a8"
+source = "git+https://github.com/getsentry/hyper?rev=9efa5aedce8a36e9a86115b8c104da44fcc43d7e#9efa5aedce8a36e9a86115b8c104da44fcc43d7e"
 dependencies = [
  "atomic-waker",
  "bytes",
+ "dashmap",
  "futures-channel",
  "futures-core",
  "h2",
@@ -1678,6 +1693,7 @@ dependencies = [
  "http-body 1.0.1",
  "httparse",
  "itoa",
+ "lazy_static",
  "pin-project-lite",
  "pin-utils",
  "smallvec",
@@ -1717,10 +1733,10 @@ dependencies = [
 [[package]]
 name = "hyper-tls"
 version = "0.6.0"
-source = "git+https://github.com/getsentry/hyper-tls?rev=b3a21d25b6b3a0427ffc12db113f3a03a33b367c#b3a21d25b6b3a0427ffc12db113f3a03a33b367c"
+source = "git+https://github.com/getsentry/hyper-tls?rev=7968d40a8b00842803adae4f65963bbf0b126dca#7968d40a8b00842803adae4f65963bbf0b126dca"
 dependencies = [
  "bytes",
- "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=ea400d80174114b12cf5078462e1cdd75d1627a8)",
+ "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=9efa5aedce8a36e9a86115b8c104da44fcc43d7e)",
  "hyper-util 0.1.14",
  "native-tls",
  "tokio",
@@ -1731,7 +1747,7 @@ dependencies = [
 [[package]]
 name = "hyper-util"
 version = "0.1.14"
-source = "git+https://github.com/getsentry/hyper-util?rev=335700c7180dc392b674bc93ac8939d44138f2fc#335700c7180dc392b674bc93ac8939d44138f2fc"
+source = "git+https://github.com/getsentry/hyper-util?rev=cff84af9d682add40b92c5a57ad43f73bb714081#cff84af9d682add40b92c5a57ad43f73bb714081"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1739,7 +1755,7 @@ dependencies = [
  "futures-util",
  "http 1.2.0",
  "http-body 1.0.1",
- "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=ea400d80174114b12cf5078462e1cdd75d1627a8)",
+ "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=9efa5aedce8a36e9a86115b8c104da44fcc43d7e)",
  "libc",
  "pin-project-lite",
  "socket2 0.5.10",
@@ -3191,7 +3207,7 @@ dependencies = [
 [[package]]
 name = "reqwest"
 version = "0.12.2"
-source = "git+https://github.com/getsentry/reqwest-uptime?rev=4e4b644fc38b62ed2e01060a44344dc660aa8f6d#4e4b644fc38b62ed2e01060a44344dc660aa8f6d"
+source = "git+https://github.com/getsentry/reqwest-uptime?rev=a4846d12afbf0d01598300c46055202a8e47de95#a4846d12afbf0d01598300c46055202a8e47de95"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3203,8 +3219,8 @@ dependencies = [
  "http 1.2.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=ea400d80174114b12cf5078462e1cdd75d1627a8)",
- "hyper-tls 0.6.0 (git+https://github.com/getsentry/hyper-tls?rev=b3a21d25b6b3a0427ffc12db113f3a03a33b367c)",
+ "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=9efa5aedce8a36e9a86115b8c104da44fcc43d7e)",
+ "hyper-tls 0.6.0 (git+https://github.com/getsentry/hyper-tls?rev=7968d40a8b00842803adae4f65963bbf0b126dca)",
  "hyper-util 0.1.14",
  "ipnet",
  "js-sys",
@@ -4736,7 +4752,7 @@ dependencies = [
  "http 1.2.0",
  "http-body-util",
  "httpmock",
- "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=ea400d80174114b12cf5078462e1cdd75d1627a8)",
+ "hyper 1.6.0 (git+https://github.com/getsentry/hyper?rev=9efa5aedce8a36e9a86115b8c104da44fcc43d7e)",
  "hyper-util 0.1.14",
  "ipnet",
  "iprange",

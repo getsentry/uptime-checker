@@ -160,35 +160,38 @@ async fn send_batch(
 
     let mut num_of_retries = 0;
     loop {
-        let response = client
+        let req = client
             .post(&endpoint)
             .header("Content-Type", "application/json")
             .body(body.clone())
-            .send()
-            .await;
-
+            .build()
+            .map_err(|_e| ExtractCodeError::VectorError)?;
+        let req_id = req.req_id().clone();
+        let response = client.execute(req).await;
+        let stats = hyper::stats::consume_request_stats(req_id);
         // Calculate delay with a maximum cap
         let delay =
             Duration::from_millis((BASE_DELAY_MS * (2_u64.pow(num_of_retries))).max(MAX_DELAY_MS));
 
         match response {
             Ok(resp) if !resp.status().is_server_error() => {
-                let stats = resp.stats();
                 metrics::gauge!("vector.num_retries", "uptime_region" => region)
                     .set(num_of_retries as f64);
 
                 if let Some(s) = stats.redirects().first() {
                     if let Some(c) = s.get_http_stats().get_connection_stats() {
-                        let start = c.get_start_instant();
-                        let end = if let Some(tls) = c.get_tls_end() {
-                            tls
+                        let start = s.get_request_start();
+                        let end = if let Some(tls) = c.get_tls_connect() {
+                            *tls.end()
+                        } else if let Some(connect) = c.get_connect() {
+                            *connect.end()
                         } else {
-                            c.get_connect_end()
+                            start
                         };
 
                         metrics::histogram!("vector.connect_duration", "histogram" => "timer", "uptime_region" => region)
                             .record(end.duration_since(start).as_millis() as f64);
-                        metrics::histogram!("vector.request_sent_duration", "histogram" => "timer", "uptime_region" => region).record(s.get_response_start().duration_since(start).as_millis() as f64);
+                        metrics::histogram!("vector.request_sent_duration", "histogram" => "timer", "uptime_region" => region).record(s.get_response_start().unwrap_or(start).duration_since(start).as_millis() as f64);
                         metrics::histogram!("vector.request_duration", "histogram" => "timer", "uptime_region" => region)
                             .record(s.get_request_end().duration_since(start).as_millis() as f64);
                     }
