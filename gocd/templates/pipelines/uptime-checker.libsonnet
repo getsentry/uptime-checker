@@ -133,7 +133,7 @@ local deploy_primary_stage(pops) = {
         elastic_profile_id: 'uptime-checker',
         environment_variables: {
           SENTRY_REGION: r,
-          LABEL_SELECTOR: 'service=uptime-checker',
+          LABEL_SELECTOR: 'service=uptime-checker,env=primary',
         },
         tasks: [
           gocdtasks.script(importstr '../bash/deploy.sh'),
