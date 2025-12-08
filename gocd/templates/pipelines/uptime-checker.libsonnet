@@ -7,9 +7,9 @@ local region_pops = {
     'de-west-nl',  // uptime-nl
   ],
   us: [
-    'us-pop-1',  // pop-va
-    'us-east-sc',  // uptime-sc
     'us-west-or', // uptime-or
+    'us-east-sc',  // uptime-sc
+    'us-east-va',  // uptime-va
   ],
   s4s: [
     's4s',
@@ -25,7 +25,7 @@ local region_pops = {
 // Empty list means all POPs in that region use old direct-deploy flow
 local canary_enabled_pops = {
   de: ['de', 'de-west-de', 'de-west-nl'],
-  us: ['us-west-or', 'us-east-sc'],
+  us: ['us-west-or', 'us-east-sc', 'us-east-va'],
   s4s: ['s4s', 'pop-st-1'],
 };
 
@@ -33,7 +33,7 @@ local canary_enabled_pops = {
 // Remove this once old POPs are fully migrated/removed
 local decommissioned_pops = {
   de: [],
-  us: ['us-pop-9'],
+  us: ['us-pop-1'],
   s4s: [],
 };
 
