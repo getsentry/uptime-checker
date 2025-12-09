@@ -146,20 +146,20 @@ pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<
                     dns_lookup: to_timing(
                         &rs.get_request_start_timestamp(),
                         &rs.get_request_start(),
-                        &dns_resolve.start(),
-                        &dns_resolve.end(),
+                        dns_resolve.start(),
+                        dns_resolve.end(),
                     ),
                     tcp_connection: to_timing(
                         &rs.get_request_start_timestamp(),
                         &rs.get_request_start(),
-                        &connect.start(),
-                        &connect.end(),
+                        connect.start(),
+                        connect.end(),
                     ),
                     tls_handshake: to_timing(
                         &rs.get_request_start_timestamp(),
                         &rs.get_request_start(),
-                        &tls_connect.start(),
-                        &tls_connect.end(),
+                        tls_connect.start(),
+                        tls_connect.end(),
                     ),
                     time_to_first_byte: to_timing(
                         &rs.get_request_start_timestamp(),
