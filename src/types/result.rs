@@ -1,5 +1,6 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use hyper::rt::ConnectionStats;
+use hyper::stats::AbsoluteDuration;
 use hyper::stats::RequestStats;
 use openssl::asn1::Asn1Time;
 use openssl::x509::X509;
@@ -79,7 +80,7 @@ fn to_timing(
 ) -> Timing {
     Timing {
         start_us: reference_ts + start.duration_since(*reference_instant).as_micros(),
-        duration_us: (*end - *start).as_micros() as u64,
+        duration_us: end.duration_since(*start).as_micros() as u64,
     }
 }
 
@@ -99,12 +100,19 @@ pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<
                 )
             };
 
+            let empty_duration =
+                AbsoluteDuration::new(rs.get_request_start(), rs.get_request_start());
+            let dns_resolve = conn_stats.get_dns_resolve().unwrap_or(empty_duration);
+            let connect = conn_stats.get_connect().unwrap_or(empty_duration);
+            let tls_connect = conn_stats.get_tls_connect().unwrap_or(empty_duration);
+
             // It's pretty hard to find out when "request goes on the wire" precisely happens,
             // so for now, we can pretend it happens right after the end of tcp connection or
             // (if it exists) tls negotiation.
-            let latest_connection_stat = conn_stats
-                .get_tls_end()
-                .unwrap_or(conn_stats.get_connect_end());
+            let latest_connection_stat = *conn_stats
+                .get_tls_connect()
+                .unwrap_or(conn_stats.get_connect().unwrap_or(empty_duration))
+                .end();
 
             let certificate_info = rs
                 .get_certificate_bytes()
@@ -132,48 +140,43 @@ pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<
                 response_body_size_bytes: 0,
                 request_duration_us: rs
                     .get_request_end()
-                    .duration_since(conn_stats.get_start_instant())
+                    .duration_since(rs.get_request_start())
                     .as_micros() as u64,
                 durations: RequestDurations {
                     dns_lookup: to_timing(
-                        &conn_stats.get_start_timestamp(),
-                        &conn_stats.get_start_instant(),
-                        &conn_stats.get_dns_resolve_start(),
-                        &conn_stats.get_dns_resolve_end(),
+                        &rs.get_request_start_timestamp(),
+                        &rs.get_request_start(),
+                        dns_resolve.start(),
+                        dns_resolve.end(),
                     ),
                     tcp_connection: to_timing(
-                        &conn_stats.get_start_timestamp(),
-                        &conn_stats.get_start_instant(),
-                        &conn_stats.get_connect_start(),
-                        &conn_stats.get_connect_end(),
+                        &rs.get_request_start_timestamp(),
+                        &rs.get_request_start(),
+                        connect.start(),
+                        connect.end(),
                     ),
                     tls_handshake: to_timing(
-                        &conn_stats.get_start_timestamp(),
-                        &conn_stats.get_start_instant(),
-                        &conn_stats
-                            .get_tls_start()
-                            .unwrap_or(conn_stats.get_start_instant()),
-                        &conn_stats
-                            .get_tls_end()
-                            .unwrap_or(conn_stats.get_start_instant()),
+                        &rs.get_request_start_timestamp(),
+                        &rs.get_request_start(),
+                        tls_connect.start(),
+                        tls_connect.end(),
                     ),
-                    // This is, now, the same as receive_response.
                     time_to_first_byte: to_timing(
-                        &conn_stats.get_start_timestamp(),
-                        &conn_stats.get_start_instant(),
-                        &rs.get_request_sent(),
-                        &rs.get_response_start(),
+                        &rs.get_request_start_timestamp(),
+                        &rs.get_request_start(),
+                        &rs.get_request_sent().unwrap_or(*empty_duration.start()),
+                        &rs.get_response_start().unwrap_or(*empty_duration.end()),
                     ),
                     send_request: to_timing(
-                        &conn_stats.get_start_timestamp(),
-                        &conn_stats.get_start_instant(),
+                        &rs.get_request_start_timestamp(),
+                        &rs.get_request_start(),
                         &latest_connection_stat,
-                        &rs.get_request_sent(),
+                        &rs.get_request_sent().unwrap_or(*empty_duration.end()),
                     ),
                     receive_response: to_timing(
-                        &conn_stats.get_start_timestamp(),
-                        &conn_stats.get_start_instant(),
-                        &rs.get_response_start(),
+                        &rs.get_request_start_timestamp(),
+                        &rs.get_request_start(),
+                        &rs.get_response_start().unwrap_or(*empty_duration.start()),
                         &rs.get_request_end(),
                     ),
                 },

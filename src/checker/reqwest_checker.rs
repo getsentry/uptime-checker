@@ -8,6 +8,7 @@ use crate::types::{
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
 use chrono::{DateTime, TimeDelta, Utc};
+use hyper::stats::RequestId;
 use openssl::error::ErrorStack;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, ClientBuilder, Response, Url};
@@ -66,7 +67,7 @@ async fn do_request(
     client: &Client,
     check_config: &CheckConfig,
     sentry_trace: &str,
-) -> Result<Response, reqwest::Error> {
+) -> Result<(Response, RequestId), reqwest::Error> {
     let timeout = check_config
         .timeout
         .to_std()
@@ -86,14 +87,17 @@ async fn do_request(
         })
         .collect();
 
-    client
+    let req = client
         .request(check_config.request_method.into(), url)
         .timeout(timeout)
         .headers(headers)
         .header("sentry-trace", sentry_trace.to_owned())
         .body(check_config.request_body.to_owned())
-        .send()
-        .await
+        .build()?;
+    let req_id = req.req_id().clone();
+    let resp = client.execute(req).await?;
+
+    Ok((resp, req_id))
 }
 
 /// Check if the request error is a DNS error.
@@ -274,13 +278,13 @@ async fn read_body_bounded(
 
 fn to_check_status_and_reason(
     assert_cache: &assertions::cache::Cache,
-    response: Result<Response, reqwest::Error>,
+    response: Result<(Response, RequestId), reqwest::Error>,
     check: &ScheduledCheck,
     body_bytes: &[u8],
     subscription_id: &Uuid,
 ) -> (CheckStatus, Option<CheckStatusReason>) {
     match response {
-        Ok(r) => {
+        Ok((r, _)) => {
             if let Some(assertion) = &check.get_config().assertion {
                 run_assertion(assert_cache, body_bytes, subscription_id, &r, assertion)
             } else {
@@ -477,12 +481,11 @@ impl Checker for ReqwestChecker {
         let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
 
         let start = Instant::now();
-        let mut response: Result<Response, reqwest::Error> =
-            do_request(&self.client, check.get_config(), &trace_header).await;
+        let mut response = do_request(&self.client, check.get_config(), &trace_header).await;
 
         // Only wait for the body bytes if we have an assertion that we will be processing.
         let body_bytes = if check.get_config().assertion.is_some() && response.is_ok() {
-            let Ok(resp) = &mut response else {
+            let Ok((resp, _req_id)) = &mut response else {
                 unreachable!("enclosing if-statement means this cannot happen");
             };
             read_body_bounded(
@@ -510,7 +513,10 @@ impl Checker for ReqwestChecker {
         // }
 
         let rinfos = match &response {
-            Ok(resp) => to_request_info_list(resp.stats(), check.get_config().request_method),
+            Ok((_resp, req_id)) => {
+                let stats = hyper::stats::consume_request_stats(req_id.clone());
+                to_request_info_list(&stats, check.get_config().request_method)
+            }
             Err(err) => to_errored_request_infos(&actual_check_time, start, err, check),
         };
 
