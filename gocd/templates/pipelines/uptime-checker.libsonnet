@@ -2,12 +2,12 @@ local gocdtasks = import 'github.com/getsentry/gocd-jsonnet/libs/gocd-tasks.libs
 
 local region_pops = {
   de: [
-    'de',        // main cluster
+    'de',  // main cluster
     'de-west-de',  // uptime-de
     'de-west-nl',  // uptime-nl
   ],
   us: [
-    'us-west-or', // uptime-or
+    'us-west-or',  // uptime-or
     'us-east-sc',  // uptime-sc
     'us-east-va',  // uptime-va
   ],
