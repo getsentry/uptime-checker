@@ -1,5 +1,8 @@
 local gocdtasks = import 'github.com/getsentry/gocd-jsonnet/libs/gocd-tasks.libsonnet';
 
+// IMPORTANT: Keep these configuration maps in sync between this file and
+// ops/gocd/templates/pipelines/uptime-checker-k8s.libsonnet
+
 local region_pops = {
   de: [
     'de',  // main cluster
@@ -16,33 +19,6 @@ local region_pops = {
     'pop-st-1',
   ],
 };
-
-// IMPORTANT: Keep these canary configuration maps in sync between:
-// - uptime-checker/gocd/templates/pipelines/uptime-checker.libsonnet (this file)
-// - ops/gocd/templates/pipelines/uptime-checker-k8s.libsonnet
-
-// Map of region -> list of POPs within that region that should use canary deployment
-// Empty list means all POPs in that region use old direct-deploy flow
-local canary_enabled_pops = {
-  de: ['de', 'de-west-de', 'de-west-nl'],
-  us: ['us-west-or', 'us-east-sc', 'us-east-va'],
-  s4s: ['s4s', 'pop-st-1'],
-};
-
-// TEMPORARY: Map of region -> POPs that have been decommissioned and need canary statefulsets scaled down
-// Remove this once old POPs are fully migrated/removed
-local decommissioned_pops = {
-  de: [],
-  us: ['us-pop-1'],
-  s4s: [],
-};
-
-// Helper to check if a region/pop should use canary deployment
-local use_canary(region, pop) = std.member(canary_enabled_pops[region], pop);
-
-// Filter POPs for canary vs direct deploy
-local canary_pops(region) = std.filter(function(pop) use_canary(region, pop), region_pops[region]);
-local direct_deploy_pops(region) = std.filter(function(pop) !use_canary(region, pop), region_pops[region]);
 
 local checks_stage = {
   checks: {
@@ -61,35 +37,6 @@ local checks_stage = {
     },
   },
 };
-
-// TEMPORARY: Stage to scale down all pods in decommissioned POPs for a specific region
-// Remove this once old POPs are fully migrated/removed
-local cleanup_decommissioned_stage(region) =
-  local pops = decommissioned_pops[region];
-  if std.length(pops) == 0 then [] else [{
-    'cleanup-decommissioned': {
-      fetch_materials: true,
-      jobs: {
-        ['cleanup-' + pop]: {
-          elastic_profile_id: 'uptime-checker',
-          environment_variables: {
-            SENTRY_REGION: pop,
-          },
-          tasks: [
-            gocdtasks.script(|||
-              eval $(regions-project-env-vars --region="${SENTRY_REGION}")
-              /devinfra/scripts/get-cluster-credentials
-
-              echo "Scaling down all uptime-checker statefulsets in decommissioned POP ${SENTRY_REGION}..."
-              kubectl scale statefulset -l "service=uptime-checker" --replicas=0 || true
-              echo "Cleanup complete for ${SENTRY_REGION}"
-            |||),
-          ],
-        }
-        for pop in pops
-      },
-    },
-  }];
 
 // Helper stages for canary deployment
 local deploy_canary_stage(pops) = {
@@ -169,92 +116,12 @@ local scale_down_canary_stage(pops) = {
   },
 };
 
-// Build canary deployment stages based on configuration
 local canary_deployment_stages(region) =
-  local pops = canary_pops(region);
-  if std.length(pops) == 0 then [] else
-    [
-      deploy_canary_stage(pops),
-      deploy_primary_stage(pops),
-      scale_down_canary_stage(pops),
-    ];
-
-// Direct deploy stage for non-canary POPs (old behavior)
-// This matches the original deploy_primary_stage: single job, no SENTRY_REGION
-local direct_deploy_stages(region) =
-  local pops = direct_deploy_pops(region);
-  if std.length(pops) == 0 then [] else [
-    {
-      'deploy-primary': {
-        fetch_materials: true,
-        jobs: {
-          deploy: {
-            timeout: 600,
-            elastic_profile_id: 'uptime-checker',
-            environment_variables: {
-              SENTRY_REGION: region,
-              LABEL_SELECTOR: 'service=uptime-checker,env=primary',
-            },
-            tasks: [
-              gocdtasks.script(importstr '../bash/deploy.sh'),
-              // TEMPORARY: Scale down canary statefulsets for old POPs that used to use canary.
-              // Can be removed once old POPs are migrated/removed.
-              gocdtasks.script(|||
-                eval $(regions-project-env-vars --region="${SENTRY_REGION}")
-                /devinfra/scripts/get-cluster-credentials
-
-                echo "Scaling down any canary statefulsets..."
-                kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
-                echo "Canary cleanup complete"
-              |||),
-            ],
-          },
-        },
-      },
-    },
-  ];
-local deploy_pop_job(region) =
-  {
-    timeout: 600,
-    elastic_profile_id: 'uptime-checker',
-    environment_variables: {
-      SENTRY_REGION: region,
-      LABEL_SELECTOR: 'service=uptime-checker,env=primary',
-
-    },
-    tasks: [
-      gocdtasks.script(importstr '../bash/deploy.sh'),
-      // TEMPORARY: Scale down canary statefulsets for old POPs that used to use canary.
-      // Can be removed once old POPs are migrated/removed.
-      gocdtasks.script(|||
-        eval $(regions-project-env-vars --region="${SENTRY_REGION}")
-        /devinfra/scripts/get-cluster-credentials
-
-        echo "Scaling down any canary statefulsets..."
-        kubectl scale statefulset -l "service=uptime-checker,env=canary" --replicas=0 || true
-        echo "Canary cleanup complete"
-      |||),
-    ],
-  };
-
-
-local deploy_pop_jobs(regions) =
-  {
-    ['deploy-primary-pops-region-' + region]: deploy_pop_job(region)
-    for region in regions
-  };
-
-
-local deploy_primary_pops_stage(region) =
-  // Only deploy to POPs that are NOT using canary (they're already deployed via canary flow)
-  local pops = direct_deploy_pops(region);
-  if std.length(pops) == 0 then [] else [
-    {
-      ['deploy-primary-pops-' + region]: {
-        fetch_materials: true,
-        jobs+: deploy_pop_jobs(pops),
-      },
-    },
+  local pops = region_pops[region];
+  [
+    deploy_canary_stage(pops),
+    deploy_primary_stage(pops),
+    scale_down_canary_stage(pops),
   ];
 
 
@@ -273,12 +140,6 @@ function(region) {
   },
   lock_behavior: 'unlockWhenFinished',
   stages:
-    local has_canary = std.length(canary_pops(region)) > 0;
-    cleanup_decommissioned_stage(region) +
     [checks_stage] +
-    (if has_canary then
-       canary_deployment_stages(region)
-     else
-       direct_deploy_stages(region)) +
-    deploy_primary_pops_stage(region),
+    canary_deployment_stages(region),
 }
