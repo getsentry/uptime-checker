@@ -16,7 +16,7 @@ use crate::checker::HttpChecker;
 use crate::config_store::Tick;
 use crate::producer::ResultsProducer;
 use crate::types::check_config::CheckConfig;
-use crate::types::result::{CheckResult, CheckStatus};
+use crate::types::result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType};
 
 const SLOW_POLL_THRESHOLD: Duration = Duration::from_millis(100);
 const LONG_DELAY_THRESHOLD: Duration = Duration::from_millis(100);
@@ -149,7 +149,10 @@ impl CheckResult {
             guid: Uuid::new_v4(),
             subscription_id: check.get_config().subscription_id,
             status: CheckStatus::MissedWindow,
-            status_reason: None,
+            status_reason: Some(CheckStatusReason {
+                status_type: CheckStatusReasonType::MissProduced,
+                description: "Check was not completed within the expected time window".to_string(),
+            }),
             trace_id: Default::default(),
             span_id: Default::default(),
             scheduled_check_time: check.get_tick().time(),
