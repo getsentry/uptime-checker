@@ -43,6 +43,8 @@ pub enum CheckStatusReasonType {
     Failure,
     AssertionError,
     AssertionFailure,
+    MissProduced,
+    MissBackfill,
 }
 
 impl CheckStatusReasonType {
@@ -56,6 +58,8 @@ impl CheckStatusReasonType {
             CheckStatusReasonType::Failure => "failure",
             CheckStatusReasonType::AssertionError => "assertion_error",
             CheckStatusReasonType::AssertionFailure => "assertion_failure",
+            CheckStatusReasonType::MissProduced => "miss_produced",
+            CheckStatusReasonType::MissBackfill => "miss_backfill",
         }
     }
 }
