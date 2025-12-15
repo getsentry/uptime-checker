@@ -590,4 +590,74 @@ mod tests {
 
         assert_eq!(json, serialized);
     }
+
+    #[test]
+    fn kafka_schema_tests() {
+        let schema =
+            sentry_kafka_schemas::get_schema("uptime-results", None).expect("Schema should exist");
+
+        let check_result = CheckResult {
+            guid: Uuid::new_v4(),
+            subscription_id: Uuid::new_v4(),
+            status: CheckStatus::Failure,
+            status_reason: CheckStatusReason {
+                status_type: CheckStatusReasonType::Failure,
+                description: "description".to_owned(),
+            }
+            .into(),
+            trace_id: Uuid::new_v4(),
+            span_id: SpanId::default(),
+            scheduled_check_time: Utc::now(),
+            scheduled_check_time_us: Utc::now(),
+            actual_check_time: Utc::now(),
+            actual_check_time_us: Utc::now(),
+            duration: None,
+            duration_us: None,
+            request_info: None,
+            request_info_list: vec![],
+            region: "default",
+            assertion_failure_data: EvalPath::ChildIndex {
+                index: 0,
+                child: EvalPath::AllChildren.into(),
+            }
+            .into(),
+        };
+
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+
+        let check_result = CheckResult {
+            guid: Uuid::new_v4(),
+            subscription_id: Uuid::new_v4(),
+            status: CheckStatus::Failure,
+            status_reason: CheckStatusReason {
+                status_type: CheckStatusReasonType::Failure,
+                description: "description".to_owned(),
+            }
+            .into(),
+            trace_id: Uuid::new_v4(),
+            span_id: SpanId::default(),
+            scheduled_check_time: Utc::now(),
+            scheduled_check_time_us: Utc::now(),
+            actual_check_time: Utc::now(),
+            actual_check_time_us: Utc::now(),
+            duration: None,
+            duration_us: None,
+            request_info: None,
+            request_info_list: vec![],
+            region: "default",
+            assertion_failure_data: EvalPath::ChildIndex {
+                index: 0,
+                child: EvalPath::ChildIndex {
+                    index: 1,
+                    child: EvalPath::Leaf.into(),
+                }
+                .into(),
+            }
+            .into(),
+        };
+
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+    }
 }
