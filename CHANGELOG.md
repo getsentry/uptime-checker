@@ -1,3 +1,34 @@
+## 25.12.0
+
+### New Features ✨
+
+#### Uptime
+
+- feat(uptime): use hashmap-based stats by @klochek in [#449](https://github.com/getsentry/uptime-checker/pull/449)
+- feat(uptime): enable checks execution from the endpoint by @klochek in [#439](https://github.com/getsentry/uptime-checker/pull/439)
+
+### Bug Fixes 🐛
+
+#### Uptime
+
+- fix(uptime): Fix bug where we deploy to canary again during the primary deploy by @wedamija in [#451](https://github.com/getsentry/uptime-checker/pull/451)
+- fix(uptime): add some logging to diagnose a connection-related error by @klochek in [#436](https://github.com/getsentry/uptime-checker/pull/436)
+
+### Build / dependencies / internal 🔧
+
+#### Uptime
+
+- chore(uptime): Clean up deploy code to remove old paths by @wedamija in [#453](https://github.com/getsentry/uptime-checker/pull/453)
+- chore(uptime): Run jsonnet formatting command by @wedamija in [#452](https://github.com/getsentry/uptime-checker/pull/452)
+- chore(uptime): Enable `us-east-va` and disable `us-east-pop-va` by @wedamija in [#450](https://github.com/getsentry/uptime-checker/pull/450)
+- chore(uptime): Fix `us-east-sc` name so that canary works with it. by @wedamija in [#448](https://github.com/getsentry/uptime-checker/pull/448)
+- chore(uptime): Disable `us-east-pop-sc` and enable `us-east-sc` by @wedamija in [#447](https://github.com/getsentry/uptime-checker/pull/447)
+- chore(uptime): Add temporary `cleanup_decommissioned_stage` step to deploy by @wedamija in [#445](https://github.com/getsentry/uptime-checker/pull/445)
+- chore(uptime): Make sure canaries are properly scaled down when using old deploy path by @wedamija in [#444](https://github.com/getsentry/uptime-checker/pull/444)
+- chore(uptime): Disable canaries on old regions by @wedamija in [#443](https://github.com/getsentry/uptime-checker/pull/443)
+- chore(uptime): Enable uptime-de and uptime-or regions by @wedamija in [#442](https://github.com/getsentry/uptime-checker/pull/442)
+- chore(uptime): Make sure we're deploying to new regions by @wedamija in [#441](https://github.com/getsentry/uptime-checker/pull/441)
+
 ## 25.11.1
 
 ### New Features ✨
