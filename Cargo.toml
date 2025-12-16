@@ -8,7 +8,7 @@ rust-version = "1.88"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-jsonpath-rust = { git = "https://github.com/getsentry/jsonpath-rust", rev = "55530b5bcbada21d467a2f6329fe7c742b2c329f" }
+jsonpath-rust = { git = "https://github.com/getsentry/jsonpath-rust", rev = "5c9907d14da0e100da1176426a67e77f11dbb4d2" }
 hyper = { git = "https://github.com/getsentry/hyper", rev = "9efa5aedce8a36e9a86115b8c104da44fcc43d7e" }
 hyper-util = { git = "https://github.com/getsentry/hyper-util", rev = "cff84af9d682add40b92c5a57ad43f73bb714081" }
 reqwest = { git = "https://github.com/getsentry/reqwest-uptime", rev = "a4846d12afbf0d01598300c46055202a8e47de95", features = [
