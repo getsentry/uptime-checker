@@ -2068,7 +2068,7 @@ dependencies = [
 [[package]]
 name = "jsonpath-ast"
 version = "0.1.0"
-source = "git+https://github.com/getsentry/jsonpath-rust?rev=55530b5bcbada21d467a2f6329fe7c742b2c329f#55530b5bcbada21d467a2f6329fe7c742b2c329f"
+source = "git+https://github.com/getsentry/jsonpath-rust?rev=5c9907d14da0e100da1176426a67e77f11dbb4d2#5c9907d14da0e100da1176426a67e77f11dbb4d2"
 dependencies = [
  "derive-new",
  "from-pest",
@@ -2084,7 +2084,7 @@ dependencies = [
 [[package]]
 name = "jsonpath-rust"
 version = "1.0.4"
-source = "git+https://github.com/getsentry/jsonpath-rust?rev=55530b5bcbada21d467a2f6329fe7c742b2c329f#55530b5bcbada21d467a2f6329fe7c742b2c329f"
+source = "git+https://github.com/getsentry/jsonpath-rust?rev=5c9907d14da0e100da1176426a67e77f11dbb4d2#5c9907d14da0e100da1176426a67e77f11dbb4d2"
 dependencies = [
  "jsonpath-ast",
  "pest",
@@ -3688,9 +3688,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-kafka-schemas"
-version = "2.1.16"
+version = "2.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c25d0bd7d2e7b1a744203f141288d84c30b78030264f21e41922c130564589a"
+checksum = "3fcbe3b4c38a42a77cb456cf28df88382c197ce6abbf56ebd7a6140f274750af"
 dependencies = [
  "jsonschema",
  "prettyplease",

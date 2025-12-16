@@ -3,7 +3,7 @@ use jsonpath_rust::{
     parser::{errors::JsonPathError, model::JpQuery, parse_json_path},
     query::js_path_process,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::{Borrow, BorrowMut},
     str::FromStr,
@@ -13,9 +13,21 @@ const GLOB_COMPLEXITY_LIMIT: u64 = 20;
 const ASSERTION_MAX_GAS: u32 = 100;
 
 #[derive(thiserror::Error, Debug, Serialize)]
-pub enum Error {
-    #[error("Invalid glob: {0}")]
-    InvalidGlob(String),
+pub enum RuntimeError {
+    #[error("Invalid JSONPath: {msg}")]
+    InvalidJsonPath { msg: String },
+
+    #[error("Assertion took too long")]
+    TookTooLong,
+
+    #[error("Invalid Body JSON: {body}")]
+    InvalidBodyJson { body: String },
+}
+
+#[derive(thiserror::Error, Debug, Serialize)]
+pub enum CompilationError {
+    #[error("Invalid glob {glob}: {msg}")]
+    InvalidGlob { glob: String, msg: String },
 
     #[error("JSONPath Parser Error: {msg}")]
     JSONPathParser {
@@ -26,20 +38,70 @@ pub enum Error {
 
     #[error("Invalid JSONPath: {msg}")]
     InvalidJsonPath { msg: String },
+}
 
-    #[error("Assertion took too long")]
-    TookTooLong,
+// This struct records the reason behind the result of an assertion evaluation.  Eventually,
+// an assert evaluates to 'true' or 'false', but we won't know whether we're failing until
+// we're done evaluating.  To keep track of errors, we therefore keep track of the result of
+// given subtree of an assertion--in the case of nodes that have more than one child, we pick
+// the path that resulted in our decision, which could be all children (in the case of a
+// passing AND, or a failing OR), or a single child (in the case of a failing AND or passing
+// OR).  It can also be a leaf value.
+pub struct EvalResult {
+    pub reason_path: EvalPath,
+    pub result: bool,
+}
 
-    #[error("Invalid Body JSON: {0}")]
-    InvalidBodyJson(String),
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EvalPath {
+    Leaf,
+    AllChildren,
+    ChildIndex { index: usize, child: Box<EvalPath> },
+}
+
+impl EvalResult {
+    pub fn and_node() -> EvalResult {
+        Self {
+            reason_path: EvalPath::AllChildren,
+            result: true,
+        }
+    }
+
+    pub fn or_node() -> EvalResult {
+        Self {
+            reason_path: EvalPath::AllChildren,
+            result: false,
+        }
+    }
+
+    // Construct a leaf node that is directly responsible for the result.
+    pub fn leaf(value: bool) -> EvalResult {
+        Self {
+            reason_path: EvalPath::Leaf,
+            result: value,
+        }
+    }
+
+    // Construct a node in which a single child node is responsible for
+    // the result.
+    pub fn child_idx(index: usize, value: bool, path: EvalPath) -> EvalResult {
+        Self {
+            reason_path: EvalPath::ChildIndex {
+                index,
+                child: path.into(),
+            },
+            result: value,
+        }
+    }
 }
 
 struct Gas(u32);
 
 impl Gas {
-    fn consume(&mut self, amount: u32) -> Result<(), Error> {
+    fn consume(&mut self, amount: u32) -> Result<(), RuntimeError> {
         if amount > self.0 {
-            return Err(Error::TookTooLong);
+            return Err(RuntimeError::TookTooLong);
         }
         self.0 -= amount;
 
@@ -70,7 +132,7 @@ impl Assertion {
         status_code: u16,
         headers: &hyper::header::HeaderMap<HeaderValue>,
         body: &[u8],
-    ) -> Result<bool, Error> {
+    ) -> Result<EvalResult, RuntimeError> {
         let mut gas = Gas(ASSERTION_MAX_GAS);
         self.root.eval(status_code, headers, body, &mut gas)
     }
@@ -102,7 +164,7 @@ enum HeaderOperand {
 }
 
 impl TryFrom<&super::HeaderOperand> for HeaderOperand {
-    type Error = Error;
+    type Error = CompilationError;
     fn try_from(value: &super::HeaderOperand) -> Result<Self, Self::Error> {
         let v = match value {
             super::HeaderOperand::Literal { value } => HeaderOperand::Literal {
@@ -115,7 +177,12 @@ impl TryFrom<&super::HeaderOperand> for HeaderOperand {
 
                 match r {
                     Ok(value) => HeaderOperand::Glob { value },
-                    Err(e) => return Err(Error::InvalidGlob(e.to_string())),
+                    Err(e) => {
+                        return Err(CompilationError::InvalidGlob {
+                            glob: e.to_string(),
+                            msg: e.to_string(),
+                        })
+                    }
                 }
             }
         };
@@ -160,7 +227,7 @@ impl From<&String> for Value {
 }
 
 impl TryFrom<&super::HeaderComparison> for HeaderComparison {
-    type Error = Error;
+    type Error = CompilationError;
     fn try_from(value: &super::HeaderComparison) -> Result<Self, Self::Error> {
         let v = match value {
             super::HeaderComparison::Always => HeaderComparison::Always,
@@ -217,7 +284,7 @@ fn cmp_eq_header(
     header_value: &str,
     test_value: &HeaderOperand,
     gas: &mut Gas,
-) -> Result<bool, Error> {
+) -> Result<bool, RuntimeError> {
     let result = match test_value {
         HeaderOperand::Literal { value } => match value {
             Value::I64(value) => cmp_eq(header_value, value),
@@ -235,7 +302,7 @@ fn cmp_eq_header(
 }
 
 impl HeaderComparison {
-    fn eval(&self, header_value: &str, gas: &mut Gas) -> Result<bool, Error> {
+    fn eval(&self, header_value: &str, gas: &mut Gas) -> Result<bool, RuntimeError> {
         let result = match self {
             HeaderComparison::Always => true,
             HeaderComparison::Never => false,
@@ -295,47 +362,53 @@ impl Op {
         headers: &hyper::header::HeaderMap<HeaderValue>,
         body: &[u8],
         gas: &mut Gas,
-    ) -> Result<bool, Error> {
+    ) -> Result<EvalResult, RuntimeError> {
         let result = match self {
             Op::And { children } => {
-                let mut result = true;
-                for child in children.iter() {
-                    result &= child.eval(status_code, headers, body, gas)?;
-                    if !result {
+                let mut result = EvalResult::and_node();
+                for (idx, child) in children.iter().enumerate() {
+                    let eval = child.eval(status_code, headers, body, gas)?;
+                    if !eval.result {
+                        result = EvalResult::child_idx(idx, eval.result, eval.reason_path);
                         break;
                     }
                 }
                 result
             }
             Op::Or { children } => {
-                let mut result = false;
-                for child in children.iter() {
-                    result |= child.eval(status_code, headers, body, gas)?;
-                    if result {
+                let mut result = EvalResult::or_node();
+                for (idx, child) in children.iter().enumerate() {
+                    let eval = child.eval(status_code, headers, body, gas)?;
+                    if eval.result {
+                        result = EvalResult::child_idx(idx, eval.result, eval.reason_path);
                         break;
                     }
                 }
                 result
             }
-            Op::Not { operand } => !operand.eval(status_code, headers, body, gas)?,
+            Op::Not { operand } => {
+                let eval = operand.eval(status_code, headers, body, gas)?;
+                EvalResult::child_idx(0, !eval.result, eval.reason_path)
+            }
             Op::StatusCodeCheck { value, operator } => {
                 gas.consume(1)?;
-                match operator {
+                let value = match operator {
                     Comparison::LessThan => status_code < *value,
                     Comparison::GreaterThan => status_code > *value,
                     Comparison::Equal => *value == status_code,
                     Comparison::NotEqual => *value != status_code,
-                }
+                };
+                EvalResult::leaf(value)
             }
             Op::HeaderCheck { key, value } => {
                 // Find any header that passes key.  Then, see if it's value passes value.
-                let mut result = false;
+                let mut result = EvalResult::leaf(false);
 
                 for (k, v) in headers {
                     if key.eval(k.as_str(), gas)? {
                         if let Ok(value_str) = v.to_str() {
                             if value.eval(value_str, gas)? {
-                                result = true;
+                                result = EvalResult::leaf(true);
                                 break;
                             }
                         }
@@ -345,10 +418,12 @@ impl Op {
                 result
             }
             Op::JsonPath { value } => {
-                let json: serde_json::Value = serde_json::from_slice(body)
-                    .map_err(|e| Error::InvalidBodyJson(e.to_string()))?;
+                let json: serde_json::Value =
+                    serde_json::from_slice(body).map_err(|e| RuntimeError::InvalidBodyJson {
+                        body: e.to_string(),
+                    })?;
                 let result = js_path_process(value, &json, gas.borrow_mut())?;
-                !result.is_empty()
+                EvalResult::leaf(!result.is_empty())
             }
         };
 
@@ -356,13 +431,13 @@ impl Op {
     }
 }
 
-pub fn compile(assertion: &super::Assertion) -> Result<Assertion, Error> {
+pub fn compile(assertion: &super::Assertion) -> Result<Assertion, CompilationError> {
     Ok(Assertion {
         root: compile_op(&assertion.root)?,
     })
 }
 
-fn compile_op(op: &super::Op) -> Result<Op, Error> {
+fn compile_op(op: &super::Op) -> Result<Op, CompilationError> {
     let op = match op {
         super::Op::And { children } => Op::And {
             children: visit_children(children)?,
@@ -382,14 +457,25 @@ fn compile_op(op: &super::Op) -> Result<Op, Error> {
             value: value.try_into()?,
         },
         super::Op::JsonPath { value } => Op::JsonPath {
-            value: parse_json_path(value)?,
+            value: parse_json_path(value, GLOB_COMPLEXITY_LIMIT)?,
         },
     };
 
     Ok(op)
 }
 
-impl From<JsonPathError> for Error {
+impl From<JsonPathError> for RuntimeError {
+    fn from(value: JsonPathError) -> Self {
+        match value {
+            JsonPathError::TookTooLong => RuntimeError::TookTooLong,
+            rest => RuntimeError::InvalidJsonPath {
+                msg: rest.to_string(),
+            },
+        }
+    }
+}
+
+impl From<JsonPathError> for CompilationError {
     fn from(value: JsonPathError) -> Self {
         match value {
             JsonPathError::PestError(error) => {
@@ -397,22 +483,23 @@ impl From<JsonPathError> for Error {
                     pest::error::InputLocation::Pos(pos) => pos,
                     pest::error::InputLocation::Span((start, _)) => start,
                 };
-                Error::JSONPathParser {
+                CompilationError::JSONPathParser {
                     msg: error.to_string(),
                     path: error.line().to_owned(),
                     pos,
                 }
             }
-            JsonPathError::TookTooLong => Error::TookTooLong,
-            JsonPathError::InvalidGlob(s) => Error::InvalidGlob(s),
-            rest => Error::InvalidJsonPath {
+            JsonPathError::InvalidGlob(glob, reason) => {
+                CompilationError::InvalidGlob { glob, msg: reason }
+            }
+            rest => CompilationError::InvalidJsonPath {
                 msg: rest.to_string(),
             },
         }
     }
 }
 
-fn visit_children(children: &[super::Op]) -> Result<Vec<Op>, Error> {
+fn visit_children(children: &[super::Op]) -> Result<Vec<Op>, CompilationError> {
     let mut cs = vec![];
     for c in children.iter() {
         cs.push(compile_op(c)?);
@@ -425,7 +512,8 @@ mod tests {
     use http::{HeaderMap, HeaderValue};
 
     use crate::assertions::{
-        compiled::compile, Assertion, Comparison, GlobPattern, HeaderComparison, HeaderOperand, Op,
+        compiled::{compile, CompilationError, EvalPath},
+        Assertion, Comparison, GlobPattern, HeaderComparison, HeaderOperand, Op,
     };
 
     #[test]
@@ -454,11 +542,11 @@ mod tests {
         };
 
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap());
-        assert!(!assert.eval(105, &HeaderMap::new(), b"").unwrap());
-        assert!(!assert.eval(95, &HeaderMap::new(), b"").unwrap());
-        assert!(!assert.eval(299, &HeaderMap::new(), b"").unwrap());
-        assert!(!assert.eval(305, &HeaderMap::new(), b"").unwrap());
+        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap().result);
+        assert!(!assert.eval(105, &HeaderMap::new(), b"").unwrap().result);
+        assert!(!assert.eval(95, &HeaderMap::new(), b"").unwrap().result);
+        assert!(!assert.eval(299, &HeaderMap::new(), b"").unwrap().result);
+        assert!(!assert.eval(305, &HeaderMap::new(), b"").unwrap().result);
     }
 
     #[test]
@@ -482,11 +570,11 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap());
-        assert!(!assert.eval(105, &HeaderMap::new(), b"").unwrap());
-        assert!(assert.eval(95, &HeaderMap::new(), b"").unwrap());
-        assert!(!assert.eval(299, &HeaderMap::new(), b"").unwrap());
-        assert!(assert.eval(305, &HeaderMap::new(), b"").unwrap());
+        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap().result);
+        assert!(!assert.eval(105, &HeaderMap::new(), b"").unwrap().result);
+        assert!(assert.eval(95, &HeaderMap::new(), b"").unwrap().result);
+        assert!(!assert.eval(299, &HeaderMap::new(), b"").unwrap().result);
+        assert!(assert.eval(305, &HeaderMap::new(), b"").unwrap().result);
     }
 
     #[test]
@@ -532,13 +620,13 @@ mod tests {
         };
 
         let assert = compile(&assert).unwrap();
-        assert!(!assert.eval(0, &HeaderMap::new(), b"").unwrap());
-        assert!(assert.eval(15, &HeaderMap::new(), b"").unwrap());
-        assert!(!assert.eval(100, &HeaderMap::new(), b"").unwrap());
-        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap());
-        assert!(assert.eval(201, &HeaderMap::new(), b"").unwrap());
-        assert!(assert.eval(202, &HeaderMap::new(), b"").unwrap());
-        assert!(!assert.eval(203, &HeaderMap::new(), b"").unwrap());
+        assert!(!assert.eval(0, &HeaderMap::new(), b"").unwrap().result);
+        assert!(assert.eval(15, &HeaderMap::new(), b"").unwrap().result);
+        assert!(!assert.eval(100, &HeaderMap::new(), b"").unwrap().result);
+        assert!(assert.eval(200, &HeaderMap::new(), b"").unwrap().result);
+        assert!(assert.eval(201, &HeaderMap::new(), b"").unwrap().result);
+        assert!(assert.eval(202, &HeaderMap::new(), b"").unwrap().result);
+        assert!(!assert.eval(203, &HeaderMap::new(), b"").unwrap().result);
     }
 
     #[test]
@@ -612,7 +700,7 @@ mod tests {
         let assert = compile(&assert).unwrap();
 
         let result = assert.eval(200, &hmap, body.as_bytes()).err().unwrap();
-        assert!(matches!(result, super::Error::TookTooLong));
+        assert!(matches!(result, super::RuntimeError::TookTooLong));
     }
 
     #[test]
@@ -642,7 +730,7 @@ mod tests {
 
         let assert = compile(&assert).unwrap();
 
-        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap());
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
 
         let assert = Assertion {
             root: Op::JsonPath {
@@ -652,7 +740,7 @@ mod tests {
 
         let assert = compile(&assert).unwrap();
 
-        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap());
+        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
 
         let assert = Assertion {
             root: Op::JsonPath {
@@ -661,7 +749,7 @@ mod tests {
         };
 
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap());
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
 
         let assert = Assertion {
             root: Op::JsonPath {
@@ -671,7 +759,7 @@ mod tests {
 
         let assert = compile(&assert).unwrap();
 
-        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap());
+        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
     }
 
     #[test]
@@ -694,7 +782,7 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &hmap, b"").unwrap());
+        assert!(assert.eval(200, &hmap, b"").unwrap().result);
 
         let assert = Assertion {
             root: Op::Or {
@@ -713,7 +801,7 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert!(assert.eval(200, &hmap, b"").unwrap());
+        assert!(assert.eval(200, &hmap, b"").unwrap().result);
 
         let assert = Assertion {
             root: Op::HeaderCheck {
@@ -734,6 +822,197 @@ mod tests {
             },
         };
         let assert = compile(&assert).unwrap();
-        assert!(!assert.eval(200, &hmap, b"").unwrap());
+        assert!(!assert.eval(200, &hmap, b"").unwrap().result);
+    }
+
+    #[test]
+    fn test_broken_jsonpath_glob() {
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[?glob(@.prop1, \"'a']\")]".to_owned(),
+            },
+        };
+
+        let assert = compile(&assert).unwrap_err();
+        assert!(matches!(
+            assert,
+            CompilationError::InvalidGlob { msg: _, glob: _ }
+        ));
+    }
+
+    #[test]
+    fn test_broken_header_glob() {
+        let assert = Assertion {
+            root: Op::HeaderCheck {
+                key: HeaderComparison::Equals {
+                    test_value: HeaderOperand::Glob {
+                        pattern: GlobPattern {
+                            value: "'a']".into(),
+                        },
+                    },
+                },
+                value: HeaderComparison::Always,
+            },
+        };
+
+        let assert = compile(&assert).unwrap_err();
+        assert!(matches!(
+            assert,
+            CompilationError::InvalidGlob { msg: _, glob: _ }
+        ));
+    }
+    #[test]
+    fn test_failing_path_or() {
+        let mut hmap = HeaderMap::new();
+        hmap.append("4", HeaderValue::from_static("*"));
+        hmap.append("2", HeaderValue::from_static("*"));
+        hmap.append("5", HeaderValue::from_static("*"));
+        let assert = Assertion {
+            root: Op::Not {
+                operand: Op::Or {
+                    children: vec![
+                        Op::HeaderCheck {
+                            key: HeaderComparison::Equals {
+                                test_value: HeaderOperand::Literal { value: "1".into() },
+                            },
+                            value: HeaderComparison::Always,
+                        },
+                        Op::HeaderCheck {
+                            key: HeaderComparison::Equals {
+                                test_value: HeaderOperand::Literal { value: "2".into() },
+                            },
+                            value: HeaderComparison::Always,
+                        },
+                        Op::HeaderCheck {
+                            key: HeaderComparison::Equals {
+                                test_value: HeaderOperand::Literal { value: "3".into() },
+                            },
+                            value: HeaderComparison::Always,
+                        },
+                    ],
+                }
+                .into(),
+            },
+        };
+        let assert = compile(&assert).unwrap();
+        let eval = assert.eval(200, &hmap, b"").unwrap();
+        assert!(!eval.result);
+        assert_eq!(
+            eval.reason_path,
+            EvalPath::ChildIndex {
+                index: 0,
+                child: EvalPath::ChildIndex {
+                    index: 1,
+                    child: EvalPath::Leaf.into()
+                }
+                .into()
+            }
+        )
+    }
+
+    #[test]
+    fn test_failing_path_and() {
+        let mut hmap = HeaderMap::new();
+        hmap.append("1", HeaderValue::from_static("*"));
+        hmap.append("2", HeaderValue::from_static("*"));
+        hmap.append("3", HeaderValue::from_static("*"));
+        let assert = Assertion {
+            root: Op::And {
+                children: vec![
+                    Op::HeaderCheck {
+                        key: HeaderComparison::Equals {
+                            test_value: HeaderOperand::Literal { value: "1".into() },
+                        },
+                        value: HeaderComparison::Always,
+                    },
+                    Op::HeaderCheck {
+                        key: HeaderComparison::Equals {
+                            test_value: HeaderOperand::Literal { value: "2".into() },
+                        },
+                        value: HeaderComparison::Always,
+                    },
+                    Op::HeaderCheck {
+                        key: HeaderComparison::Equals {
+                            test_value: HeaderOperand::Literal { value: "4".into() },
+                        },
+                        value: HeaderComparison::Always,
+                    },
+                ],
+            },
+        };
+        let assert = compile(&assert).unwrap();
+        let eval = assert.eval(200, &hmap, b"").unwrap();
+        assert!(!eval.result);
+        assert_eq!(
+            eval.reason_path,
+            EvalPath::ChildIndex {
+                index: 2,
+                child: EvalPath::Leaf.into()
+            }
+        )
+    }
+
+    #[test]
+    fn test_failing_path_nesting() {
+        let mut hmap = HeaderMap::new();
+        hmap.append("1", HeaderValue::from_static("*"));
+        hmap.append("2", HeaderValue::from_static("*"));
+        hmap.append("3", HeaderValue::from_static("*"));
+        let assert = Assertion {
+            root: Op::Not {
+                operand: Op::Or {
+                    children: vec![
+                        Op::And {
+                            children: vec![
+                                Op::HeaderCheck {
+                                    key: HeaderComparison::Equals {
+                                        test_value: HeaderOperand::Literal { value: "1".into() },
+                                    },
+                                    value: HeaderComparison::Always,
+                                },
+                                Op::HeaderCheck {
+                                    key: HeaderComparison::NotEquals {
+                                        test_value: HeaderOperand::Literal {
+                                            value: "123".into(),
+                                        },
+                                    },
+                                    value: HeaderComparison::Always,
+                                },
+                            ],
+                        },
+                        Op::Or {
+                            children: vec![
+                                Op::Not {
+                                    operand: Op::StatusCodeCheck {
+                                        value: 200,
+                                        operator: Comparison::Equal,
+                                    }
+                                    .into(),
+                                },
+                                Op::StatusCodeCheck {
+                                    value: 201,
+                                    operator: Comparison::Equal,
+                                },
+                            ],
+                        },
+                    ],
+                }
+                .into(),
+            },
+        };
+        let assert = compile(&assert).unwrap();
+        let eval = assert.eval(200, &hmap, b"").unwrap();
+        assert!(!eval.result);
+        assert_eq!(
+            eval.reason_path,
+            EvalPath::ChildIndex {
+                index: 0,
+                child: EvalPath::ChildIndex {
+                    index: 0,
+                    child: EvalPath::AllChildren.into()
+                }
+                .into()
+            }
+        )
     }
 }

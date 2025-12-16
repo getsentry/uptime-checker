@@ -396,6 +396,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -418,6 +419,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -522,6 +524,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -631,6 +634,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -653,6 +657,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -757,6 +762,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -779,6 +785,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -869,6 +876,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -968,6 +976,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )
@@ -990,6 +999,7 @@ mod tests {
                     request_info: None,
                     region: config.region,
                     request_info_list: vec![],
+                    assertion_failure_data: None,
                 }
                 .into(),
             )

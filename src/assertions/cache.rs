@@ -50,7 +50,7 @@ impl Cache {
     pub fn get_or_compile(
         &self,
         key: &assertions::Assertion,
-    ) -> Result<Arc<compiled::Assertion>, compiled::Error> {
+    ) -> Result<Arc<compiled::Assertion>, compiled::CompilationError> {
         if let Some(entry) = self.compiled.read().expect("not poisoned").get(key) {
             return Ok(entry.assertion.clone());
         }

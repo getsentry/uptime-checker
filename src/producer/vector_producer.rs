@@ -283,6 +283,7 @@ mod tests {
             request_info: Some(ri.clone()),
             request_info_list: vec![ri.clone()],
             region: "us-west-1",
+            assertion_failure_data: None,
         }
     }
 

@@ -2,7 +2,7 @@ use super::ip_filter::is_external_ip;
 use super::{make_trace_header, make_trace_id, Checker};
 use crate::assertions::{self};
 use crate::check_executor::ScheduledCheck;
-use crate::types::result::{to_request_info_list, RequestDurations, Timing};
+use crate::types::result::{to_request_info_list, Check, RequestDurations, Timing};
 use crate::types::{
     check_config::CheckConfig,
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
@@ -276,34 +276,30 @@ async fn read_body_bounded(
     }
 }
 
-fn to_check_status_and_reason(
+fn to_check_result(
     assert_cache: &assertions::cache::Cache,
     response: Result<(Response, RequestId), reqwest::Error>,
     check: &ScheduledCheck,
     body_bytes: &[u8],
-    subscription_id: &Uuid,
-) -> (CheckStatus, Option<CheckStatusReason>) {
+) -> Check {
     match response {
         Ok((r, _)) => {
             if let Some(assertion) = &check.get_config().assertion {
-                run_assertion(assert_cache, body_bytes, subscription_id, &r, assertion)
+                run_assertion(
+                    assert_cache,
+                    body_bytes,
+                    &check.get_config().subscription_id,
+                    &r,
+                    assertion,
+                )
             } else {
                 match r.status().is_success() {
-                    true => (CheckStatus::Success, None),
-                    false => (
-                        CheckStatus::Failure,
-                        Some(CheckStatusReason {
-                            status_type: CheckStatusReasonType::Failure,
-                            description: format!("Got non 2xx status: {}", r.status()),
-                        }),
-                    ),
+                    true => Check::success(),
+                    false => Check::code_failure(r.status()),
                 }
             }
         }
-        Err(e) => {
-            let reason: CheckStatusReason = e.into();
-            (CheckStatus::Failure, Some(reason))
-        }
+        Err(e) => Check::other_failure(e.into()),
     }
 }
 
@@ -313,7 +309,7 @@ fn run_assertion(
     subscription_id: &Uuid,
     r: &Response,
     assertion: &assertions::Assertion,
-) -> (CheckStatus, Option<CheckStatusReason>) {
+) -> Check {
     let comp_assert = assert_cache.get_or_compile(assertion);
 
     if let Err(err) = comp_assert {
@@ -322,39 +318,13 @@ fn run_assertion(
             subscription_id,
             err.to_string(),
         );
-        return (
-            CheckStatus::Failure,
-            Some(CheckStatusReason {
-                status_type: CheckStatusReasonType::AssertionError,
-                description: err.to_string(),
-            }),
-        );
+        return Check::assert_compile_failure(&err);
     }
     let assertion = comp_assert.expect("already tested above");
 
     let result = assertion.eval(r.status().as_u16(), r.headers(), body_bytes);
-    match result {
-        Ok(result) => {
-            if result {
-                (CheckStatus::Success, None)
-            } else {
-                (
-                    CheckStatus::Failure,
-                    Some(CheckStatusReason {
-                        status_type: CheckStatusReasonType::AssertionFailure,
-                        description: "Assertion failed".to_string(),
-                    }),
-                )
-            }
-        }
-        Err(err) => (
-            CheckStatus::Failure,
-            Some(CheckStatusReason {
-                status_type: CheckStatusReasonType::AssertionError,
-                description: err.to_string(),
-            }),
-        ),
-    }
+
+    result.into()
 }
 
 impl From<reqwest::Error> for CheckStatusReason {
@@ -520,13 +490,7 @@ impl Checker for ReqwestChecker {
             Err(err) => to_errored_request_infos(&actual_check_time, start, err, check),
         };
 
-        let (status, status_reason) = to_check_status_and_reason(
-            &self.assert_cache,
-            response,
-            check,
-            &body_bytes,
-            &check.get_config().subscription_id,
-        );
+        let check_result = to_check_result(&self.assert_cache, response, check, &body_bytes);
 
         // Our total duration includes the additional processing time, including running the assert.
         let duration = TimeDelta::from_std(start.elapsed()).expect("duration shouldn't be large");
@@ -536,8 +500,8 @@ impl Checker for ReqwestChecker {
         CheckResult {
             guid: trace_id,
             subscription_id: check.get_config().subscription_id,
-            status,
-            status_reason,
+            status: check_result.result,
+            status_reason: check_result.reason,
             trace_id,
             span_id,
             scheduled_check_time,
@@ -549,6 +513,7 @@ impl Checker for ReqwestChecker {
             request_info: Some(final_req),
             region,
             request_info_list: rinfos,
+            assertion_failure_data: check_result.assert_path,
         }
     }
 
@@ -613,6 +578,7 @@ impl Checker for ReqwestChecker {
             request_info: None,
             region,
             request_info_list: Vec::new(),
+            assertion_failure_data: None,
         })
     }
 }

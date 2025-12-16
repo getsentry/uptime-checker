@@ -164,6 +164,7 @@ impl CheckResult {
             request_info: None,
             region,
             request_info_list: vec![],
+            assertion_failure_data: None,
         }
     }
 }
