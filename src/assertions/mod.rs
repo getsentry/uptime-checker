@@ -12,9 +12,11 @@ pub struct Assertion {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "cmp", rename_all = "snake_case")]
 pub(crate) enum Comparison {
+    Always,
+    Never,
     LessThan,
     GreaterThan,
-    Equal,
+    Equals,
     NotEqual,
 }
 
@@ -27,19 +29,9 @@ pub(crate) struct GlobPattern {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "header_op", rename_all = "snake_case")]
 pub(crate) enum HeaderOperand {
+    None,
     Literal { value: String },
     Glob { pattern: GlobPattern },
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
-#[serde(tag = "header_cmp", rename_all = "snake_case")]
-pub(crate) enum HeaderComparison {
-    Always,
-    Never,
-    Equals { test_value: HeaderOperand },
-    NotEquals { test_value: HeaderOperand },
-    LessThan { test_value: String },
-    GreaterThan { test_value: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
@@ -62,8 +54,10 @@ pub(crate) enum Op {
         value: String,
     },
     HeaderCheck {
-        key: HeaderComparison,
-        value: HeaderComparison,
+        key_op: Comparison,
+        key_operand: HeaderOperand,
+        value_op: Comparison,
+        value_operand: HeaderOperand,
     },
 }
 
@@ -86,21 +80,21 @@ mod tests {
           },
           {
             "op": "header_check",
-            "key": {
-              "header_cmp": "equals",
-              "test_value": {
-                "header_op": "glob",
-                "pattern": {
-                  "value": "x-header-[a-zA-Z]+-[1-9][0-9]*"
-                }
+            "key_op": {
+              "cmp": "equals"
+            },
+            "key_operand": {
+              "header_op": "glob",
+              "pattern": {
+                "value": "x-header-[a-zA-Z]+-[1-9][0-9]*"
               }
             },
-            "value": {
-              "header_cmp": "not_equals",
-              "test_value": {
-                "header_op": "literal",
-                "value": "2"
-              }
+            "value_op": {
+              "cmp": "not_equal"
+            },
+            "value_operand": {
+              "header_op": "literal",
+              "value": "2"
             }
           },
           {
@@ -141,14 +135,14 @@ mod tests {
             "op": "status_code_check",
             "value": 201,
             "operator": {
-              "cmp": "equal"
+              "cmp": "equals"
             }
           },
           {
             "op": "status_code_check",
             "value": 202,
             "operator": {
-              "cmp": "equal"
+              "cmp": "equals"
             }
           }
         ]
@@ -159,7 +153,6 @@ mod tests {
 
         let j: Assertion = serde_json::from_str(s).unwrap();
         let s2 = serde_json::to_string_pretty(&j).unwrap();
-
         assert_eq!(s, s2);
     }
 }
