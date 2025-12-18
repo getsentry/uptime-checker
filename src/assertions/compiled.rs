@@ -96,6 +96,28 @@ impl EvalResult {
     }
 }
 
+pub fn extract_failure_data(
+    path: &EvalPath,
+    assert_op: &crate::assertions::Op,
+) -> crate::assertions::Op {
+    match path {
+        EvalPath::Leaf => assert_op.clone(),
+        EvalPath::AllChildren => assert_op.clone(),
+        EvalPath::ChildIndex { index, child } => match assert_op {
+            crate::assertions::Op::And { children } => crate::assertions::Op::And {
+                children: vec![extract_failure_data(&*child, &children[*index])],
+            },
+            crate::assertions::Op::Or { children } => crate::assertions::Op::Or {
+                children: vec![extract_failure_data(&*child, &children[*index])],
+            },
+            crate::assertions::Op::Not { operand } => crate::assertions::Op::Not {
+                operand: extract_failure_data(*&child, &**operand).into(),
+            },
+            _ => panic!(),
+        },
+    }
+}
+
 struct Gas(u32);
 
 impl Gas {
@@ -547,7 +569,7 @@ mod tests {
     use http::{HeaderMap, HeaderValue};
 
     use crate::assertions::{
-        compiled::{compile, CompilationError, EvalPath},
+        compiled::{compile, extract_failure_data, CompilationError, EvalPath},
         Assertion, Comparison, GlobPattern, HeaderOperand, Op,
     };
 
@@ -926,8 +948,8 @@ mod tests {
                 .into(),
             },
         };
-        let assert = compile(&assert).unwrap();
-        let eval = assert.eval(200, &hmap, b"").unwrap();
+        let c_assert = compile(&assert).unwrap();
+        let eval = c_assert.eval(200, &hmap, b"").unwrap();
         assert!(!eval.result);
         assert_eq!(
             eval.reason_path,
@@ -939,7 +961,24 @@ mod tests {
                 }
                 .into()
             }
-        )
+        );
+
+        let extracted_failure = extract_failure_data(&eval.reason_path, &assert.root);
+        match extracted_failure {
+            Op::Not { operand } => match *operand {
+                Op::Or { children } => assert_eq!(
+                    children[0],
+                    Op::HeaderCheck {
+                        key_op: Comparison::Equals,
+                        key_operand: HeaderOperand::Literal { value: "2".into() },
+                        value_op: Comparison::Always,
+                        value_operand: HeaderOperand::None,
+                    }
+                ),
+                _ => assert!(false),
+            },
+            _ => assert!(false),
+        }
     }
 
     #[test]
@@ -972,8 +1011,8 @@ mod tests {
                 ],
             },
         };
-        let assert = compile(&assert).unwrap();
-        let eval = assert.eval(200, &hmap, b"").unwrap();
+        let c_assert = compile(&assert).unwrap();
+        let eval = c_assert.eval(200, &hmap, b"").unwrap();
         assert!(!eval.result);
         assert_eq!(
             eval.reason_path,
@@ -981,7 +1020,21 @@ mod tests {
                 index: 2,
                 child: EvalPath::Leaf.into()
             }
-        )
+        );
+
+        let extracted_failure = extract_failure_data(&eval.reason_path, &assert.root);
+        match extracted_failure {
+            Op::And { children } => assert_eq!(
+                children[0],
+                Op::HeaderCheck {
+                    key_op: Comparison::Equals,
+                    key_operand: HeaderOperand::Literal { value: "4".into() },
+                    value_op: Comparison::Always,
+                    value_operand: HeaderOperand::None,
+                },
+            ),
+            _ => assert!(false),
+        }
     }
 
     #[test]
@@ -1032,8 +1085,8 @@ mod tests {
                 .into(),
             },
         };
-        let assert = compile(&assert).unwrap();
-        let eval = assert.eval(200, &hmap, b"").unwrap();
+        let c_assert = compile(&assert).unwrap();
+        let eval = c_assert.eval(200, &hmap, b"").unwrap();
         assert!(!eval.result);
         assert_eq!(
             eval.reason_path,
@@ -1045,6 +1098,36 @@ mod tests {
                 }
                 .into()
             }
-        )
+        );
+
+        let extracted_failure = extract_failure_data(&eval.reason_path, &assert.root);
+        match extracted_failure {
+            Op::Not { operand } => match *operand {
+                Op::Or { children } => match &children[0] {
+                    Op::And { children } => assert_eq!(
+                        *children,
+                        vec![
+                            Op::HeaderCheck {
+                                key_op: Comparison::Equals,
+                                key_operand: HeaderOperand::Literal { value: "1".into() },
+                                value_op: Comparison::Always,
+                                value_operand: HeaderOperand::None,
+                            },
+                            Op::HeaderCheck {
+                                key_op: Comparison::NotEqual,
+                                key_operand: HeaderOperand::Literal {
+                                    value: "123".into(),
+                                },
+                                value_op: Comparison::Always,
+                                value_operand: HeaderOperand::None,
+                            },
+                        ],
+                    ),
+                    _ => assert!(false),
+                },
+                _ => assert!(false),
+            },
+            _ => assert!(false),
+        }
     }
 }
