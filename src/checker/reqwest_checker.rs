@@ -1041,6 +1041,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
