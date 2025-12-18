@@ -167,6 +167,7 @@ impl Manager {
                 config.http_checker_dns_nameservers.clone(),
                 config.interface.to_owned(),
                 assertions::cache::Cache::new(),
+                config.disable_asserts,
             )
             .into(),
         });

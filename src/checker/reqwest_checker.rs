@@ -31,6 +31,7 @@ const MAX_BODY_BYTES: usize = 10_000;
 pub struct ReqwestChecker {
     client: Client,
     assert_cache: assertions::cache::Cache,
+    diable_assertions: bool,
 }
 
 struct Options {
@@ -48,6 +49,9 @@ struct Options {
 
     /// Specifies the network interface to bind the client to.
     interface: Option<String>,
+
+    /// Disable runtime assertion evaluation
+    disable_assertions: bool,
 }
 
 impl Default for Options {
@@ -58,6 +62,7 @@ impl Default for Options {
             pool_idle_timeout: Duration::from_secs(90),
             dns_nameservers: None,
             interface: None,
+            disable_assertions: false,
         }
     }
 }
@@ -219,6 +224,7 @@ impl ReqwestChecker {
         Self {
             client,
             assert_cache,
+            diable_assertions: options.disable_assertions,
         }
     }
 
@@ -229,6 +235,7 @@ impl ReqwestChecker {
         dns_nameservers: Option<Vec<IpAddr>>,
         interface: Option<String>,
         assert_cache: assertions::cache::Cache,
+        disable_assertions: bool,
     ) -> Self {
         Self::new_internal(
             Options {
@@ -237,6 +244,7 @@ impl ReqwestChecker {
                 pool_idle_timeout,
                 dns_nameservers,
                 interface,
+                disable_assertions,
             },
             assert_cache,
         )
@@ -281,18 +289,28 @@ fn to_check_result(
     response: Result<(Response, RequestId), reqwest::Error>,
     check: &ScheduledCheck,
     body_bytes: &[u8],
+    disable_assertions: bool,
 ) -> Check {
     match response {
         Ok((r, _)) => {
-            if let Some(assertion) = &check.get_config().assertion {
-                run_assertion(
-                    assert_cache,
-                    body_bytes,
-                    &check.get_config().subscription_id,
-                    &r,
-                    assertion,
-                )
+            if !disable_assertions {
+                if let Some(assertion) = &check.get_config().assertion {
+                    run_assertion(
+                        assert_cache,
+                        body_bytes,
+                        &check.get_config().subscription_id,
+                        &r,
+                        assertion,
+                    )
+                } else {
+                    match r.status().is_success() {
+                        true => Check::success(),
+                        false => Check::code_failure(r.status()),
+                    }
+                }
             } else {
+                // TODO: rust 2024 allows let-chaining, so the enclosing if-statement can be
+                // folded into the the if let
                 match r.status().is_success() {
                     true => Check::success(),
                     false => Check::code_failure(r.status()),
@@ -490,7 +508,13 @@ impl Checker for ReqwestChecker {
             Err(err) => to_errored_request_infos(&actual_check_time, start, err, check),
         };
 
-        let check_result = to_check_result(&self.assert_cache, response, check, &body_bytes);
+        let check_result = to_check_result(
+            &self.assert_cache,
+            response,
+            check,
+            &body_bytes,
+            self.diable_assertions,
+        );
 
         // Our total duration includes the additional processing time, including running the assert.
         let duration = TimeDelta::from_std(start.elapsed()).expect("duration shouldn't be large");
@@ -627,6 +651,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -668,6 +693,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -720,6 +746,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -767,6 +794,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -808,6 +836,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -837,6 +866,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -881,6 +911,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -1061,6 +1092,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -1088,6 +1120,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -1131,6 +1164,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -1167,6 +1201,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -1202,6 +1237,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
@@ -1252,6 +1288,7 @@ mod tests {
                 dns_nameservers: None,
                 pool_idle_timeout: Duration::from_secs(90),
                 interface: None,
+                disable_assertions: false,
             },
             assertions::cache::Cache::new(),
         );
