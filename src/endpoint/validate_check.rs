@@ -141,15 +141,15 @@ mod tests {
             region_schedule_mode: None,
             assertion: Some(Assertion {
                 root: Op::HeaderCheck {
-                    key: crate::assertions::HeaderComparison::Equals {
-                        test_value: crate::assertions::HeaderOperand::Glob {
-                            pattern: GlobPattern {
-                                // invalid glob pattern
-                                value: "[]]])(".to_owned(),
-                            },
+                    key_op: crate::assertions::Comparison::Equals,
+                    key_operand: crate::assertions::HeaderOperand::Glob {
+                        pattern: GlobPattern {
+                            // invalid glob pattern
+                            value: "[]]])(".to_owned(),
                         },
                     },
-                    value: crate::assertions::HeaderComparison::Always,
+                    value_op: crate::assertions::Comparison::Always,
+                    value_operand: crate::assertions::HeaderOperand::None,
                 },
             }),
         };

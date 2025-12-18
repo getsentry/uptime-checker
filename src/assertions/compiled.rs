@@ -140,6 +140,8 @@ impl Assertion {
 
 #[derive(Debug, PartialEq, Eq)]
 enum Comparison {
+    Always,
+    Never,
     LessThan,
     GreaterThan,
     Equal,
@@ -149,9 +151,11 @@ enum Comparison {
 impl From<&super::Comparison> for Comparison {
     fn from(value: &super::Comparison) -> Self {
         match *value {
+            super::Comparison::Always => Comparison::Always,
+            super::Comparison::Never => Comparison::Never,
             super::Comparison::LessThan => Comparison::LessThan,
             super::Comparison::GreaterThan => Comparison::GreaterThan,
-            super::Comparison::Equal => Comparison::Equal,
+            super::Comparison::Equals => Comparison::Equal,
             super::Comparison::NotEqual => Comparison::NotEqual,
         }
     }
@@ -159,14 +163,52 @@ impl From<&super::Comparison> for Comparison {
 
 #[derive(Debug, PartialEq, Eq)]
 enum HeaderOperand {
+    None,
     Literal { value: Value },
     Glob { value: relay_pattern::Pattern },
+}
+
+impl HeaderOperand {
+    pub fn eval(
+        &self,
+        op: &Comparison,
+        header_value: &str,
+        gas: &mut Gas,
+    ) -> Result<bool, RuntimeError> {
+        let result = match op {
+            Comparison::Always => true,
+            Comparison::Never => false,
+            Comparison::LessThan => match self {
+                HeaderOperand::None => false,
+                HeaderOperand::Literal { value } => match value {
+                    Value::I64(value) => cmp_lt(header_value, value),
+                    Value::F64(value) => cmp_lt(header_value, value),
+                    Value::String(value) => cmp_lt(header_value, value),
+                },
+                HeaderOperand::Glob { .. } => false,
+            },
+            Comparison::GreaterThan => match self {
+                HeaderOperand::None => false,
+                HeaderOperand::Literal { value } => match value {
+                    Value::I64(value) => cmp_gt(header_value, value),
+                    Value::F64(value) => cmp_gt(header_value, value),
+                    Value::String(value) => cmp_gt(header_value, value),
+                },
+                HeaderOperand::Glob { .. } => false,
+            },
+            Comparison::Equal => cmp_eq_header(header_value, self, gas)?,
+            Comparison::NotEqual => !cmp_eq_header(header_value, self, gas)?,
+        };
+
+        Ok(result)
+    }
 }
 
 impl TryFrom<&super::HeaderOperand> for HeaderOperand {
     type Error = CompilationError;
     fn try_from(value: &super::HeaderOperand) -> Result<Self, Self::Error> {
         let v = match value {
+            super::HeaderOperand::None => HeaderOperand::None,
             super::HeaderOperand::Literal { value } => HeaderOperand::Literal {
                 value: value.into(),
             },
@@ -226,30 +268,6 @@ impl From<&String> for Value {
     }
 }
 
-impl TryFrom<&super::HeaderComparison> for HeaderComparison {
-    type Error = CompilationError;
-    fn try_from(value: &super::HeaderComparison) -> Result<Self, Self::Error> {
-        let v = match value {
-            super::HeaderComparison::Always => HeaderComparison::Always,
-            super::HeaderComparison::Never => HeaderComparison::Never,
-            super::HeaderComparison::Equals { test_value } => HeaderComparison::Equals {
-                test_value: test_value.try_into()?,
-            },
-            super::HeaderComparison::NotEquals { test_value } => HeaderComparison::NotEquals {
-                test_value: test_value.try_into()?,
-            },
-            super::HeaderComparison::LessThan { test_value } => HeaderComparison::LessThan {
-                test_value: test_value.into(),
-            },
-            super::HeaderComparison::GreaterThan { test_value } => HeaderComparison::GreaterThan {
-                test_value: test_value.into(),
-            },
-        };
-
-        Ok(v)
-    }
-}
-
 fn cmp_eq<T>(header_value: &str, value: &T) -> bool
 where
     T: FromStr + PartialEq,
@@ -296,6 +314,7 @@ fn cmp_eq_header(
             gas.consume(5)?;
             value.is_match(header_value)
         }
+        HeaderOperand::None => false,
     };
 
     Ok(result)
@@ -348,8 +367,10 @@ enum Op {
         value: JpQuery,
     },
     HeaderCheck {
-        key: HeaderComparison,
-        value: HeaderComparison,
+        key_op: Comparison,
+        key_operand: HeaderOperand,
+        value_op: Comparison,
+        value_operand: HeaderOperand,
     },
 }
 
@@ -393,6 +414,8 @@ impl Op {
             Op::StatusCodeCheck { value, operator } => {
                 gas.consume(1)?;
                 let value = match operator {
+                    Comparison::Always => true,
+                    Comparison::Never => false,
                     Comparison::LessThan => status_code < *value,
                     Comparison::GreaterThan => status_code > *value,
                     Comparison::Equal => *value == status_code,
@@ -400,14 +423,19 @@ impl Op {
                 };
                 EvalResult::leaf(value)
             }
-            Op::HeaderCheck { key, value } => {
+            Op::HeaderCheck {
+                key_op,
+                key_operand,
+                value_op,
+                value_operand,
+            } => {
                 // Find any header that passes key.  Then, see if it's value passes value.
                 let mut result = EvalResult::leaf(false);
 
                 for (k, v) in headers {
-                    if key.eval(k.as_str(), gas)? {
+                    if key_operand.eval(key_op, k.as_str(), gas)? {
                         if let Ok(value_str) = v.to_str() {
-                            if value.eval(value_str, gas)? {
+                            if value_operand.eval(value_op, value_str, gas)? {
                                 result = EvalResult::leaf(true);
                                 break;
                             }
@@ -452,9 +480,16 @@ fn compile_op(op: &super::Op) -> Result<Op, CompilationError> {
             value: *value,
             operator: operator.into(),
         },
-        super::Op::HeaderCheck { key, value } => Op::HeaderCheck {
-            key: key.try_into()?,
-            value: value.try_into()?,
+        super::Op::HeaderCheck {
+            key_op,
+            key_operand,
+            value_op,
+            value_operand,
+        } => Op::HeaderCheck {
+            key_op: key_op.into(),
+            value_op: value_op.into(),
+            key_operand: key_operand.try_into()?,
+            value_operand: value_operand.try_into()?,
         },
         super::Op::JsonPath { value } => Op::JsonPath {
             value: parse_json_path(value, GLOB_COMPLEXITY_LIMIT)?,
@@ -513,7 +548,7 @@ mod tests {
 
     use crate::assertions::{
         compiled::{compile, CompilationError, EvalPath},
-        Assertion, Comparison, GlobPattern, HeaderComparison, HeaderOperand, Op,
+        Assertion, Comparison, GlobPattern, HeaderOperand, Op,
     };
 
     #[test]
@@ -531,7 +566,7 @@ mod tests {
                     },
                     Op::StatusCodeCheck {
                         value: 200,
-                        operator: Comparison::Equal,
+                        operator: Comparison::Equals,
                     },
                     Op::StatusCodeCheck {
                         value: 400,
@@ -564,7 +599,7 @@ mod tests {
                     },
                     Op::StatusCodeCheck {
                         value: 200,
-                        operator: Comparison::Equal,
+                        operator: Comparison::Equals,
                     },
                 ],
             },
@@ -607,11 +642,11 @@ mod tests {
                         children: vec![
                             Op::StatusCodeCheck {
                                 value: 201,
-                                operator: Comparison::Equal,
+                                operator: Comparison::Equals,
                             },
                             Op::StatusCodeCheck {
                                 value: 202,
-                                operator: Comparison::Equal,
+                                operator: Comparison::Equals,
                             },
                         ],
                     },
@@ -669,14 +704,14 @@ mod tests {
             value: "$[?length(@.prop1) > 4]".to_owned(),
         };
         let headercheck = Op::HeaderCheck {
-            key: HeaderComparison::Equals {
-                test_value: HeaderOperand::Glob {
-                    pattern: GlobPattern {
-                        value: "*-good*".to_owned(),
-                    },
+            key_op: Comparison::Equals,
+            key_operand: HeaderOperand::Glob {
+                pattern: GlobPattern {
+                    value: "*-good*".to_owned(),
                 },
             },
-            value: HeaderComparison::Always,
+            value_op: Comparison::Always,
+            value_operand: HeaderOperand::None,
         };
 
         let assert = Assertion {
@@ -771,14 +806,14 @@ mod tests {
 
         let assert = Assertion {
             root: Op::HeaderCheck {
-                key: HeaderComparison::Equals {
-                    test_value: HeaderOperand::Glob {
-                        pattern: GlobPattern {
-                            value: r"*-good-[0-9]".into(),
-                        },
+                key_op: Comparison::Equals,
+                key_operand: HeaderOperand::Glob {
+                    pattern: GlobPattern {
+                        value: r"*-good-[0-9]".into(),
                     },
                 },
-                value: HeaderComparison::Always,
+                value_op: Comparison::Always,
+                value_operand: HeaderOperand::None,
             },
         };
         let assert = compile(&assert).unwrap();
@@ -787,16 +822,14 @@ mod tests {
         let assert = Assertion {
             root: Op::Or {
                 children: vec![Op::HeaderCheck {
-                    key: HeaderComparison::Equals {
-                        test_value: HeaderOperand::Glob {
-                            pattern: GlobPattern {
-                                value: r"*-good-[0-9]".into(),
-                            },
+                    key_op: Comparison::Equals,
+                    key_operand: HeaderOperand::Glob {
+                        pattern: GlobPattern {
+                            value: r"*-good-[0-9]".into(),
                         },
                     },
-                    value: HeaderComparison::Equals {
-                        test_value: HeaderOperand::Literal { value: "2".into() },
-                    },
+                    value_op: Comparison::Equals,
+                    value_operand: HeaderOperand::Literal { value: "2".into() },
                 }],
             },
         };
@@ -805,18 +838,17 @@ mod tests {
 
         let assert = Assertion {
             root: Op::HeaderCheck {
-                key: HeaderComparison::Equals {
-                    test_value: HeaderOperand::Glob {
-                        pattern: GlobPattern {
-                            value: r"*-good-[0-9]".into(),
-                        },
+                key_op: Comparison::Equals,
+                key_operand: HeaderOperand::Glob {
+                    pattern: GlobPattern {
+                        value: r"*-good-[0-9]".into(),
                     },
                 },
-                value: HeaderComparison::Equals {
-                    test_value: HeaderOperand::Glob {
-                        pattern: GlobPattern {
-                            value: r"[0-9][0-9]".into(),
-                        },
+
+                value_op: Comparison::Equals,
+                value_operand: HeaderOperand::Glob {
+                    pattern: GlobPattern {
+                        value: r"[0-9][0-9]".into(),
                     },
                 },
             },
@@ -844,14 +876,14 @@ mod tests {
     fn test_broken_header_glob() {
         let assert = Assertion {
             root: Op::HeaderCheck {
-                key: HeaderComparison::Equals {
-                    test_value: HeaderOperand::Glob {
-                        pattern: GlobPattern {
-                            value: "'a']".into(),
-                        },
+                key_op: Comparison::Equals,
+                key_operand: HeaderOperand::Glob {
+                    pattern: GlobPattern {
+                        value: "'a']".into(),
                     },
                 },
-                value: HeaderComparison::Always,
+                value_op: Comparison::Always,
+                value_operand: HeaderOperand::None,
             },
         };
 
@@ -872,22 +904,22 @@ mod tests {
                 operand: Op::Or {
                     children: vec![
                         Op::HeaderCheck {
-                            key: HeaderComparison::Equals {
-                                test_value: HeaderOperand::Literal { value: "1".into() },
-                            },
-                            value: HeaderComparison::Always,
+                            key_op: Comparison::Equals,
+                            key_operand: HeaderOperand::Literal { value: "1".into() },
+                            value_op: Comparison::Always,
+                            value_operand: HeaderOperand::None,
                         },
                         Op::HeaderCheck {
-                            key: HeaderComparison::Equals {
-                                test_value: HeaderOperand::Literal { value: "2".into() },
-                            },
-                            value: HeaderComparison::Always,
+                            key_op: Comparison::Equals,
+                            key_operand: HeaderOperand::Literal { value: "2".into() },
+                            value_op: Comparison::Always,
+                            value_operand: HeaderOperand::None,
                         },
                         Op::HeaderCheck {
-                            key: HeaderComparison::Equals {
-                                test_value: HeaderOperand::Literal { value: "3".into() },
-                            },
-                            value: HeaderComparison::Always,
+                            key_op: Comparison::Equals,
+                            key_operand: HeaderOperand::Literal { value: "3".into() },
+                            value_op: Comparison::Always,
+                            value_operand: HeaderOperand::None,
                         },
                     ],
                 }
@@ -920,22 +952,22 @@ mod tests {
             root: Op::And {
                 children: vec![
                     Op::HeaderCheck {
-                        key: HeaderComparison::Equals {
-                            test_value: HeaderOperand::Literal { value: "1".into() },
-                        },
-                        value: HeaderComparison::Always,
+                        key_op: Comparison::Equals,
+                        key_operand: HeaderOperand::Literal { value: "1".into() },
+                        value_op: Comparison::Always,
+                        value_operand: HeaderOperand::None,
                     },
                     Op::HeaderCheck {
-                        key: HeaderComparison::Equals {
-                            test_value: HeaderOperand::Literal { value: "2".into() },
-                        },
-                        value: HeaderComparison::Always,
+                        key_op: Comparison::Equals,
+                        key_operand: HeaderOperand::Literal { value: "2".into() },
+                        value_op: Comparison::Always,
+                        value_operand: HeaderOperand::None,
                     },
                     Op::HeaderCheck {
-                        key: HeaderComparison::Equals {
-                            test_value: HeaderOperand::Literal { value: "4".into() },
-                        },
-                        value: HeaderComparison::Always,
+                        key_op: Comparison::Equals,
+                        key_operand: HeaderOperand::Literal { value: "4".into() },
+                        value_op: Comparison::Always,
+                        value_operand: HeaderOperand::None,
                     },
                 ],
             },
@@ -965,18 +997,18 @@ mod tests {
                         Op::And {
                             children: vec![
                                 Op::HeaderCheck {
-                                    key: HeaderComparison::Equals {
-                                        test_value: HeaderOperand::Literal { value: "1".into() },
-                                    },
-                                    value: HeaderComparison::Always,
+                                    key_op: Comparison::Equals,
+                                    key_operand: HeaderOperand::Literal { value: "1".into() },
+                                    value_op: Comparison::Always,
+                                    value_operand: HeaderOperand::None,
                                 },
                                 Op::HeaderCheck {
-                                    key: HeaderComparison::NotEquals {
-                                        test_value: HeaderOperand::Literal {
-                                            value: "123".into(),
-                                        },
+                                    key_op: Comparison::NotEqual,
+                                    key_operand: HeaderOperand::Literal {
+                                        value: "123".into(),
                                     },
-                                    value: HeaderComparison::Always,
+                                    value_op: Comparison::Always,
+                                    value_operand: HeaderOperand::None,
                                 },
                             ],
                         },
@@ -985,13 +1017,13 @@ mod tests {
                                 Op::Not {
                                     operand: Op::StatusCodeCheck {
                                         value: 200,
-                                        operator: Comparison::Equal,
+                                        operator: Comparison::Equals,
                                     }
                                     .into(),
                                 },
                                 Op::StatusCodeCheck {
                                     value: 201,
-                                    operator: Comparison::Equal,
+                                    operator: Comparison::Equals,
                                 },
                             ],
                         },
