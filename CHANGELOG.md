@@ -1,3 +1,17 @@
+## 25.12.1
+
+### New Features ✨
+
+#### Uptime
+
+- feat(uptime): Add a validate_check endpoint. by @klochek in [#455](https://github.com/getsentry/uptime-checker/pull/455)
+- feat(uptime): expose assertion failure details on CheckResult by @klochek in [#440](https://github.com/getsentry/uptime-checker/pull/440)
+- feat(uptime): Add miss_produced and miss_backfill status reason types by @evanpurkhiser in [#454](https://github.com/getsentry/uptime-checker/pull/454)
+
+### Bug Fixes 🐛
+
+- fix(uptime): rework assertion comparison a bit, for consistency by @klochek in [#456](https://github.com/getsentry/uptime-checker/pull/456)
+
 ## 25.12.0
 
 ### New Features ✨
