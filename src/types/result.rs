@@ -7,6 +7,7 @@ use hyper::rt::ConnectionStats;
 use hyper::stats::AbsoluteDuration;
 use hyper::stats::RequestStats;
 use openssl::asn1::Asn1Time;
+use openssl::asn1::TimeDiff;
 use openssl::x509::X509;
 use sentry::protocol::SpanId;
 use serde::{Deserialize, Serialize};
@@ -137,10 +138,15 @@ pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<
                 .get_certificate_bytes()
                 .and_then(|cert| X509::from_der(cert).ok())
                 .map(|cert| {
-                    let epoch_start = Asn1Time::from_unix(0).unwrap();
+                    let epoch_start =
+                        Asn1Time::from_unix(0).expect("from_unix(0) should never fail");
 
-                    let not_after_diff = epoch_start.diff(cert.not_after()).unwrap();
-                    let not_before_diff = epoch_start.diff(cert.not_before()).unwrap();
+                    let not_after_diff = epoch_start
+                        .diff(cert.not_after())
+                        .unwrap_or(TimeDiff { days: 0, secs: 0 });
+                    let not_before_diff = epoch_start
+                        .diff(cert.not_before())
+                        .unwrap_or(TimeDiff { days: 0, secs: 0 });
 
                     CertificateInfo {
                         not_after_timestamp_s: not_after_diff.secs as u64
