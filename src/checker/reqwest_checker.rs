@@ -302,11 +302,10 @@ fn to_check_result(
                         &r,
                         assertion,
                     )
+                } else if r.status().is_success() {
+                    Check::success()
                 } else {
-                    match r.status().is_success() {
-                        true => Check::success(),
-                        false => Check::code_failure(r.status()),
-                    }
+                    Check::code_failure(r.status())
                 }
             } else {
                 // TODO: rust 2024 allows let-chaining, so the enclosing if-statement can be
