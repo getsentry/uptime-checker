@@ -162,6 +162,9 @@ pub struct Config {
 
     /// The port on which to run the checker webserver.
     pub webserver_port: u16,
+
+    /// Disable runtime assert evaluation.
+    pub disable_asserts: bool,
 }
 
 impl Default for Config {
@@ -205,6 +208,7 @@ impl Default for Config {
             enable_metrics: false,
             redis_readonly: false,
             webserver_port: 12345,
+            disable_asserts: false,
         }
     }
 }
@@ -362,6 +366,7 @@ mod tests {
                         enable_metrics: false,
                         redis_readonly: false,
                         webserver_port: 12345,
+                        disable_asserts: false,
                     }
                 );
             },
@@ -459,6 +464,7 @@ mod tests {
                         enable_metrics: false,
                         redis_readonly: true,
                         webserver_port: 81,
+                        disable_asserts: false,
                     }
                 );
             },
