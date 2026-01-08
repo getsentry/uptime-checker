@@ -105,13 +105,13 @@ pub fn extract_failure_data(
         EvalPath::AllChildren => assert_op.clone(),
         EvalPath::ChildIndex { index, child } => match assert_op {
             crate::assertions::Op::And { children } => crate::assertions::Op::And {
-                children: vec![extract_failure_data(&*child, &children[*index])],
+                children: vec![extract_failure_data(child, &children[*index])],
             },
             crate::assertions::Op::Or { children } => crate::assertions::Op::Or {
-                children: vec![extract_failure_data(&*child, &children[*index])],
+                children: vec![extract_failure_data(child, &children[*index])],
             },
             crate::assertions::Op::Not { operand } => crate::assertions::Op::Not {
-                operand: extract_failure_data(*&child, &**operand).into(),
+                operand: extract_failure_data(child, operand).into(),
             },
             _ => panic!(),
         },
@@ -975,9 +975,9 @@ mod tests {
                         value_operand: HeaderOperand::None,
                     }
                 ),
-                _ => assert!(false),
+                _ => panic!(),
             },
-            _ => assert!(false),
+            _ => panic!(),
         }
     }
 
@@ -1033,7 +1033,7 @@ mod tests {
                     value_operand: HeaderOperand::None,
                 },
             ),
-            _ => assert!(false),
+            _ => panic!(),
         }
     }
 
@@ -1123,11 +1123,11 @@ mod tests {
                             },
                         ],
                     ),
-                    _ => assert!(false),
+                    _ => panic!(),
                 },
-                _ => assert!(false),
+                _ => panic!(),
             },
-            _ => assert!(false),
+            _ => panic!(),
         }
     }
 }
