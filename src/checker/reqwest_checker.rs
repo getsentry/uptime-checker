@@ -1,6 +1,7 @@
 use super::ip_filter::is_external_ip;
 use super::{make_trace_header, make_trace_id, Checker};
-use crate::assertions::{self};
+use crate::assertions::compiled::extract_failure_data;
+use crate::assertions::{self, Assertion};
 use crate::check_executor::ScheduledCheck;
 use crate::types::result::{to_request_info_list, Check, RequestDurations, Timing};
 use crate::types::{
@@ -520,6 +521,23 @@ impl Checker for ReqwestChecker {
 
         let final_req = rinfos.last().unwrap().clone();
 
+        let assertion_failure_data = if let Some(path) = check_result.assert_path {
+            Assertion {
+                root: extract_failure_data(
+                    &path,
+                    &check
+                        .get_config()
+                        .assertion
+                        .as_ref()
+                        .expect("cannot have assertion failure data with an assertion")
+                        .root,
+                ),
+            }
+            .into()
+        } else {
+            None
+        };
+
         CheckResult {
             guid: trace_id,
             subscription_id: check.get_config().subscription_id,
@@ -536,7 +554,7 @@ impl Checker for ReqwestChecker {
             request_info: Some(final_req),
             region,
             request_info_list: rinfos,
-            assertion_failure_data: check_result.assert_path,
+            assertion_failure_data,
         }
     }
 

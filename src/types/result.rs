@@ -1,5 +1,6 @@
 use crate::assertions::compiled;
 use crate::assertions::compiled::EvalPath;
+use crate::assertions::Assertion;
 use chrono::{DateTime, TimeDelta, Utc};
 use http::StatusCode;
 use hyper::rt::ConnectionStats;
@@ -374,7 +375,7 @@ pub struct CheckResult {
 
     /// If an assertion was present, executed successfully, and didn't pass, this contains
     /// the parts of the assertion that led to the failed status.
-    pub assertion_failure_data: Option<EvalPath>,
+    pub assertion_failure_data: Option<Assertion>,
 }
 
 pub(crate) struct Check {
@@ -463,6 +464,8 @@ impl From<Result<compiled::EvalResult, compiled::RuntimeError>> for Check {
 #[cfg(test)]
 mod tests {
     use similar_asserts::assert_eq;
+
+    use crate::assertions::{self, GlobPattern};
 
     use super::*;
 
@@ -616,9 +619,41 @@ mod tests {
             request_info: None,
             request_info_list: vec![],
             region: "default",
-            assertion_failure_data: EvalPath::ChildIndex {
-                index: 0,
-                child: EvalPath::AllChildren.into(),
+            assertion_failure_data: Assertion {
+                root: assertions::Op::And {
+                    children: vec![
+                        assertions::Op::HeaderCheck {
+                            key_op: assertions::Comparison::Equals,
+                            key_operand: assertions::HeaderOperand::Literal {
+                                value: "hello".to_owned(),
+                            },
+                            value_op: assertions::Comparison::NotEqual,
+                            value_operand: assertions::HeaderOperand::Glob {
+                                pattern: GlobPattern {
+                                    value: "a*".to_owned(),
+                                },
+                            },
+                        },
+                        assertions::Op::HeaderCheck {
+                            key_op: assertions::Comparison::LessThan,
+                            key_operand: assertions::HeaderOperand::None,
+                            value_op: assertions::Comparison::GreaterThan,
+                            value_operand: assertions::HeaderOperand::None,
+                        },
+                        assertions::Op::HeaderCheck {
+                            key_op: assertions::Comparison::Always,
+                            key_operand: assertions::HeaderOperand::None,
+                            value_op: assertions::Comparison::Never,
+                            value_operand: assertions::HeaderOperand::None,
+                        },
+                        assertions::Op::Not {
+                            operand: assertions::Op::JsonPath {
+                                value: "asdf".to_owned(),
+                            }
+                            .into(),
+                        },
+                    ],
+                },
             }
             .into(),
         };
@@ -646,15 +681,7 @@ mod tests {
             request_info: None,
             request_info_list: vec![],
             region: "default",
-            assertion_failure_data: EvalPath::ChildIndex {
-                index: 0,
-                child: EvalPath::ChildIndex {
-                    index: 1,
-                    child: EvalPath::Leaf.into(),
-                }
-                .into(),
-            }
-            .into(),
+            assertion_failure_data: None,
         };
 
         let json = serde_json::to_vec(&check_result).unwrap();

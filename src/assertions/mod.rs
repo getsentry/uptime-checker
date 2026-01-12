@@ -98,6 +98,24 @@ mod tests {
             }
           },
           {
+            "op": "header_check",
+            "key_op": {
+              "cmp": "equals"
+            },
+            "key_operand": {
+              "header_op": "glob",
+              "pattern": {
+                "value": "x-header-[a-zA-Z]+-[1-9][0-9]*"
+              }
+            },
+            "value_op": {
+              "cmp": "always"
+            },
+            "value_operand": {
+              "header_op": "none"
+            }
+          },
+          {
             "op": "status_code_check",
             "value": 0,
             "operator": {
