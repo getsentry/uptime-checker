@@ -74,10 +74,7 @@ async fn do_request(
     check_config: &CheckConfig,
     sentry_trace: &str,
 ) -> Result<(Response, RequestId), reqwest::Error> {
-    let timeout = check_config
-        .timeout
-        .to_std()
-        .expect("Timeout duration should be representable as a duration");
+    let timeout = check_config.timeout.to_std().unwrap_or_default();
 
     let url = check_config.url.as_str();
 
@@ -330,15 +327,17 @@ fn run_assertion(
 ) -> Check {
     let comp_assert = assert_cache.get_or_compile(assertion);
 
-    if let Err(err) = comp_assert {
-        tracing::warn!(
-            "a bad assertion made it to compile from {} : {}",
-            subscription_id,
-            err.to_string(),
-        );
-        return Check::assert_compile_failure(&err);
-    }
-    let assertion = comp_assert.expect("already tested above");
+    let assertion = match comp_assert {
+        Ok(assertion) => assertion,
+        Err(err) => {
+            tracing::warn!(
+                "a bad assertion made it to compile from {} : {}",
+                subscription_id,
+                err.to_string(),
+            );
+            return Check::assert_compile_failure(&err);
+        }
+    };
 
     let result = assertion.eval(r.status().as_u16(), r.headers(), body_bytes);
 
@@ -406,8 +405,7 @@ fn to_errored_request_infos(
     // connection error_ will require some effort, so for now, just bill the full time to the part that
     // we failed on, leaving the others at zero.
 
-    let request_duration =
-        TimeDelta::from_std(start.elapsed()).expect("duration shouldn't be large");
+    let request_duration = TimeDelta::from_std(start.elapsed()).unwrap_or_default();
     let zero_timing = Timing {
         start_us: actual_check_time.timestamp_micros() as u128,
         duration_us: 0,
@@ -415,7 +413,7 @@ fn to_errored_request_infos(
 
     let full_duration = Timing {
         start_us: actual_check_time.timestamp_micros() as u128,
-        duration_us: request_duration.num_microseconds().unwrap() as u64,
+        duration_us: request_duration.num_microseconds().unwrap_or(0) as u64,
     };
 
     let mut dns_timing = zero_timing;
@@ -442,7 +440,7 @@ fn to_errored_request_infos(
         request_body_size_bytes: check.get_config().request_body.len() as u32,
         url: check.get_config().url.clone(),
         response_body_size_bytes: 0,
-        request_duration_us: request_duration.num_microseconds().unwrap() as u64,
+        request_duration_us: request_duration.num_microseconds().unwrap_or(0) as u64,
         durations: RequestDurations {
             dns_lookup: dns_timing,
             tcp_connection: connection_timing,
@@ -517,9 +515,9 @@ impl Checker for ReqwestChecker {
         );
 
         // Our total duration includes the additional processing time, including running the assert.
-        let duration = TimeDelta::from_std(start.elapsed()).expect("duration shouldn't be large");
+        let duration = TimeDelta::from_std(start.elapsed()).unwrap_or_default();
 
-        let final_req = rinfos.last().unwrap().clone();
+        let request_info = rinfos.last().cloned();
 
         let assertion_failure_data = if let Some(path) = check_result.assert_path {
             Assertion {
@@ -551,7 +549,7 @@ impl Checker for ReqwestChecker {
             actual_check_time_us: actual_check_time,
             duration: Some(duration),
             duration_us: Some(duration),
-            request_info: Some(final_req),
+            request_info,
             region,
             request_info_list: rinfos,
             assertion_failure_data,
