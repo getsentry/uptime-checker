@@ -485,13 +485,12 @@ impl Checker for ReqwestChecker {
         let mut response = do_request(&self.client, check.get_config(), &trace_header).await;
 
         // Determine if we should capture response data on failure
-        let should_capture = self.response_capture_enabled
-            && check.get_config().capture_response_on_failure;
+        let should_capture =
+            self.response_capture_enabled && check.get_config().capture_response_on_failure;
 
         // Read body bytes if we have an assertion OR if we should capture on failure.
         let needs_body_for_assertion = check.get_config().assertion.is_some();
-        let body_bytes = if (needs_body_for_assertion || should_capture) && response.is_ok()
-        {
+        let body_bytes = if (needs_body_for_assertion || should_capture) && response.is_ok() {
             let Ok((resp, _req_id)) = &mut response else {
                 unreachable!("enclosing if-statement means this cannot happen");
             };
@@ -683,8 +682,8 @@ mod tests {
     use crate::types::shared::RequestMethod;
     use std::net::IpAddr;
 
-    use base64::Engine;
     use super::{make_trace_header, Options, ReqwestChecker, BASE64_STANDARD, UPTIME_USER_AGENT};
+    use base64::Engine;
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
@@ -927,8 +926,12 @@ mod tests {
 
         // Verify response headers are captured
         let headers = request_info.response_headers.unwrap();
-        assert!(headers.iter().any(|(k, v)| k == "x-error-code" && v == "ERR123"));
-        assert!(headers.iter().any(|(k, v)| k == "content-type" && v == "application/json"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "x-error-code" && v == "ERR123"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "content-type" && v == "application/json"));
 
         mock.assert();
     }
@@ -950,8 +953,7 @@ mod tests {
             when.method(Method::GET)
                 .path("/error")
                 .header_exists("sentry-trace");
-            then.status(500)
-                .body("error body");
+            then.status(500).body("error body");
         });
 
         let config = CheckConfig {
