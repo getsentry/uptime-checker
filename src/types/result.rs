@@ -188,6 +188,8 @@ pub fn to_request_info_list(stats: &RequestStats, method: RequestMethod) -> Vec<
                         &rs.get_request_end(),
                     ),
                 },
+                response_body: None,
+                response_headers: None,
             }
         })
         .collect()
@@ -216,6 +218,14 @@ pub struct RequestInfo {
     // Information about the leaf certificate retrieved as part of this
     // request, if any.
     pub certificate_info: Option<CertificateInfo>,
+
+    /// Response body content, captured on failure when configured. Base64 encoded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_body: Option<String>,
+
+    /// Response headers, captured on failure when configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_headers: Option<Vec<(String, String)>>,
 }
 
 #[derive(PartialEq, Deserialize, Serialize, Clone, Default)]
@@ -398,7 +408,7 @@ impl Check {
             result: CheckStatus::Failure,
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
-                description: format!("Got non 2xx status: {}", status),
+                description: format!("Got non 2xx status: {status}"),
             }),
             assert_path: None,
         }

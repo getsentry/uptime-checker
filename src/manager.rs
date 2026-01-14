@@ -168,6 +168,7 @@ impl Manager {
                 config.interface.to_owned(),
                 assertions::cache::Cache::new(),
                 config.disable_asserts,
+                config.response_capture_enabled,
             )
             .into(),
         });
