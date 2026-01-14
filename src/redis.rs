@@ -65,7 +65,7 @@ impl RedisOperations {
     pub async fn consume_config_updates(
         &mut self,
         update_key: &String,
-    ) -> (Vec<ConfigUpdate>, Vec<ConfigUpdate>) {
+    ) -> (Vec<ConfigUpdate>, Vec<ConfigUpdate>, Vec<ConfigUpdate>) {
         let conn = self
             .get_readwrite_conn()
             .expect("must be in read-write mode to access");
@@ -73,7 +73,7 @@ impl RedisOperations {
         let mut pipe = redis::pipe();
         // We fetch all updates from the list and then delete the key. We do this
         // atomically so that there isn't any chance of a race
-        let (config_upserts, config_deletes) = pipe
+        let (config_upserts, config_deletes, response_capture_toggles) = pipe
             .atomic()
             .hvals(update_key)
             .del(update_key)
@@ -92,15 +92,19 @@ impl RedisOperations {
                 })
             })
             .filter_map(Result::ok)
-            .fold((vec![], vec![]), |(mut upserts, mut deletes), update| {
-                match update.action {
-                    ConfigUpdateAction::Upsert => upserts.push(update),
-                    ConfigUpdateAction::Delete => deletes.push(update),
-                }
-                (upserts, deletes)
-            });
+            .fold(
+                (vec![], vec![], vec![]),
+                |(mut upserts, mut deletes, mut toggles), update| {
+                    match update.action {
+                        ConfigUpdateAction::Upsert => upserts.push(update),
+                        ConfigUpdateAction::Delete => deletes.push(update),
+                        ConfigUpdateAction::SetResponseCapture => toggles.push(update),
+                    }
+                    (upserts, deletes, toggles)
+                },
+            );
 
-        (config_upserts, config_deletes)
+        (config_upserts, config_deletes, response_capture_toggles)
     }
 
     pub async fn get_config_key_payloads(

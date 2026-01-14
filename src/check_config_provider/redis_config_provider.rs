@@ -37,6 +37,8 @@ impl RedisPartition {
 pub enum ConfigUpdateAction {
     Upsert,
     Delete,
+    /// Toggle response capture for a subscription without reloading full config
+    SetResponseCapture,
 }
 
 /// The ConfigUpdate is a notification that a ConfigMessage was upserted or deleted.
@@ -49,6 +51,10 @@ pub struct ConfigUpdate {
     /// The subscription this check configuration is associated to in sentry.
     #[serde(with = "uuid::serde::simple")]
     pub subscription_id: Uuid,
+
+    /// For SetResponseCapture action: whether to capture responses on failure.
+    #[serde(default)]
+    pub capture_response_on_failure: Option<bool>,
 }
 
 trait RedisKey {
@@ -216,13 +222,15 @@ impl RedisConfigProvider {
                 let partition_update_start = Instant::now();
                 // We fetch all updates from the list and then delete the key. We do this
                 // atomically so that there isn't any chance of a race
-                let (config_upserts, config_deletes) =
+                let (config_upserts, config_deletes, response_capture_toggles) =
                     ops.consume_config_updates(&partition.update_key).await;
 
                 metrics::counter!("config_provider.updater.upserts", "uptime_region" => region, "partition" => partition.number.to_string())
                     .increment(config_upserts.len() as u64);
                 metrics::counter!("config_provider.updater.deletes", "uptime_region" => region, "partition" => partition.number.to_string())
                     .increment(config_deletes.len() as u64);
+                metrics::counter!("config_provider.updater.response_capture_toggles", "uptime_region" => region, "partition" => partition.number.to_string())
+                    .increment(response_capture_toggles.len() as u64);
 
                 config_deletes.into_iter().for_each(|config_delete| {
                     manager
@@ -236,6 +244,30 @@ impl RedisConfigProvider {
                         "config_consumer.config_removed"
                     );
                 });
+
+                // Process response capture toggles - these update the flag without reloading full config
+                for toggle in response_capture_toggles {
+                    if let Some(capture_enabled) = toggle.capture_response_on_failure {
+                        let updated = manager
+                            .get_service(partition.number)
+                            .get_config_store()
+                            .write()
+                            .expect("Lock should not be poisoned")
+                            .update_response_capture(toggle.subscription_id, capture_enabled);
+                        if updated {
+                            tracing::debug!(
+                                %toggle.subscription_id,
+                                capture_enabled,
+                                "config_consumer.response_capture_toggled"
+                            );
+                        } else {
+                            tracing::debug!(
+                                %toggle.subscription_id,
+                                "config_consumer.response_capture_toggle_ignored_config_not_found"
+                            );
+                        }
+                    }
+                }
 
                 if config_upserts.is_empty() {
                     continue;
@@ -473,6 +505,7 @@ mod tests {
         let update = ConfigUpdate {
             action: ConfigUpdateAction::Upsert,
             subscription_id: config.subscription_id,
+            capture_response_on_failure: None,
         };
         let config_msg = rmp_serde::to_vec(&config).unwrap();
         let update_msg = rmp_serde::to_vec(&update).unwrap();
@@ -494,6 +527,7 @@ mod tests {
         let update = ConfigUpdate {
             action: ConfigUpdateAction::Delete,
             subscription_id: config.subscription_id,
+            capture_response_on_failure: None,
         };
         let update_msg = rmp_serde::to_vec(&update).unwrap();
         let _: () = conn
@@ -502,6 +536,28 @@ mod tests {
             .unwrap();
         let _: () = conn
             .hset(&partition.update_key, config.redis_key(), &update_msg)
+            .await
+            .unwrap();
+    }
+
+    async fn send_response_capture_toggle(
+        mut conn: RedisAsyncConnection,
+        partition: &RedisPartition,
+        subscription_id: Uuid,
+        capture_enabled: bool,
+    ) {
+        let update = ConfigUpdate {
+            action: ConfigUpdateAction::SetResponseCapture,
+            subscription_id,
+            capture_response_on_failure: Some(capture_enabled),
+        };
+        let update_msg = rmp_serde::to_vec(&update).unwrap();
+        let _: () = conn
+            .hset(
+                &partition.update_key,
+                subscription_id.simple().to_string(),
+                &update_msg,
+            )
             .await
             .unwrap();
     }
@@ -570,6 +626,71 @@ mod tests {
         // Test deleting a non-existent config doesn't cause a problem
         send_delete(conn.clone(), removed_config.0, &removed_config.1).await;
         tokio::time::sleep(Duration::from_millis(15)).await;
+
+        shutdown.cancel();
+    }
+
+    #[redis_test(start_paused = false)]
+    async fn test_redis_config_provider_response_capture_toggle() {
+        let (config, conn, partitions, manager, shutdown) = setup_test(false).await;
+        let partition = partitions.first().unwrap();
+
+        let check_config = CheckConfig {
+            subscription_id: Uuid::new_v4(),
+            capture_response_on_failure: true,
+            ..Default::default()
+        };
+        send_update(conn.clone(), partition, &check_config).await;
+
+        let _handle = run_config_provider(&config, manager.clone(), shutdown.clone());
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        let stored_config = manager
+            .get_service(partition.number)
+            .get_config_store()
+            .read()
+            .unwrap()
+            .all_configs();
+        assert_eq!(stored_config.len(), 1);
+        assert!(stored_config[0].capture_response_on_failure);
+
+        send_response_capture_toggle(conn.clone(), partition, check_config.subscription_id, false)
+            .await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let stored_config = manager
+            .get_service(partition.number)
+            .get_config_store()
+            .read()
+            .unwrap()
+            .all_configs();
+        assert_eq!(stored_config.len(), 1);
+        assert!(!stored_config[0].capture_response_on_failure);
+
+        send_response_capture_toggle(conn.clone(), partition, check_config.subscription_id, true)
+            .await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let stored_config = manager
+            .get_service(partition.number)
+            .get_config_store()
+            .read()
+            .unwrap()
+            .all_configs();
+        assert_eq!(stored_config.len(), 1);
+        assert!(stored_config[0].capture_response_on_failure);
+
+        // Test toggle for non-existent subscription
+        send_response_capture_toggle(conn.clone(), partition, Uuid::new_v4(), false).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        // Original config should still be there unchanged
+        let stored_config = manager
+            .get_service(partition.number)
+            .get_config_store()
+            .read()
+            .unwrap()
+            .all_configs();
+        assert_eq!(stored_config.len(), 1);
+        assert!(stored_config[0].capture_response_on_failure);
 
         shutdown.cancel();
     }

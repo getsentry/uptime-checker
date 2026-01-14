@@ -139,6 +139,24 @@ impl ConfigStore {
     pub fn get_last_update(&self) -> Option<Instant> {
         self.last_update
     }
+
+    /// Update the capture_response_on_failure flag for a subscription.
+    /// Returns true if the config was found and updated, false otherwise.
+    pub fn update_response_capture(&mut self, subscription_id: Uuid, capture_enabled: bool) -> bool {
+        let Some(existing_config) = self.configs.get(&subscription_id) else {
+            return false;
+        };
+
+        if existing_config.capture_response_on_failure == capture_enabled {
+            return true;
+        }
+
+        let mut new_config = (**existing_config).clone();
+        new_config.capture_response_on_failure = capture_enabled;
+        self.add_config(new_config);
+
+        true
+    }
 }
 
 #[cfg(test)]
@@ -320,5 +338,37 @@ mod tests {
         // Remove config
         store.remove_config(config.subscription_id);
         assert_eq!(store.get_last_update(), Some(now));
+    }
+
+    #[test]
+    fn test_update_response_capture() {
+        let mut store = ConfigStore::new();
+
+        let subscription_id = Uuid::from_u128(64);
+        let config = CheckConfig {
+            subscription_id,
+            capture_response_on_failure: true,
+            ..Default::default()
+        };
+
+        store.add_config(config);
+
+        let stored = store.configs.get(&subscription_id).unwrap();
+        assert!(stored.capture_response_on_failure);
+
+        let result = store.update_response_capture(subscription_id, false);
+        assert!(result);
+        let stored = store.configs.get(&subscription_id).unwrap();
+        assert!(!stored.capture_response_on_failure);
+
+        let result = store.update_response_capture(subscription_id, true);
+        assert!(result);
+        let stored = store.configs.get(&subscription_id).unwrap();
+        assert!(stored.capture_response_on_failure);
+
+        let result = store.update_response_capture(subscription_id, true);
+        assert!(result);
+        let result = store.update_response_capture(Uuid::from_u128(999), false);
+        assert!(!result);
     }
 }
