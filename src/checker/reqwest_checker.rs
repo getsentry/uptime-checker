@@ -8,6 +8,7 @@ use crate::types::{
     check_config::CheckConfig,
     result::{CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo},
 };
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{DateTime, TimeDelta, Utc};
 use hyper::stats::RequestId;
 use openssl::error::ErrorStack;
@@ -33,6 +34,7 @@ pub struct ReqwestChecker {
     client: Client,
     assert_cache: assertions::cache::Cache,
     diable_assertions: bool,
+    response_capture_enabled: bool,
 }
 
 struct Options {
@@ -53,6 +55,10 @@ struct Options {
 
     /// Disable runtime assertion evaluation
     disable_assertions: bool,
+
+    /// Enable response capture feature. When enabled and the check fails,
+    /// response body and headers will be captured and included in the result.
+    response_capture_enabled: bool,
 }
 
 impl Default for Options {
@@ -64,6 +70,7 @@ impl Default for Options {
             dns_nameservers: None,
             interface: None,
             disable_assertions: false,
+            response_capture_enabled: false,
         }
     }
 }
@@ -226,9 +233,11 @@ impl ReqwestChecker {
             client,
             assert_cache,
             diable_assertions: options.disable_assertions,
+            response_capture_enabled: options.response_capture_enabled,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         validate_url: bool,
         disable_connection_reuse: bool,
@@ -237,6 +246,7 @@ impl ReqwestChecker {
         interface: Option<String>,
         assert_cache: assertions::cache::Cache,
         disable_assertions: bool,
+        response_capture_enabled: bool,
     ) -> Self {
         Self::new_internal(
             Options {
@@ -246,6 +256,7 @@ impl ReqwestChecker {
                 dns_nameservers,
                 interface,
                 disable_assertions,
+                response_capture_enabled,
             },
             assert_cache,
         )
@@ -452,6 +463,8 @@ fn to_errored_request_infos(
             receive_response: zero_timing,
         },
         certificate_info: None,
+        response_body: None,
+        response_headers: None,
     }]
 }
 
@@ -471,8 +484,14 @@ impl Checker for ReqwestChecker {
         let start = Instant::now();
         let mut response = do_request(&self.client, check.get_config(), &trace_header).await;
 
-        // Only wait for the body bytes if we have an assertion that we will be processing.
-        let body_bytes = if check.get_config().assertion.is_some() && response.is_ok() {
+        // Determine if we should capture response data on failure
+        let should_capture = self.response_capture_enabled
+            && check.get_config().capture_response_on_failure;
+
+        // Read body bytes if we have an assertion OR if we should capture on failure.
+        let needs_body_for_assertion = check.get_config().assertion.is_some();
+        let body_bytes = if (needs_body_for_assertion || should_capture) && response.is_ok()
+        {
             let Ok((resp, _req_id)) = &mut response else {
                 unreachable!("enclosing if-statement means this cannot happen");
             };
@@ -485,6 +504,22 @@ impl Checker for ReqwestChecker {
             .await
         } else {
             vec![]
+        };
+
+        let captured_headers: Option<Vec<(String, String)>> = if should_capture {
+            response.as_ref().ok().map(|(resp, _)| {
+                resp.headers()
+                    .iter()
+                    .map(|(name, value)| {
+                        (
+                            name.to_string(),
+                            value.to_str().unwrap_or("<non-utf8>").to_string(),
+                        )
+                    })
+                    .collect()
+            })
+        } else {
+            None
         };
 
         // TODO: this is how to extract the leaf cert from the request we run.
@@ -518,6 +553,19 @@ impl Checker for ReqwestChecker {
 
         // Our total duration includes the additional processing time, including running the assert.
         let duration = TimeDelta::from_std(start.elapsed()).expect("duration shouldn't be large");
+
+        let mut rinfos = rinfos;
+
+        // Add captured response data if this is a failure
+        if should_capture && check_result.result == CheckStatus::Failure {
+            if let Some(last_req) = rinfos.last_mut() {
+                // Base64 encode the body and truncate if needed
+                if !body_bytes.is_empty() {
+                    last_req.response_body = Some(BASE64_STANDARD.encode(&body_bytes));
+                }
+                last_req.response_headers = captured_headers;
+            }
+        }
 
         let final_req = rinfos.last().unwrap().clone();
 
@@ -634,9 +682,9 @@ mod tests {
     use crate::types::result::{CheckStatus, CheckStatusReasonType};
     use crate::types::shared::RequestMethod;
     use std::net::IpAddr;
-    use std::time::Duration;
 
-    use super::{make_trace_header, Options, ReqwestChecker, UPTIME_USER_AGENT};
+    use base64::Engine;
+    use super::{make_trace_header, Options, ReqwestChecker, BASE64_STANDARD, UPTIME_USER_AGENT};
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
@@ -665,10 +713,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -707,10 +752,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -760,10 +802,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -808,10 +847,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -845,15 +881,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_response_capture_on_failure() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(
+            Options {
+                validate_url: false,
+                disable_connection_reuse: true,
+                response_capture_enabled: true,
+                ..Default::default()
+            },
+            assertions::cache::Cache::new(),
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/error")
+                .header_exists("sentry-trace");
+            then.status(500)
+                .header("X-Error-Code", "ERR123")
+                .header("Content-Type", "application/json")
+                .body(r#"{"error": "something went wrong"}"#);
+        });
+
+        let config = CheckConfig {
+            url: server.url("/error").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+
+        let request_info = result.request_info.unwrap();
+        assert_eq!(request_info.http_status_code, Some(500));
+
+        // Verify response body is captured and base64 encoded
+        let body = request_info.response_body.unwrap();
+        let decoded = BASE64_STANDARD.decode(&body).unwrap();
+        assert_eq!(
+            String::from_utf8(decoded).unwrap(),
+            r#"{"error": "something went wrong"}"#
+        );
+
+        // Verify response headers are captured
+        let headers = request_info.response_headers.unwrap();
+        assert!(headers.iter().any(|(k, v)| k == "x-error-code" && v == "ERR123"));
+        assert!(headers.iter().any(|(k, v)| k == "content-type" && v == "application/json"));
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_response_capture_disabled() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(
+            Options {
+                validate_url: false,
+                disable_connection_reuse: true,
+                response_capture_enabled: false, // disabled
+                ..Default::default()
+            },
+            assertions::cache::Cache::new(),
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/error")
+                .header_exists("sentry-trace");
+            then.status(500)
+                .body("error body");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/error").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Failure);
+
+        let request_info = result.request_info.unwrap();
+        // Response should NOT be captured when disabled
+        assert!(request_info.response_body.is_none());
+        assert!(request_info.response_headers.is_none());
+
+        mock.assert();
+    }
+
+    #[tokio::test]
     async fn test_restricted_resolution() {
         let checker = ReqwestChecker::new_internal(
             Options {
                 validate_url: true,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -880,10 +1006,7 @@ mod tests {
             Options {
                 validate_url: true,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -925,10 +1048,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -1055,10 +1175,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -1107,10 +1224,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -1135,10 +1249,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -1179,10 +1290,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -1216,10 +1324,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -1252,10 +1357,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
@@ -1303,10 +1405,7 @@ mod tests {
             Options {
                 validate_url: false,
                 disable_connection_reuse: true,
-                dns_nameservers: None,
-                pool_idle_timeout: Duration::from_secs(90),
-                interface: None,
-                disable_assertions: false,
+                ..Default::default()
             },
             assertions::cache::Cache::new(),
         );
