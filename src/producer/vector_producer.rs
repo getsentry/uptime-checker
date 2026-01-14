@@ -262,6 +262,8 @@ mod tests {
             response_body_size_bytes: 0,
             request_duration_us: 123456,
             durations: RequestDurations::default(),
+            response_body: None,
+            response_headers: None,
         };
 
         CheckResult {

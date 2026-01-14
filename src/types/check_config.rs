@@ -81,6 +81,17 @@ pub struct CheckConfig {
 
     #[serde(default)]
     pub assertion: Option<assertions::Assertion>,
+
+    /// When true, response body and headers will be captured on failure.
+    /// This flag can be toggled via the set_response_capture action.
+    /// Defaults to true (capture enabled), but requires the global
+    /// response_capture_enabled config to be true for capturing to occur.
+    #[serde(default = "default_capture_response")]
+    pub capture_response_on_failure: bool,
+}
+
+fn default_capture_response() -> bool {
+    true
 }
 
 impl Hash for CheckConfig {
@@ -188,6 +199,7 @@ mod tests {
                 active_regions: None,
                 region_schedule_mode: None,
                 assertion: None,
+                capture_response_on_failure: true,
             }
         }
     }
@@ -233,6 +245,7 @@ mod tests {
                 active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
                 assertion: None,
+                capture_response_on_failure: true,
             }
         );
     }
@@ -289,6 +302,7 @@ mod tests {
                 active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
                 assertion: None,
+                capture_response_on_failure: true,
             }
         );
     }
