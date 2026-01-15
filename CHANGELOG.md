@@ -1,3 +1,12 @@
+## 26.1.0
+
+### New Features ✨
+
+#### Uptime
+
+- Assertion failure data now contains the assertion by @klochek in [#459](https://github.com/getsentry/uptime-checker/pull/459)
+- Add a config to disable assert evaluation by @klochek in [#457](https://github.com/getsentry/uptime-checker/pull/457)
+
 ## 25.12.1
 
 ### New Features ✨
