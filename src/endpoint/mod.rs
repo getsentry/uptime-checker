@@ -32,7 +32,7 @@ pub fn start_endpoint(
     let endpoint_port = config.webserver_port;
 
     tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind(format!("localhost:{}", endpoint_port)).await;
+        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", endpoint_port)).await;
 
         let Ok(listener) = listener else {
             tracing::error!(
