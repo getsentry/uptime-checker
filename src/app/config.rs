@@ -165,6 +165,10 @@ pub struct Config {
 
     /// Disable runtime assert evaluation.
     pub disable_asserts: bool,
+
+    /// Enable response capture feature. When enabled, response body and headers
+    /// will be captured on failures and included in the check result.
+    pub response_capture_enabled: bool,
 }
 
 impl Default for Config {
@@ -209,6 +213,7 @@ impl Default for Config {
             redis_readonly: false,
             webserver_port: 12345,
             disable_asserts: false,
+            response_capture_enabled: false,
         }
     }
 }
@@ -367,6 +372,7 @@ mod tests {
                         redis_readonly: false,
                         webserver_port: 12345,
                         disable_asserts: false,
+                        response_capture_enabled: false,
                     }
                 );
             },
@@ -465,6 +471,7 @@ mod tests {
                         redis_readonly: true,
                         webserver_port: 81,
                         disable_asserts: false,
+                        response_capture_enabled: false,
                     }
                 );
             },
