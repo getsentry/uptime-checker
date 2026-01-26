@@ -468,10 +468,16 @@ impl Op {
                 result
             }
             Op::JsonPath { value } => {
-                let json: serde_json::Value =
+                let mut json: serde_json::Value =
                     serde_json::from_slice(body).map_err(|e| RuntimeError::InvalidBodyJson {
                         body: e.to_string(),
                     })?;
+
+                // If it's just a json object, wrap it in an array, because jsonpath queries can't do comparisons on
+                // object paths ($.foo.bar == 7 is invalid; $[?@.foo.bar == 7] works)
+                if let serde_json::Value::Object(_) = json {
+                    json = serde_json::Value::Array(vec![json]);
+                }
                 let result = js_path_process(value, &json, gas.borrow_mut())?;
                 EvalResult::leaf(!result.is_empty())
             }
@@ -811,6 +817,37 @@ mod tests {
         let assert = Assertion {
             root: Op::JsonPath {
                 value: "$[?glob(@.prop1, \"A[A-Z]*\")]".to_owned(),
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
+    }
+
+    #[test]
+    fn test_json_path_object() {
+        let body = r#"
+    {
+      "prop1": {
+        "id" : "123"
+      }
+    }
+"#;
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[?@.prop1.id == \"123\"]".to_owned(),
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
+
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[?@.prop1.id == \"124\"]".to_owned(),
             },
         };
 
