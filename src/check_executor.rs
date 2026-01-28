@@ -35,6 +35,7 @@ pub struct ScheduledCheck {
     resolve_tx: Sender<Option<CheckResult>>,
     /// The number of times this scheduled check has been retried
     retry_count: u16,
+    force_body_capture: bool,
 }
 
 impl ScheduledCheck {
@@ -42,6 +43,7 @@ impl ScheduledCheck {
         kind: CheckKind,
         tick: Tick,
         config: Arc<CheckConfig>,
+        force_body_capture: bool,
         resolve_tx: Sender<Option<CheckResult>>,
     ) -> ScheduledCheck {
         ScheduledCheck {
@@ -50,6 +52,7 @@ impl ScheduledCheck {
             config,
             resolve_tx,
             retry_count: 0,
+            force_body_capture,
         }
     }
 
@@ -62,7 +65,29 @@ impl ScheduledCheck {
             config: config.into(),
             resolve_tx,
             retry_count: 0,
+            force_body_capture: false,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test_with_forced(
+        tick: Tick,
+        config: CheckConfig,
+        force_body_capture: bool,
+    ) -> Self {
+        let (resolve_tx, _) = tokio::sync::oneshot::channel();
+        ScheduledCheck {
+            kind: CheckKind::Uptime,
+            tick,
+            config: config.into(),
+            resolve_tx,
+            retry_count: 0,
+            force_body_capture,
+        }
+    }
+
+    pub fn should_force_capture(&self) -> bool {
+        self.force_body_capture
     }
 
     pub fn get_kind(&self) -> &CheckKind {
@@ -122,7 +147,7 @@ impl CheckSender {
     ) -> anyhow::Result<Receiver<Option<CheckResult>>> {
         let (resolve_tx, resolve_rx) = oneshot::channel();
 
-        let scheduled_check = ScheduledCheck::new(check_kind, tick, config, resolve_tx);
+        let scheduled_check = ScheduledCheck::new(check_kind, tick, config, false, resolve_tx);
 
         self.queue_size.fetch_add(1, Ordering::Relaxed);
 

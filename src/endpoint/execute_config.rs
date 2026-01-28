@@ -73,6 +73,7 @@ pub(crate) async fn execute_config(
         crate::check_executor::CheckKind::Uptime,
         Tick::from_time(Utc::now()),
         Arc::new(check_config),
+        true,
         resolve_tx,
     );
 
