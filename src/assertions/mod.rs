@@ -22,7 +22,6 @@ pub(crate) enum Comparison {
     NotEqual,
 }
 
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct GlobPattern {
@@ -43,10 +42,13 @@ pub(crate) enum HeaderOperand {
 pub(crate) enum JSONPathOperand {
     #[default]
     None,
-    Literal { value: String },
-    Glob { pattern: GlobPattern },
+    Literal {
+        value: String,
+    },
+    Glob {
+        pattern: GlobPattern,
+    },
 }
-
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "op", rename_all = "snake_case")]
