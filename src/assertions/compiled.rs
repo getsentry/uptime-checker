@@ -6,7 +6,7 @@ use jsonpath_rust::{
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::{Borrow, BorrowMut},
-    str::FromStr,
+    num::{ParseFloatError, ParseIntError},
 };
 
 const GLOB_COMPLEXITY_LIMIT: u64 = 20;
@@ -22,6 +22,9 @@ pub enum RuntimeError {
 
     #[error("Invalid Body JSON: {body}")]
     InvalidBodyJson { body: String },
+
+    #[error("Invalid type in comparison: {msg}")]
+    InvalidTypeComparison { msg: String },
 }
 
 #[derive(thiserror::Error, Debug, Serialize)]
@@ -184,6 +187,84 @@ impl From<&super::Comparison> for Comparison {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+enum JSONPathOperand {
+    None,
+    Literal { value: String },
+    Glob { pattern: relay_pattern::Pattern },
+}
+impl JSONPathOperand {
+    fn eval(
+        &self,
+        op: &Comparison,
+        result: Vec<jsonpath_rust::query::QueryRef<'_, serde_json::Value>>,
+        gas: &mut Gas,
+    ) -> Result<bool, RuntimeError> {
+        // No results explicitly implies 'false', in this case.
+        if result.is_empty() {
+            return Ok(false);
+        }
+
+        for res in result {
+            let v = res.val();
+
+            let result = match op {
+                Comparison::Always => true,
+                Comparison::Never => false,
+                Comparison::LessThan => match self {
+                    JSONPathOperand::None => false,
+                    JSONPathOperand::Literal { value } => cmp_lt_json(v, value, gas)?,
+
+                    JSONPathOperand::Glob { .. } => false,
+                },
+                Comparison::GreaterThan => match self {
+                    JSONPathOperand::None => false,
+                    JSONPathOperand::Literal { value } => cmp_gt_json(v, value, gas)?,
+
+                    JSONPathOperand::Glob { .. } => false,
+                },
+                Comparison::Equal => cmp_eq_jsonpath(v, self, gas)?,
+                Comparison::NotEqual => !cmp_eq_jsonpath(v, self, gas)?,
+            };
+
+            if !result {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+}
+
+impl TryFrom<&super::JSONPathOperand> for JSONPathOperand {
+    type Error = CompilationError;
+
+    fn try_from(value: &super::JSONPathOperand) -> Result<Self, Self::Error> {
+        let v = match value {
+            super::JSONPathOperand::None => JSONPathOperand::None,
+            super::JSONPathOperand::Literal { value } => JSONPathOperand::Literal {
+                value: value.clone(),
+            },
+            super::JSONPathOperand::Glob { pattern: value } => {
+                let r = relay_pattern::Pattern::builder(&value.value)
+                    .max_complexity(GLOB_COMPLEXITY_LIMIT)
+                    .build();
+
+                match r {
+                    Ok(value) => JSONPathOperand::Glob { pattern: value },
+                    Err(e) => {
+                        return Err(CompilationError::InvalidGlob {
+                            glob: e.to_string(),
+                            msg: e.to_string(),
+                        })
+                    }
+                }
+            }
+        };
+        Ok(v)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum HeaderOperand {
     None,
     Literal { value: Value },
@@ -203,18 +284,18 @@ impl HeaderOperand {
             Comparison::LessThan => match self {
                 HeaderOperand::None => false,
                 HeaderOperand::Literal { value } => match value {
-                    Value::I64(value) => cmp_lt(header_value, value),
-                    Value::F64(value) => cmp_lt(header_value, value),
-                    Value::String(value) => cmp_lt(header_value, value),
+                    Value::I64(value) => cmp_lt(&header_value.parse()?, value, gas)?,
+                    Value::F64(value) => cmp_lt(&header_value.parse()?, value, gas)?,
+                    Value::String(value) => cmp_lt(header_value, value.as_str(), gas)?,
                 },
                 HeaderOperand::Glob { .. } => false,
             },
             Comparison::GreaterThan => match self {
                 HeaderOperand::None => false,
                 HeaderOperand::Literal { value } => match value {
-                    Value::I64(value) => cmp_gt(header_value, value),
-                    Value::F64(value) => cmp_gt(header_value, value),
-                    Value::String(value) => cmp_gt(header_value, value),
+                    Value::I64(value) => cmp_gt(&header_value.parse()?, value, gas)?,
+                    Value::F64(value) => cmp_gt(&header_value.parse()?, value, gas)?,
+                    Value::String(value) => cmp_gt(header_value, value, gas)?,
                 },
                 HeaderOperand::Glob { .. } => false,
             },
@@ -264,16 +345,6 @@ enum Value {
 
 impl Eq for Value {}
 
-#[derive(Debug, PartialEq, Eq)]
-enum HeaderComparison {
-    Always,
-    Never,
-    Equals { test_value: HeaderOperand },
-    NotEquals { test_value: HeaderOperand },
-    LessThan { test_value: Value },
-    GreaterThan { test_value: Value },
-}
-
 impl From<&String> for Value {
     fn from(value: &String) -> Self {
         let f = value.parse::<f64>();
@@ -290,34 +361,89 @@ impl From<&String> for Value {
     }
 }
 
-fn cmp_eq<T>(header_value: &str, value: &T) -> bool
+fn cmp_eq<T>(response_value: &T, test_value: &T, gas: &mut Gas) -> Result<bool, RuntimeError>
 where
-    T: FromStr + PartialEq,
+    T: PartialEq + ?Sized,
 {
-    header_value
-        .parse::<T>()
-        .map(|v| v == *value)
-        .unwrap_or(false)
+    gas.consume(1)?;
+    Ok(*response_value == *test_value)
 }
 
-fn cmp_lt<T>(header_value: &str, value: &T) -> bool
+fn cmp_coerce_json<FF64, FI64, FSTR>(
+    json_value: &serde_json::Value,
+    test_value: &String,
+    gas: &mut Gas,
+    cmp_f64: FF64,
+    cmp_i64: FI64,
+    cmp_str: FSTR,
+) -> Result<bool, RuntimeError>
 where
-    T: FromStr + PartialOrd,
+    FF64: FnOnce(&f64, &f64, &mut Gas) -> Result<bool, RuntimeError>,
+    FI64: FnOnce(&i64, &i64, &mut Gas) -> Result<bool, RuntimeError>,
+    FSTR: FnOnce(&str, &str, &mut Gas) -> Result<bool, RuntimeError>,
 {
-    header_value
-        .parse::<T>()
-        .map(|v| v < *value)
-        .unwrap_or(false)
+    if let Some(v) = json_value.as_f64() {
+        if let Ok(tv) = test_value.parse() {
+            return cmp_f64(&v, &tv, gas);
+        }
+    }
+
+    if let Some(v) = json_value.as_i64() {
+        if let Ok(tv) = test_value.parse() {
+            return cmp_i64(&v, &tv, gas);
+        }
+    }
+
+    if let Some(v) = json_value.as_str() {
+        return cmp_str(v, test_value, gas);
+    }
+
+    Err(RuntimeError::InvalidTypeComparison {
+        msg: format!(
+            "could not coerce a comparison between {} and {}",
+            json_value, test_value
+        ),
+    })
 }
 
-fn cmp_gt<T>(header_value: &str, value: &T) -> bool
+fn cmp_lt_json(
+    json_value: &serde_json::Value,
+    test_value: &String,
+    gas: &mut Gas,
+) -> Result<bool, RuntimeError> {
+    cmp_coerce_json(json_value, test_value, gas, cmp_lt, cmp_lt, cmp_lt)
+}
+
+fn cmp_lt<T>(response_value: &T, test_value: &T, gas: &mut Gas) -> Result<bool, RuntimeError>
 where
-    T: FromStr + PartialOrd,
+    T: PartialOrd + ?Sized,
 {
-    header_value
-        .parse::<T>()
-        .map(|v| v > *value)
-        .unwrap_or(false)
+    gas.consume(1)?;
+    Ok(*response_value < *test_value)
+}
+
+fn cmp_gt_json(
+    json_value: &serde_json::Value,
+    test_value: &String,
+    gas: &mut Gas,
+) -> Result<bool, RuntimeError> {
+    cmp_coerce_json(json_value, test_value, gas, cmp_gt, cmp_gt, cmp_gt)
+}
+
+fn cmp_gt<T>(response_value: &T, test_value: &T, gas: &mut Gas) -> Result<bool, RuntimeError>
+where
+    T: PartialOrd + ?Sized,
+{
+    gas.consume(1)?;
+    Ok(*response_value > *test_value)
+}
+
+fn cmp_eq_json(
+    json_value: &serde_json::Value,
+    test_value: &String,
+    gas: &mut Gas,
+) -> Result<bool, RuntimeError> {
+    cmp_coerce_json(json_value, test_value, gas, cmp_eq, cmp_eq, cmp_eq)
 }
 
 fn cmp_eq_header(
@@ -327,9 +453,9 @@ fn cmp_eq_header(
 ) -> Result<bool, RuntimeError> {
     let result = match test_value {
         HeaderOperand::Literal { value } => match value {
-            Value::I64(value) => cmp_eq(header_value, value),
-            Value::F64(value) => cmp_eq(header_value, value),
-            Value::String(value) => cmp_eq(header_value, value),
+            Value::I64(value) => cmp_eq(&header_value.parse()?, value, gas)?,
+            Value::F64(value) => cmp_eq(&header_value.parse()?, value, gas)?,
+            Value::String(value) => cmp_eq(header_value, value.as_str(), gas)?,
         },
         HeaderOperand::Glob { value } => {
             // TODO: either expose, or copy, the complexity metric from relay-pattern.
@@ -342,32 +468,22 @@ fn cmp_eq_header(
     Ok(result)
 }
 
-impl HeaderComparison {
-    fn eval(&self, header_value: &str, gas: &mut Gas) -> Result<bool, RuntimeError> {
-        let result = match self {
-            HeaderComparison::Always => true,
-            HeaderComparison::Never => false,
-            HeaderComparison::Equals { test_value } => {
-                cmp_eq_header(header_value, test_value, gas)?
-            }
-            HeaderComparison::NotEquals { test_value } => {
-                !cmp_eq_header(header_value, test_value, gas)?
-            }
+fn cmp_eq_jsonpath(
+    body_value: &serde_json::Value,
+    test_value: &JSONPathOperand,
+    gas: &mut Gas,
+) -> Result<bool, RuntimeError> {
+    let result = match test_value {
+        JSONPathOperand::Literal { value } => cmp_eq_json(body_value, value, gas)?,
+        JSONPathOperand::Glob { pattern } => {
+            // TODO: either expose, or copy, the complexity metric from relay-pattern.
+            gas.consume(5)?;
+            pattern.is_match(body_value.as_str().ok_or(RuntimeError::TookTooLong)?)
+        }
+        JSONPathOperand::None => false,
+    };
 
-            HeaderComparison::LessThan { test_value } => match test_value {
-                Value::I64(value) => cmp_lt(header_value, value),
-                Value::F64(value) => cmp_lt(header_value, value),
-                Value::String(value) => cmp_lt(header_value, value),
-            },
-            HeaderComparison::GreaterThan { test_value } => match test_value {
-                Value::I64(value) => cmp_gt(header_value, value),
-                Value::F64(value) => cmp_gt(header_value, value),
-                Value::String(value) => cmp_gt(header_value, value),
-            },
-        };
-
-        Ok(result)
-    }
+    Ok(result)
 }
 
 #[derive(Debug, PartialEq)]
@@ -387,6 +503,8 @@ enum Op {
     },
     JsonPath {
         value: JpQuery,
+        operator: Comparison,
+        operand: JSONPathOperand,
     },
     HeaderCheck {
         key_op: Comparison,
@@ -467,19 +585,21 @@ impl Op {
 
                 result
             }
-            Op::JsonPath { value } => {
-                let mut json: serde_json::Value =
+            Op::JsonPath {
+                value,
+                operand,
+                operator,
+            } => {
+                let json: serde_json::Value =
                     serde_json::from_slice(body).map_err(|e| RuntimeError::InvalidBodyJson {
                         body: e.to_string(),
                     })?;
 
-                // If it's just a json object, wrap it in an array, because jsonpath queries can't do comparisons on
-                // object paths ($.foo.bar == 7 is invalid; $[?@.foo.bar == 7] works)
-                if let serde_json::Value::Object(_) = json {
-                    json = serde_json::Value::Array(vec![json]);
-                }
                 let result = js_path_process(value, &json, gas.borrow_mut())?;
-                EvalResult::leaf(!result.is_empty())
+
+                let v = operand.eval(operator, result, gas)?;
+
+                EvalResult::leaf(v)
             }
         };
 
@@ -519,12 +639,34 @@ fn compile_op(op: &super::Op) -> Result<Op, CompilationError> {
             key_operand: key_operand.try_into()?,
             value_operand: value_operand.try_into()?,
         },
-        super::Op::JsonPath { value } => Op::JsonPath {
+        super::Op::JsonPath {
+            value,
+            operand,
+            operator,
+        } => Op::JsonPath {
             value: parse_json_path(value, GLOB_COMPLEXITY_LIMIT)?,
+            operand: operand.try_into()?,
+            operator: operator.into(),
         },
     };
 
     Ok(op)
+}
+
+impl From<ParseIntError> for RuntimeError {
+    fn from(value: ParseIntError) -> Self {
+        Self::InvalidTypeComparison {
+            msg: value.to_string(),
+        }
+    }
+}
+
+impl From<ParseFloatError> for RuntimeError {
+    fn from(value: ParseFloatError) -> Self {
+        Self::InvalidTypeComparison {
+            msg: value.to_string(),
+        }
+    }
 }
 
 impl From<JsonPathError> for RuntimeError {
@@ -576,7 +718,7 @@ mod tests {
 
     use crate::assertions::{
         compiled::{compile, extract_failure_data, CompilationError, EvalPath},
-        Assertion, Comparison, GlobPattern, HeaderOperand, Op,
+        Assertion, Comparison, GlobPattern, HeaderOperand, JSONPathOperand, Op,
     };
 
     #[test]
@@ -730,6 +872,8 @@ mod tests {
 
         let jsonpath = Op::JsonPath {
             value: "$[?length(@.prop1) > 4]".to_owned(),
+            operator: Comparison::Always,
+            operand: JSONPathOperand::None,
         };
         let headercheck = Op::HeaderCheck {
             key_op: Comparison::Equals,
@@ -787,7 +931,13 @@ mod tests {
         let hmap = HeaderMap::new();
         let assert = Assertion {
             root: Op::JsonPath {
-                value: "$[?length(@.prop1) > 4]".to_owned(),
+                value: "$[?length(@.prop1) > 4].prop1".to_owned(),
+                operand: JSONPathOperand::Glob {
+                    pattern: GlobPattern {
+                        value: "a*a".into(),
+                    },
+                },
+                operator: Comparison::Equals,
             },
         };
 
@@ -797,7 +947,13 @@ mod tests {
 
         let assert = Assertion {
             root: Op::JsonPath {
-                value: "$[?length(@.prop1) > 10]".to_owned(),
+                value: "$[?length(@.prop1) > 10].prop1".to_owned(),
+                operand: JSONPathOperand::Glob {
+                    pattern: GlobPattern {
+                        value: "a*a".into(),
+                    },
+                },
+                operator: Comparison::Equals,
             },
         };
 
@@ -808,6 +964,8 @@ mod tests {
         let assert = Assertion {
             root: Op::JsonPath {
                 value: "$[?glob(@.prop1, \"a[a-z]*\")]".to_owned(),
+                operand: JSONPathOperand::None,
+                operator: Comparison::Always,
             },
         };
 
@@ -816,7 +974,9 @@ mod tests {
 
         let assert = Assertion {
             root: Op::JsonPath {
-                value: "$[?glob(@.prop1, \"A[A-Z]*\")]".to_owned(),
+                value: "$[?glob(@.prop1, \"A[A-Z]*\")].prop1".to_owned(),
+                operand: JSONPathOperand::None,
+                operator: Comparison::Always,
             },
         };
 
@@ -837,7 +997,11 @@ mod tests {
         let hmap = HeaderMap::new();
         let assert = Assertion {
             root: Op::JsonPath {
-                value: "$[?@.prop1.id == \"123\"]".to_owned(),
+                value: "$.prop1.id".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "123".into(),
+                },
+                operator: Comparison::Equals,
             },
         };
 
@@ -847,7 +1011,143 @@ mod tests {
 
         let assert = Assertion {
             root: Op::JsonPath {
-                value: "$[?@.prop1.id == \"124\"]".to_owned(),
+                value: "$.prop1.id".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "124".into(),
+                },
+                operator: Comparison::Equals,
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
+    }
+
+    #[test]
+    fn test_json_path_coerce() {
+        let body = r#"
+    {
+      "prop1": {
+        "id1" : 123,
+        "id2": 123.1,
+        "id3": "123"
+      }
+    }
+"#;
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$.prop1.id1".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "123".into(),
+                },
+                operator: Comparison::Equals,
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
+
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$.prop1.id2".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "123.1".into(),
+                },
+                operator: Comparison::Equals,
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
+
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$.prop1.id3".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "123".into(),
+                },
+                operator: Comparison::Equals,
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
+
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$.prop1.id".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "onetwothree".into(),
+                },
+                operator: Comparison::Equals,
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(!assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
+    }
+
+    #[test]
+    fn test_json_path_arrays() {
+        let body = r#"
+    [
+      {
+      "prop": {
+        "id": "123"
+      }
+      },
+      {
+      "prop": {
+        "id": "123"
+      }
+      }
+    ]
+"#;
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[*].prop.id".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "123".into(),
+                },
+                operator: Comparison::Equals,
+            },
+        };
+
+        let assert = compile(&assert).unwrap();
+
+        assert!(assert.eval(200, &hmap, body.as_bytes()).unwrap().result);
+
+        let body = r#"
+    [
+      {
+      "prop": {
+        "id": "123"
+      }
+      },
+      {
+      "prop": {
+        "id": "124"
+      }
+      }
+    ]
+"#;
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$[*].prop.id".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "124".into(),
+                },
+                operator: Comparison::NotEqual,
             },
         };
 
@@ -921,6 +1221,8 @@ mod tests {
         let assert = Assertion {
             root: Op::JsonPath {
                 value: "$[?glob(@.prop1, \"'a']\")]".to_owned(),
+                operand: JSONPathOperand::None,
+                operator: Comparison::Always,
             },
         };
 

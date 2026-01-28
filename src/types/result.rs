@@ -659,6 +659,8 @@ mod tests {
                         assertions::Op::Not {
                             operand: assertions::Op::JsonPath {
                                 value: "asdf".to_owned(),
+                                operand: assertions::JSONPathOperand::None,
+                                operator: assertions::Comparison::Always,
                             }
                             .into(),
                         },
