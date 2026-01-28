@@ -978,6 +978,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_response_capture_forced() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(
+            Options {
+                validate_url: false,
+                disable_connection_reuse: true,
+                response_capture_enabled: false, // disabled
+                ..Default::default()
+            },
+            assertions::cache::Cache::new(),
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/no-head")
+                .header_exists("sentry-trace")
+                .header("User-Agent", UPTIME_USER_AGENT.to_string());
+            then.status(200).body("body");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/no-head").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test_with_forced(tick, config, true);
+        let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Success);
+
+        let request_info = result.request_info.unwrap();
+
+        let body_string = String::from_utf8(
+            BASE64_STANDARD
+                .decode(request_info.response_body.unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body_string, "body");
+
+        mock.assert();
+    }
+
+    #[tokio::test]
     async fn test_restricted_resolution() {
         let checker = ReqwestChecker::new_internal(
             Options {

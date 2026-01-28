@@ -69,6 +69,23 @@ impl ScheduledCheck {
         }
     }
 
+    #[cfg(test)]
+    pub fn new_for_test_with_forced(
+        tick: Tick,
+        config: CheckConfig,
+        force_body_capture: bool,
+    ) -> Self {
+        let (resolve_tx, _) = tokio::sync::oneshot::channel();
+        ScheduledCheck {
+            kind: CheckKind::Uptime,
+            tick,
+            config: config.into(),
+            resolve_tx,
+            retry_count: 0,
+            force_body_capture,
+        }
+    }
+
     pub fn should_force_capture(&self) -> bool {
         self.force_body_capture
     }
