@@ -484,9 +484,11 @@ impl Checker for ReqwestChecker {
         let start = Instant::now();
         let mut response = do_request(&self.client, check.get_config(), &trace_header).await;
 
+        let force_capture = check.should_force_capture();
+
         // Determine if we should capture response data on failure
-        let should_capture =
-            self.response_capture_enabled && check.get_config().capture_response_on_failure;
+        let should_capture = force_capture
+            || (self.response_capture_enabled && check.get_config().capture_response_on_failure);
 
         // Read body bytes if we have an assertion OR if we should capture on failure.
         let needs_body_for_assertion = check.get_config().assertion.is_some();
@@ -556,7 +558,7 @@ impl Checker for ReqwestChecker {
         let mut rinfos = rinfos;
 
         // Add captured response data if this is a failure
-        if should_capture && check_result.result == CheckStatus::Failure {
+        if force_capture || (should_capture && check_result.result == CheckStatus::Failure) {
             if let Some(last_req) = rinfos.last_mut() {
                 // Base64 encode the body and truncate if needed
                 if !body_bytes.is_empty() {
