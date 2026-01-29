@@ -1469,4 +1469,233 @@ mod tests {
             _ => panic!(),
         }
     }
+    #[test]
+    fn test_comparisons() {
+        let body = r#"
+    {
+      "prop": {
+        "string": "123",
+        "int": 123,
+        "float": 123.0
+      }
+    }
+"#;
+
+        // Equals
+        assert!(run_single_jsonpath_assert(
+            "$.prop.string",
+            "123",
+            Comparison::Equals,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.int",
+            "123",
+            Comparison::Equals,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.float",
+            "123.0",
+            Comparison::Equals,
+            body
+        ));
+        // Equals (negation)
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.string",
+            "124",
+            Comparison::Equals,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.int",
+            "124",
+            Comparison::Equals,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.float",
+            "123.1",
+            Comparison::Equals,
+            body
+        ));
+
+        // NotEquals
+        assert!(run_single_jsonpath_assert(
+            "$.prop.string",
+            "123a",
+            Comparison::NotEqual,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.int",
+            "124",
+            Comparison::NotEqual,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.float",
+            "123.1",
+            Comparison::NotEqual,
+            body
+        ));
+        // NotEquals (negation)
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.string",
+            "123",
+            Comparison::NotEqual,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.int",
+            "123",
+            Comparison::NotEqual,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.float",
+            "123.0",
+            Comparison::NotEqual,
+            body
+        ));
+
+        // GreaterThan
+        assert!(run_single_jsonpath_assert(
+            "$.prop.string",
+            "023",
+            Comparison::GreaterThan,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.int",
+            "122",
+            Comparison::GreaterThan,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.float",
+            "122.9",
+            Comparison::GreaterThan,
+            body
+        ));
+        // GreaterThan (negation)
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.string",
+            "123",
+            Comparison::GreaterThan,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.int",
+            "123",
+            Comparison::GreaterThan,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.float",
+            "123.0",
+            Comparison::GreaterThan,
+            body
+        ));
+
+        // LessThan
+        assert!(run_single_jsonpath_assert(
+            "$.prop.string",
+            "223",
+            Comparison::LessThan,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.int",
+            "124",
+            Comparison::LessThan,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.float",
+            "123.1",
+            Comparison::LessThan,
+            body
+        ));
+        // LessThan (negation)
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.string",
+            "123",
+            Comparison::LessThan,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.int",
+            "123",
+            Comparison::LessThan,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.float",
+            "123.0",
+            Comparison::LessThan,
+            body
+        ));
+
+        // Always
+        assert!(run_single_jsonpath_assert(
+            "$.prop.string",
+            "",
+            Comparison::Always,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.int",
+            "",
+            Comparison::Always,
+            body
+        ));
+        assert!(run_single_jsonpath_assert(
+            "$.prop.float",
+            "",
+            Comparison::Always,
+            body
+        ));
+
+        // Never
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.string",
+            "",
+            Comparison::Never,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.int",
+            "",
+            Comparison::Never,
+            body
+        ));
+        assert!(!run_single_jsonpath_assert(
+            "$.prop.float",
+            "",
+            Comparison::Never,
+            body
+        ));
+    }
+
+    fn run_single_jsonpath_assert(
+        path: &str,
+        operand: &str,
+        operator: Comparison,
+        body: &str,
+    ) -> bool {
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: path.to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: operand.into(),
+                },
+                operator,
+            },
+        };
+        let assert = compile(&assert).unwrap();
+        let eval = assert.eval(200, &hmap, body.as_bytes()).unwrap();
+        eval.result
+    }
 }
