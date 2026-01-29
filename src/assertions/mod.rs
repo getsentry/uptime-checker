@@ -11,7 +11,9 @@ pub struct Assertion {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "cmp", rename_all = "snake_case")]
+#[derive(Default)]
 pub(crate) enum Comparison {
+    #[default]
     Always,
     Never,
     LessThan,
@@ -35,6 +37,20 @@ pub(crate) enum HeaderOperand {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[serde(tag = "jsonpath_op", rename_all = "snake_case")]
+#[derive(Default)]
+pub(crate) enum JSONPathOperand {
+    #[default]
+    None,
+    Literal {
+        value: String,
+    },
+    Glob {
+        pattern: GlobPattern,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub(crate) enum Op {
     And {
@@ -52,6 +68,13 @@ pub(crate) enum Op {
     },
     JsonPath {
         value: String,
+
+        // These values were added later, so provide sensible defaults for
+        // backwards compatibility.
+        #[serde(default)]
+        operator: Comparison,
+        #[serde(default)]
+        operand: JSONPathOperand,
     },
     HeaderCheck {
         key_op: Comparison,
@@ -76,7 +99,13 @@ mod tests {
         "children": [
           {
             "op": "json_path",
-            "value": "$[?length(@.prop1) > 4]"
+            "value": "$[?length(@.prop1) > 4]",
+            "operator": {
+              "cmp": "always"
+            },
+            "operand": {
+              "jsonpath_op": "none"
+            }
           },
           {
             "op": "header_check",
