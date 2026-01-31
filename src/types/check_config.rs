@@ -88,6 +88,12 @@ pub struct CheckConfig {
     /// response_capture_enabled config to be true for capturing to occur.
     #[serde(default = "default_capture_response")]
     pub capture_response_on_failure: bool,
+
+    /// When true, response body and headers will be captured regardless of
+    /// success or failure. Used for preview checks that need response data
+    /// for features like assertion suggestions.
+    #[serde(default)]
+    pub always_capture_response: bool,
 }
 
 fn default_capture_response() -> bool {
@@ -200,6 +206,7 @@ mod tests {
                 region_schedule_mode: None,
                 assertion: None,
                 capture_response_on_failure: true,
+                always_capture_response: false,
             }
         }
     }
@@ -246,6 +253,7 @@ mod tests {
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
                 assertion: None,
                 capture_response_on_failure: true,
+                always_capture_response: false,
             }
         );
     }
@@ -303,6 +311,7 @@ mod tests {
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
                 assertion: None,
                 capture_response_on_failure: true,
+                always_capture_response: false,
             }
         );
     }

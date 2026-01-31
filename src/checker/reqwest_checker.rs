@@ -488,9 +488,13 @@ impl Checker for ReqwestChecker {
         let should_capture =
             self.response_capture_enabled && check.get_config().capture_response_on_failure;
 
-        // Read body bytes if we have an assertion OR if we should capture on failure.
+        // Always capture if explicitly requested (for preview checks / assertion suggestions)
+        let always_capture = check.get_config().always_capture_response;
+
+        // Read body bytes if we have an assertion, should capture on failure, or always capture.
         let needs_body_for_assertion = check.get_config().assertion.is_some();
-        let body_bytes = if (needs_body_for_assertion || should_capture) && response.is_ok() {
+        let body_bytes =
+            if (needs_body_for_assertion || should_capture || always_capture) && response.is_ok() {
             let Ok((resp, _req_id)) = &mut response else {
                 unreachable!("enclosing if-statement means this cannot happen");
             };
@@ -505,7 +509,7 @@ impl Checker for ReqwestChecker {
             vec![]
         };
 
-        let captured_headers: Option<Vec<(String, String)>> = if should_capture {
+        let captured_headers: Option<Vec<(String, String)>> = if should_capture || always_capture {
             response.as_ref().ok().map(|(resp, _)| {
                 resp.headers()
                     .iter()
@@ -555,8 +559,10 @@ impl Checker for ReqwestChecker {
 
         let mut rinfos = rinfos;
 
-        // Add captured response data if this is a failure
-        if should_capture && check_result.result == CheckStatus::Failure {
+        // Add captured response data if this is a failure, or if always_capture_response is set
+        let should_attach_response =
+            (should_capture && check_result.result == CheckStatus::Failure) || always_capture;
+        if should_attach_response {
             if let Some(last_req) = rinfos.last_mut() {
                 // Base64 encode the body and truncate if needed
                 if !body_bytes.is_empty() {

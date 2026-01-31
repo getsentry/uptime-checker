@@ -140,6 +140,7 @@ mod tests {
             active_regions: None,
             region_schedule_mode: None,
             capture_response_on_failure: true,
+            always_capture_response: false,
             assertion: Some(Assertion {
                 root: Op::HeaderCheck {
                     key_op: crate::assertions::Comparison::Equals,
