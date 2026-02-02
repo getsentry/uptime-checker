@@ -9,6 +9,7 @@ use std::{
     num::{ParseFloatError, ParseIntError},
 };
 
+const MAX_OPERATIONS: u32 = 16;
 const GLOB_COMPLEXITY_LIMIT: u64 = 20;
 const ASSERTION_MAX_GAS: u32 = 100;
 
@@ -41,6 +42,9 @@ pub enum CompilationError {
 
     #[error("Invalid JSONPath: {msg}")]
     InvalidJsonPath { msg: String },
+
+    #[error("Too many assertion operations")]
+    TooManyOperations,
 }
 
 // This struct records the reason behind the result of an assertion evaluation.  Eventually,
@@ -607,22 +611,33 @@ impl Op {
     }
 }
 
+fn inc_ops(num_ops: &mut u32) -> Result<(), CompilationError> {
+    if *num_ops < MAX_OPERATIONS {
+        *num_ops += 1;
+        return Ok(());
+    }
+
+    Err(CompilationError::TooManyOperations)
+}
+
 pub fn compile(assertion: &super::Assertion) -> Result<Assertion, CompilationError> {
+    let mut num_ops = 0;
     Ok(Assertion {
-        root: compile_op(&assertion.root)?,
+        root: compile_op(&assertion.root, &mut num_ops)?,
     })
 }
 
-fn compile_op(op: &super::Op) -> Result<Op, CompilationError> {
+fn compile_op(op: &super::Op, num_ops: &mut u32) -> Result<Op, CompilationError> {
+    inc_ops(num_ops)?;
     let op = match op {
         super::Op::And { children } => Op::And {
-            children: visit_children(children)?,
+            children: visit_children(children, num_ops)?,
         },
         super::Op::Or { children } => Op::Or {
-            children: visit_children(children)?,
+            children: visit_children(children, num_ops)?,
         },
         super::Op::Not { operand } => Op::Not {
-            operand: Box::new(compile_op(operand)?),
+            operand: Box::new(compile_op(operand, num_ops)?),
         },
         super::Op::StatusCodeCheck { value, operator } => Op::StatusCodeCheck {
             value: *value,
@@ -704,10 +719,10 @@ impl From<JsonPathError> for CompilationError {
     }
 }
 
-fn visit_children(children: &[super::Op]) -> Result<Vec<Op>, CompilationError> {
+fn visit_children(children: &[super::Op], num_ops: &mut u32) -> Result<Vec<Op>, CompilationError> {
     let mut cs = vec![];
     for c in children.iter() {
-        cs.push(compile_op(c)?);
+        cs.push(compile_op(c, num_ops)?);
     }
     Ok(cs)
 }
