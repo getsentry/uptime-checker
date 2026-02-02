@@ -495,19 +495,19 @@ impl Checker for ReqwestChecker {
         let needs_body_for_assertion = check.get_config().assertion.is_some();
         let body_bytes =
             if (needs_body_for_assertion || should_capture || always_capture) && response.is_ok() {
-            let Ok((resp, _req_id)) = &mut response else {
-                unreachable!("enclosing if-statement means this cannot happen");
+                let Ok((resp, _req_id)) = &mut response else {
+                    unreachable!("enclosing if-statement means this cannot happen");
+                };
+                read_body_bounded(
+                    Duration::from_millis(check.get_config().timeout.num_milliseconds() as u64),
+                    MAX_BODY_BYTES,
+                    start,
+                    resp,
+                )
+                .await
+            } else {
+                vec![]
             };
-            read_body_bounded(
-                Duration::from_millis(check.get_config().timeout.num_milliseconds() as u64),
-                MAX_BODY_BYTES,
-                start,
-                resp,
-            )
-            .await
-        } else {
-            vec![]
-        };
 
         let captured_headers: Option<Vec<(String, String)>> = if should_capture || always_capture {
             response.as_ref().ok().map(|(resp, _)| {
