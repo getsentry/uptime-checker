@@ -982,6 +982,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_always_capture_response_on_success() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(
+            Options {
+                validate_url: false,
+                disable_connection_reuse: true,
+                response_capture_enabled: false, // Even with this disabled...
+                ..Default::default()
+            },
+            assertions::cache::Cache::new(),
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/success")
+                .header_exists("sentry-trace");
+            then.status(200)
+                .header("X-Custom-Header", "custom-value")
+                .header("Content-Type", "application/json")
+                .body(r#"{"status": "ok", "data": [1, 2, 3]}"#);
+        });
+
+        let config = CheckConfig {
+            url: server.url("/success").to_string(),
+            always_capture_response: true, // ...this flag should capture response
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
+
+        // Check should succeed
+        assert_eq!(result.status, CheckStatus::Success);
+
+        let request_info = result.request_info.unwrap();
+        assert_eq!(request_info.http_status_code, Some(200));
+
+        // Verify response body is captured and base64 encoded even on success
+        let body = request_info.response_body.unwrap();
+        let decoded = BASE64_STANDARD.decode(&body).unwrap();
+        assert_eq!(
+            String::from_utf8(decoded).unwrap(),
+            r#"{"status": "ok", "data": [1, 2, 3]}"#
+        );
+
+        // Verify response headers are captured
+        let headers = request_info.response_headers.unwrap();
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "x-custom-header" && v == "custom-value"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "content-type" && v == "application/json"));
+
+        mock.assert();
+    }
+
+    #[tokio::test]
     async fn test_restricted_resolution() {
         let checker = ReqwestChecker::new_internal(
             Options {
