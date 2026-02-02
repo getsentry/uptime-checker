@@ -50,12 +50,13 @@ impl Cache {
     pub fn get_or_compile(
         &self,
         key: &assertions::Assertion,
+        max_assertion_ops: u32,
     ) -> Result<Arc<compiled::Assertion>, compiled::CompilationError> {
         if let Some(entry) = self.compiled.read().expect("not poisoned").get(key) {
             return Ok(entry.assertion.clone());
         }
 
-        let comp = compiled::compile(key);
+        let comp = compiled::compile(key, max_assertion_ops);
         match comp {
             Ok(comp) => {
                 let mut wl = self.compiled.write().expect("not poisoned");

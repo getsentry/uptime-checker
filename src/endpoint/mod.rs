@@ -13,13 +13,18 @@ use tokio_util::sync::CancellationToken;
 struct EndpointState {
     checker: Arc<HttpChecker>,
     region: &'static str,
+    max_assertion_ops: u32,
 }
 
-fn new_router(checker: Arc<HttpChecker>, region: &'static str) -> Router {
+fn new_router(checker: Arc<HttpChecker>, region: &'static str, max_assertion_ops: u32) -> Router {
     Router::new()
         .route("/execute_config", post(execute_config))
         .route("/validate_check", post(validate_check))
-        .with_state(Arc::new(EndpointState { checker, region }))
+        .with_state(Arc::new(EndpointState {
+            checker,
+            region,
+            max_assertion_ops,
+        }))
 }
 
 pub fn start_endpoint(
@@ -27,7 +32,7 @@ pub fn start_endpoint(
     shutdown_signal: CancellationToken,
     checker: Arc<HttpChecker>,
 ) -> JoinHandle<()> {
-    let app = new_router(checker, config.region);
+    let app = new_router(checker, config.region, config.max_assertion_ops);
 
     let endpoint_port = config.webserver_port;
 

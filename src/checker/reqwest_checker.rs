@@ -33,8 +33,10 @@ const MAX_BODY_BYTES: usize = 10_000;
 pub struct ReqwestChecker {
     client: Client,
     assert_cache: assertions::cache::Cache,
-    diable_assertions: bool,
+    disable_assertions: bool,
     response_capture_enabled: bool,
+    assertion_complexity: u32,
+    max_assertion_ops: u32,
 }
 
 struct Options {
@@ -59,6 +61,9 @@ struct Options {
     /// Enable response capture feature. When enabled and the check fails,
     /// response body and headers will be captured and included in the result.
     response_capture_enabled: bool,
+
+    assertion_complexity: u32,
+    max_assertion_ops: u32,
 }
 
 impl Default for Options {
@@ -71,6 +76,8 @@ impl Default for Options {
             interface: None,
             disable_assertions: false,
             response_capture_enabled: false,
+            assertion_complexity: 100,
+            max_assertion_ops: 16,
         }
     }
 }
@@ -232,8 +239,10 @@ impl ReqwestChecker {
         Self {
             client,
             assert_cache,
-            diable_assertions: options.disable_assertions,
+            disable_assertions: options.disable_assertions,
             response_capture_enabled: options.response_capture_enabled,
+            assertion_complexity: options.assertion_complexity,
+            max_assertion_ops: options.max_assertion_ops,
         }
     }
 
@@ -247,6 +256,8 @@ impl ReqwestChecker {
         assert_cache: assertions::cache::Cache,
         disable_assertions: bool,
         response_capture_enabled: bool,
+        assertion_complexity: u32,
+        max_assertion_ops: u32,
     ) -> Self {
         Self::new_internal(
             Options {
@@ -257,6 +268,8 @@ impl ReqwestChecker {
                 interface,
                 disable_assertions,
                 response_capture_enabled,
+                assertion_complexity,
+                max_assertion_ops,
             },
             assert_cache,
         )
@@ -302,6 +315,8 @@ fn to_check_result(
     check: &ScheduledCheck,
     body_bytes: &[u8],
     disable_assertions: bool,
+    assertion_complexity: u32,
+    max_assertion_ops: u32,
 ) -> Check {
     match response {
         Ok((r, _)) => {
@@ -313,6 +328,8 @@ fn to_check_result(
                         &check.get_config().subscription_id,
                         &r,
                         assertion,
+                        assertion_complexity,
+                        max_assertion_ops,
                     )
                 } else if r.status().is_success() {
                     Check::success()
@@ -338,8 +355,10 @@ fn run_assertion(
     subscription_id: &Uuid,
     r: &Response,
     assertion: &assertions::Assertion,
+    assertion_complexity: u32,
+    max_assertion_ops: u32,
 ) -> Check {
-    let comp_assert = assert_cache.get_or_compile(assertion);
+    let comp_assert = assert_cache.get_or_compile(assertion, max_assertion_ops);
 
     if let Err(err) = comp_assert {
         tracing::warn!(
@@ -351,7 +370,12 @@ fn run_assertion(
     }
     let assertion = comp_assert.expect("already tested above");
 
-    let result = assertion.eval(r.status().as_u16(), r.headers(), body_bytes);
+    let result = assertion.eval(
+        r.status().as_u16(),
+        r.headers(),
+        body_bytes,
+        assertion_complexity,
+    );
 
     result.into()
 }
@@ -547,7 +571,9 @@ impl Checker for ReqwestChecker {
             response,
             check,
             &body_bytes,
-            self.diable_assertions,
+            self.disable_assertions,
+            self.assertion_complexity,
+            self.max_assertion_ops,
         );
 
         // Our total duration includes the additional processing time, including running the assert.
