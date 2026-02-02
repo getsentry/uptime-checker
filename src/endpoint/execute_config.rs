@@ -66,6 +66,7 @@ pub(crate) async fn execute_config(
     State(state): State<Arc<EndpointState>>,
     AppJson(check_config): AppJson<CheckConfig>,
 ) -> Result<AppJson<ResultWrapper>, ExecuteError> {
+    metrics::counter!("endpoint.execute_config").increment(1);
     let (sender, _) = CheckSender::new();
 
     let (resolve_tx, resolve_rx) = oneshot::channel();

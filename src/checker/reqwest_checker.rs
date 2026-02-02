@@ -360,15 +360,17 @@ fn run_assertion(
 ) -> Check {
     let comp_assert = assert_cache.get_or_compile(assertion, max_assertion_ops);
 
-    if let Err(err) = comp_assert {
-        tracing::warn!(
-            "a bad assertion made it to compile from {} : {}",
-            subscription_id,
-            err.to_string(),
-        );
-        return Check::assert_compile_failure(&err);
-    }
-    let assertion = comp_assert.expect("already tested above");
+    let assertion = match comp_assert {
+        Err(err) => {
+            tracing::warn!(
+                "a bad assertion made it to compile from {} : {}",
+                subscription_id,
+                err.to_string(),
+            );
+            return Check::assert_compile_failure(&err);
+        }
+        Ok(assertion) => assertion,
+    };
 
     let result = assertion.eval(
         r.status().as_u16(),

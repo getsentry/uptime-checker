@@ -161,8 +161,17 @@ impl Assertion {
         body: &[u8],
         assertion_complexity: u32,
     ) -> Result<EvalResult, RuntimeError> {
+        let start = Instant::now();
         let mut gas = Gas(assertion_complexity);
-        self.root.eval(status_code, headers, body, &mut gas)
+        let result = self.root.eval(status_code, headers, body, &mut gas);
+
+        metrics::histogram!(
+            "assertion.eval",
+            "histogram" => "timer"
+        )
+        .record(start.elapsed().as_secs_f64());
+
+        result
     }
 }
 
@@ -624,9 +633,16 @@ pub fn compile(
     max_assertion_ops: u32,
 ) -> Result<Assertion, CompilationError> {
     let mut num_ops = max_assertion_ops;
-    Ok(Assertion {
-        root: compile_op(&assertion.root, &mut num_ops)?,
-    })
+    let start = Instant::now();
+    let compiled = compile_op(&assertion.root, &mut num_ops);
+
+    metrics::histogram!(
+        "assertion.compile",
+        "histogram" => "timer"
+    )
+    .record(start.elapsed().as_secs_f64());
+
+    Ok(Assertion { root: compiled? })
 }
 
 fn compile_op(op: &super::Op, num_ops: &mut u32) -> Result<Op, CompilationError> {
