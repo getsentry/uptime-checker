@@ -161,6 +161,7 @@ impl Assertion {
         headers: &hyper::header::HeaderMap<HeaderValue>,
         body: &[u8],
         assertion_complexity: u32,
+        region: &'static str,
     ) -> Result<EvalResult, RuntimeError> {
         let start = Instant::now();
         let mut gas = Gas(assertion_complexity);
@@ -168,7 +169,8 @@ impl Assertion {
 
         metrics::histogram!(
             "assertion.eval",
-            "histogram" => "timer"
+            "histogram" => "timer",
+            "uptime_region" => region,
         )
         .record(start.elapsed().as_secs_f64());
 
@@ -632,6 +634,7 @@ fn dec_ops(num_ops: &mut u32) -> Result<(), CompilationError> {
 pub fn compile(
     assertion: &super::Assertion,
     max_assertion_ops: u32,
+    region: &'static str,
 ) -> Result<Assertion, CompilationError> {
     let mut num_ops = max_assertion_ops;
     let start = Instant::now();
@@ -639,7 +642,8 @@ pub fn compile(
 
     metrics::histogram!(
         "assertion.compile",
-        "histogram" => "timer"
+        "histogram" => "timer",
+        "uptime_region" => region,
     )
     .record(start.elapsed().as_secs_f64());
 
@@ -750,6 +754,8 @@ fn visit_children(children: &[super::Op], num_ops: &mut u32) -> Result<Vec<Op>, 
 mod tests {
     const MAX_ASSERTION_OPS: u32 = 16;
     const ASSERTION_MAX_GAS: u32 = 100;
+    const REGION: &'static str = "default";
+
     use http::{HeaderMap, HeaderValue};
 
     use crate::assertions::{
@@ -782,34 +788,34 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
         assert!(
             assert
-                .eval(200, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(200, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             !assert
-                .eval(105, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(105, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             !assert
-                .eval(95, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(95, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             !assert
-                .eval(299, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(299, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             !assert
-                .eval(305, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(305, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -835,34 +841,34 @@ mod tests {
                 ],
             },
         };
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
         assert!(
             assert
-                .eval(200, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(200, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             !assert
-                .eval(105, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(105, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             assert
-                .eval(95, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(95, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             !assert
-                .eval(299, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(299, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             assert
-                .eval(305, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(305, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -910,46 +916,46 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
         assert!(
             !assert
-                .eval(0, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(0, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             assert
-                .eval(15, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
-                .unwrap()
-                .result
-        );
-        assert!(
-            !assert
-                .eval(100, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
-                .unwrap()
-                .result
-        );
-        assert!(
-            assert
-                .eval(200, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
-                .unwrap()
-                .result
-        );
-        assert!(
-            assert
-                .eval(201, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
-                .unwrap()
-                .result
-        );
-        assert!(
-            assert
-                .eval(202, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(15, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
         assert!(
             !assert
-                .eval(203, &HeaderMap::new(), b"", ASSERTION_MAX_GAS)
+                .eval(100, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
+                .unwrap()
+                .result
+        );
+        assert!(
+            assert
+                .eval(200, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
+                .unwrap()
+                .result
+        );
+        assert!(
+            assert
+                .eval(201, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
+                .unwrap()
+                .result
+        );
+        assert!(
+            assert
+                .eval(202, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
+                .unwrap()
+                .result
+        );
+        assert!(
+            !assert
+                .eval(203, &HeaderMap::new(), b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1025,10 +1031,10 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         let result = assert
-            .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+            .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
             .err()
             .unwrap();
         assert!(matches!(result, super::RuntimeError::TookTooLong));
@@ -1065,11 +1071,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1086,11 +1092,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             !assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1103,10 +1109,10 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
         assert!(
             assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1119,11 +1125,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             !assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1149,11 +1155,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1168,11 +1174,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             !assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1200,11 +1206,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1220,11 +1226,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1240,11 +1246,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1260,11 +1266,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             !assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1297,11 +1303,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1330,11 +1336,11 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
 
         assert!(
             !assert
-                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1359,10 +1365,10 @@ mod tests {
                 value_operand: HeaderOperand::None,
             },
         };
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
         assert!(
             assert
-                .eval(200, &hmap, b"", ASSERTION_MAX_GAS)
+                .eval(200, &hmap, b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1381,10 +1387,10 @@ mod tests {
                 }],
             },
         };
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
         assert!(
             assert
-                .eval(200, &hmap, b"", ASSERTION_MAX_GAS)
+                .eval(200, &hmap, b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1406,10 +1412,10 @@ mod tests {
                 },
             },
         };
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
         assert!(
             !assert
-                .eval(200, &hmap, b"", ASSERTION_MAX_GAS)
+                .eval(200, &hmap, b"", ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
         );
@@ -1425,7 +1431,7 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap_err();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap_err();
         assert!(matches!(
             assert,
             CompilationError::InvalidGlob { msg: _, glob: _ }
@@ -1447,7 +1453,7 @@ mod tests {
             },
         };
 
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap_err();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap_err();
         assert!(matches!(
             assert,
             CompilationError::InvalidGlob { msg: _, glob: _ }
@@ -1486,8 +1492,10 @@ mod tests {
                 .into(),
             },
         };
-        let c_assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
-        let eval = c_assert.eval(200, &hmap, b"", ASSERTION_MAX_GAS).unwrap();
+        let c_assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
+        let eval = c_assert
+            .eval(200, &hmap, b"", ASSERTION_MAX_GAS, REGION)
+            .unwrap();
         assert!(!eval.result);
         assert_eq!(
             eval.reason_path,
@@ -1549,8 +1557,10 @@ mod tests {
                 ],
             },
         };
-        let c_assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
-        let eval = c_assert.eval(200, &hmap, b"", ASSERTION_MAX_GAS).unwrap();
+        let c_assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
+        let eval = c_assert
+            .eval(200, &hmap, b"", ASSERTION_MAX_GAS, REGION)
+            .unwrap();
         assert!(!eval.result);
         assert_eq!(
             eval.reason_path,
@@ -1623,8 +1633,10 @@ mod tests {
                 .into(),
             },
         };
-        let c_assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
-        let eval = c_assert.eval(200, &hmap, b"", ASSERTION_MAX_GAS).unwrap();
+        let c_assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
+        let eval = c_assert
+            .eval(200, &hmap, b"", ASSERTION_MAX_GAS, REGION)
+            .unwrap();
         assert!(!eval.result);
         assert_eq!(
             eval.reason_path,
@@ -1893,9 +1905,9 @@ mod tests {
                 operator,
             },
         };
-        let assert = compile(&assert, MAX_ASSERTION_OPS).unwrap();
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
         let eval = assert
-            .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS)
+            .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
             .unwrap();
         eval.result
     }

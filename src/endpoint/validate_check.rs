@@ -46,10 +46,10 @@ pub(crate) async fn validate_check(
     State(state): State<Arc<EndpointState>>,
     AppJson(check_config): AppJson<CheckConfig>,
 ) -> Result<(), ExecuteError> {
-    metrics::counter!("endpoint.validate_check").increment(1);
+    metrics::counter!("endpoint.validate_check", "uptime_region" => state.region).increment(1);
 
     if let Some(assertion) = check_config.assertion {
-        if let Err(err) = compile(&assertion, state.max_assertion_ops) {
+        if let Err(err) = compile(&assertion, state.max_assertion_ops, state.region) {
             return Err(ExecuteError::CompilationError {
                 details: err.to_string(),
             });

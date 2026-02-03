@@ -317,6 +317,7 @@ fn to_check_result(
     disable_assertions: bool,
     assertion_complexity: u32,
     max_assertion_ops: u32,
+    region: &'static str,
 ) -> Check {
     match response {
         Ok((r, _)) => {
@@ -330,6 +331,7 @@ fn to_check_result(
                         assertion,
                         assertion_complexity,
                         max_assertion_ops,
+                        region,
                     )
                 } else if r.status().is_success() {
                     Check::success()
@@ -357,8 +359,9 @@ fn run_assertion(
     assertion: &assertions::Assertion,
     assertion_complexity: u32,
     max_assertion_ops: u32,
+    region: &'static str,
 ) -> Check {
-    let comp_assert = assert_cache.get_or_compile(assertion, max_assertion_ops);
+    let comp_assert = assert_cache.get_or_compile(assertion, max_assertion_ops, region);
 
     let assertion = match comp_assert {
         Err(err) => {
@@ -377,6 +380,7 @@ fn run_assertion(
         r.headers(),
         body_bytes,
         assertion_complexity,
+        region,
     );
 
     result.into()
@@ -576,6 +580,7 @@ impl Checker for ReqwestChecker {
             self.disable_assertions,
             self.assertion_complexity,
             self.max_assertion_ops,
+            region,
         );
 
         // Our total duration includes the additional processing time, including running the assert.
