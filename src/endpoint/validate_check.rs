@@ -1,6 +1,10 @@
-use crate::{assertions::compiled::compile, types::check_config::CheckConfig};
+use std::sync::Arc;
+
+use crate::{
+    assertions::compiled::compile, endpoint::EndpointState, types::check_config::CheckConfig,
+};
 use axum::{
-    extract::{rejection::JsonRejection, FromRequest},
+    extract::{rejection::JsonRejection, FromRequest, State},
     response::IntoResponse,
     Json,
 };
@@ -39,10 +43,11 @@ impl From<JsonRejection> for ExecuteError {
 pub(crate) struct AppJson<T>(T);
 
 pub(crate) async fn validate_check(
+    State(state): State<Arc<EndpointState>>,
     AppJson(check_config): AppJson<CheckConfig>,
 ) -> Result<(), ExecuteError> {
     if let Some(assertion) = check_config.assertion {
-        if let Err(err) = compile(&assertion) {
+        if let Err(err) = compile(&assertion, state.max_assertion_ops) {
             return Err(ExecuteError::CompilationError {
                 details: err.to_string(),
             });
@@ -72,6 +77,8 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
+    const MAX_ASSERTION_OPS: u32 = 16;
+
     #[derive(Deserialize)]
     struct ErroredResult {
         details: Value,
@@ -81,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_bad_request() {
         let checker = Arc::new(HttpChecker::DummyChecker(DummyChecker::new()));
-        let app = new_router(checker.clone(), "region");
+        let app = new_router(checker.clone(), "region", MAX_ASSERTION_OPS);
 
         let response = app
             .oneshot(
@@ -105,7 +112,7 @@ mod tests {
         let req = json!({
             "subscription_id": Uuid::new_v4(),
         });
-        let app = new_router(checker.clone(), "region");
+        let app = new_router(checker.clone(), "region", MAX_ASSERTION_OPS);
         let response = app
             .oneshot(
                 Request::builder()
@@ -155,7 +162,7 @@ mod tests {
             }),
         };
 
-        let app = new_router(checker.clone(), "region");
+        let app = new_router(checker.clone(), "region", MAX_ASSERTION_OPS);
         let response = app
             .oneshot(
                 Request::builder()

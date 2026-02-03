@@ -169,6 +169,8 @@ impl Manager {
                 assertions::cache::Cache::new(),
                 config.disable_asserts,
                 config.response_capture_enabled,
+                config.assertion_complexity,
+                config.max_assertion_ops,
             )
             .into(),
         });

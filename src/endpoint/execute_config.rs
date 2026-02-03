@@ -118,6 +118,8 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
+    const MAX_ASSERTION_OPS: u32 = 16;
+
     #[derive(Deserialize)]
     struct ErroredResult {
         details: Value,
@@ -127,7 +129,7 @@ mod tests {
     #[tokio::test]
     async fn test_bad_request() {
         let checker = Arc::new(HttpChecker::DummyChecker(DummyChecker::new()));
-        let app = new_router(checker.clone(), "region");
+        let app = new_router(checker.clone(), "region", MAX_ASSERTION_OPS);
 
         let response = app
             .oneshot(
@@ -151,7 +153,7 @@ mod tests {
         let req = json!({
             "subscription_id": Uuid::new_v4(),
         });
-        let app = new_router(checker.clone(), "region");
+        let app = new_router(checker.clone(), "region", MAX_ASSERTION_OPS);
         let response = app
             .oneshot(
                 Request::builder()
@@ -180,7 +182,7 @@ mod tests {
         let checker = DummyChecker::new();
         checker.queue_result(success_result);
         let checker = Arc::new(HttpChecker::DummyChecker(checker));
-        let app = new_router(checker.clone(), "region");
+        let app = new_router(checker.clone(), "region", MAX_ASSERTION_OPS);
         let config = CheckConfig::default();
 
         let response = app

@@ -169,6 +169,16 @@ pub struct Config {
     /// Enable response capture feature. When enabled, response body and headers
     /// will be captured on failures and included in the check result.
     pub response_capture_enabled: bool,
+
+    /// The maximum "complexity" an assertion is allowed to be; this roughly represents
+    /// how much time an assertion has to complete its ops; assertions with JSONPath queries
+    /// and glob pattern matching will contribute more to consuming this value (in proportion
+    /// to their individual complexity.)
+    pub assertion_complexity: u32,
+
+    /// The maximum number of assertion operations allowed in a complete assertion (including
+    /// logical operations like AND and OR and NOT.)
+    pub max_assertion_ops: u32,
 }
 
 impl Default for Config {
@@ -214,6 +224,8 @@ impl Default for Config {
             webserver_port: 12345,
             disable_asserts: false,
             response_capture_enabled: false,
+            assertion_complexity: 100,
+            max_assertion_ops: 16,
         }
     }
 }
@@ -373,6 +385,8 @@ mod tests {
                         webserver_port: 12345,
                         disable_asserts: false,
                         response_capture_enabled: false,
+                        assertion_complexity: 100,
+                        max_assertion_ops: 16,
                     }
                 );
             },
@@ -421,6 +435,8 @@ mod tests {
                 ("UPTIME_CHECKER_INTERFACE", "eth0"),
                 ("UPTIME_CHECKER_REDIS_READONLY", "true"),
                 ("UPTIME_CHECKER_WEBSERVER_PORT", "81"),
+                ("UPTIME_CHECKER_ASSERTION_COMPLEXITY", "120"),
+                ("UPTIME_CHECKER_MAX_ASSERTION_OPS", "15"),
             ],
             |config| {
                 assert_eq!(
@@ -472,6 +488,8 @@ mod tests {
                         webserver_port: 81,
                         disable_asserts: false,
                         response_capture_enabled: false,
+                        assertion_complexity: 120,
+                        max_assertion_ops: 15,
                     }
                 );
             },
