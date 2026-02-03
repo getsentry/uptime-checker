@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::{Borrow, BorrowMut},
     num::{ParseFloatError, ParseIntError},
-    time::Instant,
 };
 
 const GLOB_COMPLEXITY_LIMIT: u64 = 20;
