@@ -309,6 +309,7 @@ async fn read_body_bounded(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn to_check_result(
     assert_cache: &assertions::cache::Cache,
     response: Result<(Response, RequestId), reqwest::Error>,
@@ -351,6 +352,7 @@ fn to_check_result(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_assertion(
     assert_cache: &assertions::cache::Cache,
     body_bytes: &[u8],

@@ -754,7 +754,7 @@ fn visit_children(children: &[super::Op], num_ops: &mut u32) -> Result<Vec<Op>, 
 mod tests {
     const MAX_ASSERTION_OPS: u32 = 16;
     const ASSERTION_MAX_GAS: u32 = 100;
-    const REGION: &'static str = "default";
+    const REGION: &str = "default";
 
     use http::{HeaderMap, HeaderValue};
 
