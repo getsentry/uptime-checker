@@ -51,12 +51,19 @@ impl Cache {
         &self,
         key: &assertions::Assertion,
         max_assertion_ops: u32,
+        region: &'static str,
     ) -> Result<Arc<compiled::Assertion>, compiled::CompilationError> {
+        let start = Instant::now();
+
         if let Some(entry) = self.compiled.read().expect("not poisoned").get(key) {
-            return Ok(entry.assertion.clone());
+            let result = Ok(entry.assertion.clone());
+
+            metrics::histogram!("assertion.cache_hit", "histogram" => "timer", "uptime_region" => region)
+                .record(start.elapsed().as_secs_f64());
+            return result;
         }
 
-        let comp = compiled::compile(key, max_assertion_ops);
+        let comp = compiled::compile(key, max_assertion_ops, region);
         match comp {
             Ok(comp) => {
                 let mut wl = self.compiled.write().expect("not poisoned");
@@ -68,6 +75,9 @@ impl Cache {
                         timestamp: RwLock::new(Instant::now()),
                     },
                 );
+
+                metrics::histogram!("assertion.cache_miss", "histogram" => "timer", "uptime_region" => region)
+                    .record(start.elapsed().as_secs_f64());
 
                 Ok(comp)
             }

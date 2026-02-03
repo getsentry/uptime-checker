@@ -309,6 +309,7 @@ async fn read_body_bounded(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn to_check_result(
     assert_cache: &assertions::cache::Cache,
     response: Result<(Response, RequestId), reqwest::Error>,
@@ -317,6 +318,7 @@ fn to_check_result(
     disable_assertions: bool,
     assertion_complexity: u32,
     max_assertion_ops: u32,
+    region: &'static str,
 ) -> Check {
     match response {
         Ok((r, _)) => {
@@ -330,6 +332,7 @@ fn to_check_result(
                         assertion,
                         assertion_complexity,
                         max_assertion_ops,
+                        region,
                     )
                 } else if r.status().is_success() {
                     Check::success()
@@ -349,6 +352,7 @@ fn to_check_result(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_assertion(
     assert_cache: &assertions::cache::Cache,
     body_bytes: &[u8],
@@ -357,24 +361,28 @@ fn run_assertion(
     assertion: &assertions::Assertion,
     assertion_complexity: u32,
     max_assertion_ops: u32,
+    region: &'static str,
 ) -> Check {
-    let comp_assert = assert_cache.get_or_compile(assertion, max_assertion_ops);
+    let comp_assert = assert_cache.get_or_compile(assertion, max_assertion_ops, region);
 
-    if let Err(err) = comp_assert {
-        tracing::warn!(
-            "a bad assertion made it to compile from {} : {}",
-            subscription_id,
-            err.to_string(),
-        );
-        return Check::assert_compile_failure(&err);
-    }
-    let assertion = comp_assert.expect("already tested above");
+    let assertion = match comp_assert {
+        Err(err) => {
+            tracing::warn!(
+                "a bad assertion made it to compile from {} : {}",
+                subscription_id,
+                err.to_string(),
+            );
+            return Check::assert_compile_failure(&err);
+        }
+        Ok(assertion) => assertion,
+    };
 
     let result = assertion.eval(
         r.status().as_u16(),
         r.headers(),
         body_bytes,
         assertion_complexity,
+        region,
     );
 
     result.into()
@@ -574,6 +582,7 @@ impl Checker for ReqwestChecker {
             self.disable_assertions,
             self.assertion_complexity,
             self.max_assertion_ops,
+            region,
         );
 
         // Our total duration includes the additional processing time, including running the assert.
