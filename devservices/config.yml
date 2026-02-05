@@ -7,13 +7,13 @@ x-sentry-service-config:
       remote:
         repo_name: sentry-shared-kafka
         branch: main
-        repo_link: git@github.com:getsentry/sentry-shared-kafka.git
+        repo_link: https://github.com/getsentry/sentry-shared-kafka.git
     redis:
       description: Shared instance of redis used by sentry services
       remote:
         repo_name: sentry-shared-redis
         branch: main
-        repo_link: git@github.com:getsentry/sentry-shared-redis.git
+        repo_link: https://github.com/getsentry/sentry-shared-redis.git
     uptime-checker:
       description: Service powering Sentry's uptime detection features
   modes:
@@ -41,7 +41,8 @@ services:
     labels:
       - orchestrator=devservices
     restart: unless-stopped
-
+    ports:
+      - 127.0.0.1:12345:12345
 networks:
   devservices:
     name: devservices
