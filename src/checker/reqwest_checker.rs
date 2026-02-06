@@ -516,9 +516,11 @@ impl Checker for ReqwestChecker {
         let start = Instant::now();
         let mut response = do_request(&self.client, check.get_config(), &trace_header).await;
 
+        let force_capture = check.should_force_capture();
+
         // Determine if we should capture response data on failure
-        let should_capture =
-            self.response_capture_enabled && check.get_config().capture_response_on_failure;
+        let should_capture = force_capture
+            || (self.response_capture_enabled && check.get_config().capture_response_on_failure);
 
         // Read body bytes if we have an assertion OR if we should capture on failure.
         let needs_body_for_assertion = check.get_config().assertion.is_some();
@@ -591,7 +593,7 @@ impl Checker for ReqwestChecker {
         let mut rinfos = rinfos;
 
         // Add captured response data if this is a failure
-        if should_capture && check_result.result == CheckStatus::Failure {
+        if force_capture || (should_capture && check_result.result == CheckStatus::Failure) {
             if let Some(last_req) = rinfos.last_mut() {
                 // Base64 encode the body and truncate if needed
                 if !body_bytes.is_empty() {
@@ -1006,6 +1008,51 @@ mod tests {
         // Response should NOT be captured when disabled
         assert!(request_info.response_body.is_none());
         assert!(request_info.response_headers.is_none());
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_response_capture_forced() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(
+            Options {
+                validate_url: false,
+                disable_connection_reuse: true,
+                response_capture_enabled: false, // disabled
+                ..Default::default()
+            },
+            assertions::cache::Cache::new(),
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/no-head")
+                .header_exists("sentry-trace")
+                .header("User-Agent", UPTIME_USER_AGENT.to_string());
+            then.status(200).body("body");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/no-head").to_string(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test_with_forced(tick, config, true);
+        let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Success);
+
+        let request_info = result.request_info.unwrap();
+
+        let body_string = String::from_utf8(
+            BASE64_STANDARD
+                .decode(request_info.response_body.unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body_string, "body");
 
         mock.assert();
     }
