@@ -1578,22 +1578,18 @@ mod tests {
 
         let res = compile(&assert, MAX_ASSERTION_OPS, REGION);
 
-        let Err(err) = res else {
-            assert!(false);
-            return;
-        };
+        let err = res.err().unwrap();
 
-        let CompilationError::JsonPathParser {
-            assert_path,
-            msg: _,
-            path: _,
-            pos: _,
-        } = err
-        else {
-            assert!(false);
-            return;
-        };
-        assert_eq!(assert_path, [0, 2, 0, 1]);
+        matches!(
+            err,
+            CompilationError::JsonPathParser {
+                assert_path,
+                msg: _,
+                path: _,
+                pos: _
+            }
+            if assert_path == vec![0, 2, 0, 1]
+        );
     }
 
     #[test]
@@ -1635,20 +1631,12 @@ mod tests {
             REGION,
         );
 
-        let Err(err) = res else {
-            assert!(false);
-            return;
-        };
+        let err = res.err().unwrap();
 
-        let RuntimeError::InvalidTypeComparison {
+        assert!(matches!(err, RuntimeError::InvalidTypeComparison {
             assert_path,
             msg: _,
-        } = err
-        else {
-            assert!(false);
-            return;
-        };
-        assert_eq!(assert_path, [0, 2, 0]);
+        } if assert_path == vec![0, 2, 0]));
     }
 
     #[test]

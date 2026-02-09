@@ -502,7 +502,8 @@ mod tests {
   "status": "failure",
   "status_reason": {
     "type": "dns_error",
-    "description": "Unable to resolve hostname example.xyz"
+    "description": "Unable to resolve hostname example.xyz",
+    "details": null,
   },
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
   "span_id": "9c1d886a44bafc94",
