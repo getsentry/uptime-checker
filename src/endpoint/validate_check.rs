@@ -83,7 +83,8 @@ mod tests {
 
     #[derive(Deserialize)]
     struct ErroredResult {
-        details: Value,
+        details: Option<Value>,
+        compile_error: Option<Value>,
         error: String,
     }
 
@@ -182,5 +183,6 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let result: ErroredResult = serde_json::from_slice(&body).unwrap();
         assert_eq!(result.error, "compilation_error");
+        assert!(result.compile_error.is_some());
     }
 }
