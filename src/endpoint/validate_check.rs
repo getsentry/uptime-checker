@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use crate::{
-    assertions::compiled::compile, endpoint::EndpointState, types::check_config::CheckConfig,
+    assertions::compiled::{compile, CompilationError},
+    endpoint::EndpointState,
+    types::check_config::CheckConfig,
 };
 use axum::{
     extract::{rejection::JsonRejection, FromRequest, State},
@@ -17,14 +19,14 @@ use serde::Serialize;
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ExecuteError {
     SerializationError { details: String },
-    CompilationError { details: String },
+    CompilationError { compile_error: CompilationError },
 }
 
 impl IntoResponse for ExecuteError {
     fn into_response(self) -> axum::response::Response {
         let status = match &self {
             ExecuteError::SerializationError { details: _ } => StatusCode::BAD_REQUEST,
-            ExecuteError::CompilationError { details: _ } => StatusCode::BAD_REQUEST,
+            ExecuteError::CompilationError { compile_error: _ } => StatusCode::BAD_REQUEST,
         };
 
         (status, Json(self)).into_response()
@@ -50,9 +52,7 @@ pub(crate) async fn validate_check(
 
     if let Some(assertion) = check_config.assertion {
         if let Err(err) = compile(&assertion, state.max_assertion_ops, state.region) {
-            return Err(ExecuteError::CompilationError {
-                details: err.to_string(),
-            });
+            return Err(ExecuteError::CompilationError { compile_error: err });
         }
     }
 
