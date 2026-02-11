@@ -531,7 +531,11 @@ impl Checker for ReqwestChecker {
             || (self.response_capture_enabled && check.get_config().capture_response_on_failure);
 
         // Read body bytes if we have an assertion OR if we should capture on failure.
-        let needs_body_for_assertion = check.get_config().assertion.is_some();
+        let needs_body_for_assertion = if let Some(assertion) = &check.get_config().assertion {
+            assertion.requires_body()
+        } else {
+            false
+        };
         let body_bytes = if (needs_body_for_assertion || should_capture) && response.is_ok() {
             let Ok((resp, _req_id)) = &mut response else {
                 unreachable!("enclosing if-statement means this cannot happen");
