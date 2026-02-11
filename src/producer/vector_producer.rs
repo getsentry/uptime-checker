@@ -273,6 +273,7 @@ mod tests {
             status_reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::DnsError,
                 description: "hi".to_string(),
+                details: None,
             }),
             trace_id: Uuid::new_v4(),
             span_id: SpanId::default(),
