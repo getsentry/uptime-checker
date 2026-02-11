@@ -722,7 +722,7 @@ impl Checker for ReqwestChecker {
 
 #[cfg(test)]
 mod tests {
-    use crate::assertions;
+    use crate::assertions::{self, Assertion};
     use crate::check_executor::ScheduledCheck;
     use crate::checker::Checker;
     use crate::config_store::Tick;
@@ -1020,6 +1020,58 @@ mod tests {
         // Response should NOT be captured when disabled
         assert!(request_info.response_body.is_none());
         assert!(request_info.response_headers.is_none());
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_jsonpath_body_downloads() {
+        let server = MockServer::start();
+        let checker = ReqwestChecker::new_internal(
+            Options {
+                validate_url: false,
+                disable_connection_reuse: true,
+                response_capture_enabled: false, // disabled
+                ..Default::default()
+            },
+            assertions::cache::Cache::new(),
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::GET)
+                .path("/no-head")
+                .header_exists("sentry-trace")
+                .header("User-Agent", UPTIME_USER_AGENT.to_string());
+            then.status(200).body("{ \"foo\":\"bar\"}");
+        });
+
+        let config = CheckConfig {
+            url: server.url("/no-head").to_string(),
+            assertion: Assertion {
+                root: assertions::Op::And {
+                    children: vec![assertions::Op::Or {
+                        children: vec![assertions::Op::Not {
+                            operand: assertions::Op::JsonPath {
+                                value: "$.foo".to_owned(),
+                                operator: assertions::Comparison::Equals,
+                                operand: assertions::JSONPathOperand::Literal {
+                                    value: "baz".to_owned(),
+                                },
+                            }
+                            .into(),
+                        }],
+                    }],
+                },
+            }
+            .into(),
+            ..Default::default()
+        };
+
+        let tick = make_tick();
+        let check = ScheduledCheck::new_for_test(tick, config);
+        let result = checker.check_url(&check, "us-west").await;
+
+        assert_eq!(result.status, CheckStatus::Success);
 
         mock.assert();
     }
