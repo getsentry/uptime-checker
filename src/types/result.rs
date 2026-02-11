@@ -78,6 +78,17 @@ pub struct CheckStatusReason {
 
     /// A human readable description of the status reason
     pub description: String,
+
+    /// Optional details for the failure
+    pub details: Option<CheckFailureDetails>,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
+pub enum CheckFailureDetails {
+    AssertionCompilationError(compiled::CompilationError),
+    AssertionEvaluationError(compiled::RuntimeError),
 }
 
 fn to_timing(
@@ -409,6 +420,7 @@ impl Check {
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: format!("Got non 2xx status: {status}"),
+                details: None,
             }),
             assert_path: None,
         }
@@ -428,6 +440,7 @@ impl Check {
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::AssertionCompilationError,
                 description: err.to_string(),
+                details: Some(CheckFailureDetails::AssertionCompilationError(err.clone())),
             }),
             assert_path: None,
         }
@@ -439,6 +452,7 @@ impl Check {
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::AssertionEvaluationError,
                 description: err.to_string(),
+                details: Some(CheckFailureDetails::AssertionEvaluationError(err.clone())),
             }),
             assert_path: None,
         }
@@ -450,6 +464,7 @@ impl Check {
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: "Assertion failed".to_string(),
+                details: None,
             }),
             assert_path: Some(path),
         }
@@ -487,7 +502,8 @@ mod tests {
   "status": "failure",
   "status_reason": {
     "type": "dns_error",
-    "description": "Unable to resolve hostname example.xyz"
+    "description": "Unable to resolve hostname example.xyz",
+    "details": null
   },
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
   "span_id": "9c1d886a44bafc94",
@@ -609,13 +625,20 @@ mod tests {
         let schema =
             sentry_kafka_schemas::get_schema("uptime-results", None).expect("Schema should exist");
 
-        let check_result = CheckResult {
+        let mut check_result = CheckResult {
             guid: Uuid::new_v4(),
             subscription_id: Uuid::new_v4(),
             status: CheckStatus::Failure,
             status_reason: CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: "description".to_owned(),
+                details: crate::types::result::CheckFailureDetails::AssertionCompilationError(
+                    crate::assertions::compiled::CompilationError::InvalidJsonPath {
+                        assert_path: vec![0],
+                        msg: "".to_string(),
+                    },
+                )
+                .into(),
             }
             .into(),
             trace_id: Uuid::new_v4(),
@@ -673,6 +696,111 @@ mod tests {
         let json = serde_json::to_vec(&check_result).unwrap();
         schema.validate_json(&json).unwrap();
 
+        check_result.status_reason = CheckStatusReason {
+            status_type: CheckStatusReasonType::Failure,
+            description: "description".to_owned(),
+            details: crate::types::result::CheckFailureDetails::AssertionCompilationError(
+                crate::assertions::compiled::CompilationError::InvalidGlob {
+                    assert_path: vec![0],
+                    glob: "".to_string(),
+                    msg: "".to_string(),
+                },
+            )
+            .into(),
+        }
+        .into();
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+
+        check_result.status_reason = CheckStatusReason {
+            status_type: CheckStatusReasonType::Failure,
+            description: "description".to_owned(),
+            details: crate::types::result::CheckFailureDetails::AssertionCompilationError(
+                crate::assertions::compiled::CompilationError::JsonPathParser {
+                    assert_path: vec![0],
+                    msg: "".to_string(),
+                    path: "".to_string(),
+                    pos: 1,
+                },
+            )
+            .into(),
+        }
+        .into();
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+
+        check_result.status_reason = CheckStatusReason {
+            status_type: CheckStatusReasonType::Failure,
+            description: "description".to_owned(),
+            details: crate::types::result::CheckFailureDetails::AssertionCompilationError(
+                crate::assertions::compiled::CompilationError::TooManyOperations {
+                    assert_path: vec![1],
+                },
+            )
+            .into(),
+        }
+        .into();
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+
+        check_result.status_reason = CheckStatusReason {
+            status_type: CheckStatusReasonType::Failure,
+            description: "description".to_owned(),
+            details: crate::types::result::CheckFailureDetails::AssertionEvaluationError(
+                compiled::RuntimeError::InvalidJsonBody {
+                    body: "".to_string(),
+                },
+            )
+            .into(),
+        }
+        .into();
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+
+        check_result.status_reason = CheckStatusReason {
+            status_type: CheckStatusReasonType::Failure,
+            description: "description".to_owned(),
+            details: crate::types::result::CheckFailureDetails::AssertionEvaluationError(
+                compiled::RuntimeError::InvalidJsonPath {
+                    assert_path: vec![0],
+                    msg: "".to_string(),
+                },
+            )
+            .into(),
+        }
+        .into();
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+
+        check_result.status_reason = CheckStatusReason {
+            status_type: CheckStatusReasonType::Failure,
+            description: "description".to_owned(),
+            details: crate::types::result::CheckFailureDetails::AssertionEvaluationError(
+                compiled::RuntimeError::InvalidTypeComparison {
+                    assert_path: vec![0],
+                    msg: "".to_string(),
+                },
+            )
+            .into(),
+        }
+        .into();
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+
+        check_result.status_reason = CheckStatusReason {
+            status_type: CheckStatusReasonType::Failure,
+            description: "description".to_owned(),
+            details: crate::types::result::CheckFailureDetails::AssertionEvaluationError(
+                compiled::RuntimeError::TookTooLong {
+                    assert_path: vec![0],
+                },
+            )
+            .into(),
+        }
+        .into();
+        let json = serde_json::to_vec(&check_result).unwrap();
+        schema.validate_json(&json).unwrap();
+
         let check_result = CheckResult {
             guid: Uuid::new_v4(),
             subscription_id: Uuid::new_v4(),
@@ -680,6 +808,7 @@ mod tests {
             status_reason: CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: "description".to_owned(),
+                details: None,
             }
             .into(),
             trace_id: Uuid::new_v4(),
