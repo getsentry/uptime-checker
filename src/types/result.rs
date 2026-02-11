@@ -78,17 +78,6 @@ pub struct CheckStatusReason {
 
     /// A human readable description of the status reason
     pub description: String,
-
-    /// Optional details for the failure
-    pub details: Option<CheckFailureDetails>,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(untagged)]
-pub enum CheckFailureDetails {
-    AssertionCompilationError(compiled::CompilationError),
-    AssertionEvaluationError(compiled::RuntimeError),
 }
 
 fn to_timing(
@@ -420,7 +409,6 @@ impl Check {
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: format!("Got non 2xx status: {status}"),
-                details: None,
             }),
             assert_path: None,
         }
@@ -440,7 +428,6 @@ impl Check {
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::AssertionCompilationError,
                 description: err.to_string(),
-                details: Some(CheckFailureDetails::AssertionCompilationError(err.clone())),
             }),
             assert_path: None,
         }
@@ -452,7 +439,6 @@ impl Check {
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::AssertionEvaluationError,
                 description: err.to_string(),
-                details: Some(CheckFailureDetails::AssertionEvaluationError(err.clone())),
             }),
             assert_path: None,
         }
@@ -464,7 +450,6 @@ impl Check {
             reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: "Assertion failed".to_string(),
-                details: None,
             }),
             assert_path: Some(path),
         }
@@ -502,8 +487,7 @@ mod tests {
   "status": "failure",
   "status_reason": {
     "type": "dns_error",
-    "description": "Unable to resolve hostname example.xyz",
-    "details": null
+    "description": "Unable to resolve hostname example.xyz"
   },
   "trace_id": "947efba02dac463b9c1d886a44bafc94",
   "span_id": "9c1d886a44bafc94",
@@ -632,15 +616,6 @@ mod tests {
             status_reason: CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: "description".to_owned(),
-                details: CheckFailureDetails::AssertionCompilationError(
-                    compiled::CompilationError::JsonPathParser {
-                        assert_path: vec![0, 1, 2],
-                        msg: "msg".to_owned(),
-                        path: "$.status".to_owned(),
-                        pos: 42,
-                    },
-                )
-                .into(),
             }
             .into(),
             trace_id: Uuid::new_v4(),
@@ -705,7 +680,6 @@ mod tests {
             status_reason: CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: "description".to_owned(),
-                details: None,
             }
             .into(),
             trace_id: Uuid::new_v4(),

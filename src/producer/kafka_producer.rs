@@ -89,7 +89,6 @@ mod tests {
             status_reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::DnsError,
                 description: "hi".to_string(),
-                details: None,
             }),
             trace_id: guid,
             span_id: SpanId::default(),

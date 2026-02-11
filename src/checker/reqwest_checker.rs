@@ -394,43 +394,36 @@ impl From<reqwest::Error> for CheckStatusReason {
             CheckStatusReason {
                 status_type: CheckStatusReasonType::Timeout,
                 description: "Request timed out".to_string(),
-                details: None,
             }
         } else if e.is_redirect() {
             CheckStatusReason {
                 status_type: CheckStatusReasonType::RedirectError,
                 description: "Too many redirects".to_string(),
-                details: None,
             }
         } else if let Some(message) = dns_error(&e) {
             CheckStatusReason {
                 status_type: CheckStatusReasonType::DnsError,
                 description: message,
-                details: None,
             }
         } else if let Some(message) = tls_error(&e) {
             CheckStatusReason {
                 status_type: CheckStatusReasonType::TlsError,
                 description: message,
-                details: None,
             }
         } else if let Some(message) = connection_error(&e) {
             CheckStatusReason {
                 status_type: CheckStatusReasonType::ConnectionError,
                 description: message,
-                details: None,
             }
         } else if let Some((status_type, message)) = hyper_error(&e) {
             CheckStatusReason {
                 status_type,
                 description: message,
-                details: None,
             }
         } else if let Some((status_type, message)) = hyper_util_error(&e) {
             CheckStatusReason {
                 status_type,
                 description: message,
-                details: None,
             }
         } else {
             // if any error falls through we should log it,
@@ -440,7 +433,6 @@ impl From<reqwest::Error> for CheckStatusReason {
             CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: format!("{error_msg:?}"),
-                details: None,
             }
         }
     }

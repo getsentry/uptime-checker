@@ -12,87 +12,38 @@ use std::{
 
 const GLOB_COMPLEXITY_LIMIT: u64 = 20;
 
-#[derive(thiserror::Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
+#[derive(thiserror::Error, Debug, Serialize)]
 pub enum RuntimeError {
     #[error("Invalid JSONPath: {msg}")]
-    InvalidJsonPath { assert_path: Vec<u32>, msg: String },
+    InvalidJsonPath { msg: String },
 
     #[error("Assertion took too long")]
-    TookTooLong { assert_path: Vec<u32> },
+    TookTooLong,
 
     #[error("Invalid Body JSON: {body}")]
     InvalidBodyJson { body: String },
 
     #[error("Invalid type in comparison: {msg}")]
-    InvalidTypeComparison { assert_path: Vec<u32>, msg: String },
+    InvalidTypeComparison { msg: String },
 }
 
-impl RuntimeError {
-    pub fn set_path(&mut self, path: Vec<u32>) {
-        match self {
-            RuntimeError::InvalidJsonPath {
-                assert_path,
-                msg: _,
-            } => *assert_path = path,
-
-            RuntimeError::InvalidTypeComparison {
-                assert_path,
-                msg: _,
-            } => *assert_path = path,
-            _ => {}
-        }
-    }
-}
-
-#[derive(thiserror::Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
+#[derive(thiserror::Error, Debug, Serialize)]
 pub enum CompilationError {
     #[error("Invalid glob {glob}: {msg}")]
-    InvalidGlob {
-        assert_path: Vec<u32>,
-        glob: String,
-        msg: String,
-    },
+    InvalidGlob { glob: String, msg: String },
 
     #[error("JSONPath Parser Error: {msg}")]
-    JsonPathParser {
-        assert_path: Vec<u32>,
+    JSONPathParser {
         msg: String,
         path: String,
         pos: usize,
     },
 
     #[error("Invalid JSONPath: {msg}")]
-    InvalidJsonPath { assert_path: Vec<u32>, msg: String },
+    InvalidJsonPath { msg: String },
 
     #[error("Too many assertion operations")]
-    TooManyOperations { assert_path: Vec<u32> },
-}
-
-impl CompilationError {
-    pub fn set_path(&mut self, path: Vec<u32>) {
-        match self {
-            CompilationError::InvalidGlob {
-                assert_path,
-                glob: _,
-                msg: _,
-            } => *assert_path = path,
-            CompilationError::JsonPathParser {
-                assert_path,
-                msg: _,
-                path: _,
-                pos: _,
-            } => *assert_path = path,
-            CompilationError::InvalidJsonPath {
-                assert_path,
-                msg: _,
-            } => *assert_path = path,
-            CompilationError::TooManyOperations { assert_path } => *assert_path = path,
-        }
-    }
+    TooManyOperations,
 }
 
 // This struct records the reason behind the result of an assertion evaluation.  Eventually,
@@ -178,9 +129,7 @@ struct Gas(u32);
 impl Gas {
     fn consume(&mut self, amount: u32) -> Result<(), RuntimeError> {
         if amount > self.0 {
-            return Err(RuntimeError::TookTooLong {
-                assert_path: Vec::new(),
-            });
+            return Err(RuntimeError::TookTooLong);
         }
         self.0 -= amount;
 
@@ -214,16 +163,9 @@ impl Assertion {
         assertion_complexity: u32,
         region: &'static str,
     ) -> Result<EvalResult, RuntimeError> {
-        let mut path = Vec::with_capacity(10);
         let start = Instant::now();
         let mut gas = Gas(assertion_complexity);
-        let mut result = self
-            .root
-            .eval(0, status_code, headers, body, &mut gas, &mut path);
-
-        if let Err(err) = &mut result {
-            err.set_path(path);
-        }
+        let result = self.root.eval(status_code, headers, body, &mut gas);
 
         metrics::histogram!(
             "assertion.eval",
@@ -328,7 +270,6 @@ impl TryFrom<&super::JSONPathOperand> for JSONPathOperand {
                         return Err(CompilationError::InvalidGlob {
                             glob: e.to_string(),
                             msg: e.to_string(),
-                            assert_path: Vec::new(),
                         })
                     }
                 }
@@ -400,7 +341,6 @@ impl TryFrom<&super::HeaderOperand> for HeaderOperand {
                         return Err(CompilationError::InvalidGlob {
                             glob: e.to_string(),
                             msg: e.to_string(),
-                            assert_path: Vec::new(),
                         })
                     }
                 }
@@ -478,7 +418,6 @@ where
             "could not coerce a comparison between {} and {}",
             json_value, test_value
         ),
-        assert_path: Vec::new(),
     })
 }
 
@@ -554,9 +493,7 @@ fn cmp_eq_jsonpath(
         JSONPathOperand::Glob { pattern } => {
             // TODO: either expose, or copy, the complexity metric from relay-pattern.
             gas.consume(5)?;
-            pattern.is_match(body_value.as_str().ok_or(RuntimeError::TookTooLong {
-                assert_path: Vec::new(),
-            })?)
+            pattern.is_match(body_value.as_str().ok_or(RuntimeError::TookTooLong)?)
         }
         JSONPathOperand::None => false,
     };
@@ -597,19 +534,16 @@ impl Eq for Op {}
 impl Op {
     fn eval(
         &self,
-        idx: u32,
         status_code: u16,
         headers: &hyper::header::HeaderMap<HeaderValue>,
         body: &[u8],
         gas: &mut Gas,
-        path: &mut Vec<u32>,
     ) -> Result<EvalResult, RuntimeError> {
-        path.push(idx);
         let result = match self {
             Op::And { children } => {
                 let mut result = EvalResult::and_node();
                 for (idx, child) in children.iter().enumerate() {
-                    let eval = child.eval(idx as u32, status_code, headers, body, gas, path)?;
+                    let eval = child.eval(status_code, headers, body, gas)?;
                     if !eval.result {
                         result = EvalResult::child_idx(idx, eval.result, eval.reason_path);
                         break;
@@ -620,7 +554,7 @@ impl Op {
             Op::Or { children } => {
                 let mut result = EvalResult::or_node();
                 for (idx, child) in children.iter().enumerate() {
-                    let eval = child.eval(idx as u32, status_code, headers, body, gas, path)?;
+                    let eval = child.eval(status_code, headers, body, gas)?;
                     if eval.result {
                         result = EvalResult::child_idx(idx, eval.result, eval.reason_path);
                         break;
@@ -629,7 +563,7 @@ impl Op {
                 result
             }
             Op::Not { operand } => {
-                let eval = operand.eval(0, status_code, headers, body, gas, path)?;
+                let eval = operand.eval(status_code, headers, body, gas)?;
                 EvalResult::child_idx(0, !eval.result, eval.reason_path)
             }
             Op::StatusCodeCheck { value, operator } => {
@@ -684,8 +618,6 @@ impl Op {
             }
         };
 
-        path.pop();
-
         Ok(result)
     }
 }
@@ -696,9 +628,7 @@ fn dec_ops(num_ops: &mut u32) -> Result<(), CompilationError> {
         return Ok(());
     }
 
-    Err(CompilationError::TooManyOperations {
-        assert_path: Vec::new(),
-    })
+    Err(CompilationError::TooManyOperations)
 }
 
 pub fn compile(
@@ -708,12 +638,7 @@ pub fn compile(
 ) -> Result<Assertion, CompilationError> {
     let mut num_ops = max_assertion_ops;
     let start = Instant::now();
-    let mut path = Vec::with_capacity(10);
-    let mut compiled = compile_op(0, &assertion.root, &mut num_ops, &mut path);
-
-    if let Err(err) = &mut compiled {
-        err.set_path(path);
-    }
+    let compiled = compile_op(&assertion.root, &mut num_ops);
 
     metrics::histogram!(
         "assertion.compile",
@@ -725,23 +650,17 @@ pub fn compile(
     Ok(Assertion { root: compiled? })
 }
 
-fn compile_op(
-    idx: u32,
-    op: &super::Op,
-    num_ops: &mut u32,
-    path: &mut Vec<u32>,
-) -> Result<Op, CompilationError> {
-    path.push(idx);
+fn compile_op(op: &super::Op, num_ops: &mut u32) -> Result<Op, CompilationError> {
     dec_ops(num_ops)?;
     let op = match op {
         super::Op::And { children } => Op::And {
-            children: visit_children(children, num_ops, path)?,
+            children: visit_children(children, num_ops)?,
         },
         super::Op::Or { children } => Op::Or {
-            children: visit_children(children, num_ops, path)?,
+            children: visit_children(children, num_ops)?,
         },
         super::Op::Not { operand } => Op::Not {
-            operand: Box::new(compile_op(0, operand, num_ops, path)?),
+            operand: Box::new(compile_op(operand, num_ops)?),
         },
         super::Op::StatusCodeCheck { value, operator } => Op::StatusCodeCheck {
             value: *value,
@@ -768,7 +687,7 @@ fn compile_op(
             operator: operator.into(),
         },
     };
-    path.pop();
+
     Ok(op)
 }
 
@@ -776,7 +695,6 @@ impl From<ParseIntError> for RuntimeError {
     fn from(value: ParseIntError) -> Self {
         Self::InvalidTypeComparison {
             msg: value.to_string(),
-            assert_path: Vec::new(),
         }
     }
 }
@@ -785,7 +703,6 @@ impl From<ParseFloatError> for RuntimeError {
     fn from(value: ParseFloatError) -> Self {
         Self::InvalidTypeComparison {
             msg: value.to_string(),
-            assert_path: Vec::new(),
         }
     }
 }
@@ -793,12 +710,9 @@ impl From<ParseFloatError> for RuntimeError {
 impl From<JsonPathError> for RuntimeError {
     fn from(value: JsonPathError) -> Self {
         match value {
-            JsonPathError::TookTooLong => RuntimeError::TookTooLong {
-                assert_path: Vec::new(),
-            },
+            JsonPathError::TookTooLong => RuntimeError::TookTooLong,
             rest => RuntimeError::InvalidJsonPath {
                 msg: rest.to_string(),
-                assert_path: Vec::new(),
             },
         }
     }
@@ -812,34 +726,26 @@ impl From<JsonPathError> for CompilationError {
                     pest::error::InputLocation::Pos(pos) => pos,
                     pest::error::InputLocation::Span((start, _)) => start,
                 };
-                CompilationError::JsonPathParser {
+                CompilationError::JSONPathParser {
                     msg: error.to_string(),
                     path: error.line().to_owned(),
                     pos,
-                    assert_path: Vec::new(),
                 }
             }
-            JsonPathError::InvalidGlob(glob, reason) => CompilationError::InvalidGlob {
-                glob,
-                msg: reason,
-                assert_path: Vec::new(),
-            },
+            JsonPathError::InvalidGlob(glob, reason) => {
+                CompilationError::InvalidGlob { glob, msg: reason }
+            }
             rest => CompilationError::InvalidJsonPath {
                 msg: rest.to_string(),
-                assert_path: Vec::new(),
             },
         }
     }
 }
 
-fn visit_children(
-    children: &[super::Op],
-    num_ops: &mut u32,
-    path: &mut Vec<u32>,
-) -> Result<Vec<Op>, CompilationError> {
+fn visit_children(children: &[super::Op], num_ops: &mut u32) -> Result<Vec<Op>, CompilationError> {
     let mut cs = vec![];
-    for (idx, c) in children.iter().enumerate() {
-        cs.push(compile_op(idx as u32, c, num_ops, path)?);
+    for c in children.iter() {
+        cs.push(compile_op(c, num_ops)?);
     }
     Ok(cs)
 }
@@ -853,7 +759,7 @@ mod tests {
     use http::{HeaderMap, HeaderValue};
 
     use crate::assertions::{
-        compiled::{compile, extract_failure_data, CompilationError, EvalPath, RuntimeError},
+        compiled::{compile, extract_failure_data, CompilationError, EvalPath},
         Assertion, Comparison, GlobPattern, HeaderOperand, JSONPathOperand, Op,
     };
 
@@ -1131,10 +1037,7 @@ mod tests {
             .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
             .err()
             .unwrap();
-        assert!(matches!(
-            result,
-            super::RuntimeError::TookTooLong { assert_path: _ }
-        ));
+        assert!(matches!(result, super::RuntimeError::TookTooLong));
     }
 
     #[test]
@@ -1531,112 +1434,8 @@ mod tests {
         let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap_err();
         assert!(matches!(
             assert,
-            CompilationError::InvalidGlob {
-                msg: _,
-                glob: _,
-                assert_path: _
-            }
+            CompilationError::InvalidGlob { msg: _, glob: _ }
         ));
-    }
-
-    #[test]
-    fn test_compile_error_paths() {
-        let assert = Assertion {
-            root: Op::And {
-                children: vec![
-                    Op::StatusCodeCheck {
-                        value: 200,
-                        operator: Comparison::Always,
-                    },
-                    Op::StatusCodeCheck {
-                        value: 200,
-                        operator: Comparison::Always,
-                    },
-                    Op::Not {
-                        operand: Op::Or {
-                            children: vec![
-                                Op::StatusCodeCheck {
-                                    value: 200,
-                                    operator: Comparison::Always,
-                                },
-                                Op::JsonPath {
-                                    value: "asdf".into(),
-                                    operator: Comparison::Always,
-                                    operand: JSONPathOperand::None,
-                                },
-                            ],
-                        }
-                        .into(),
-                    },
-                    Op::StatusCodeCheck {
-                        value: 200,
-                        operator: Comparison::Always,
-                    },
-                ],
-            },
-        };
-
-        let res = compile(&assert, MAX_ASSERTION_OPS, REGION);
-
-        let err = res.err().unwrap();
-
-        matches!(
-            err,
-            CompilationError::JsonPathParser {
-                assert_path,
-                msg: _,
-                path: _,
-                pos: _
-            }
-            if assert_path == vec![0, 2, 0, 1]
-        );
-    }
-
-    #[test]
-    fn test_runtime_error_paths() {
-        let hmap = HeaderMap::new();
-        let assert = Assertion {
-            root: Op::And {
-                children: vec![
-                    Op::StatusCodeCheck {
-                        value: 200,
-                        operator: Comparison::Always,
-                    },
-                    Op::And {
-                        children: vec![Op::StatusCodeCheck {
-                            value: 200,
-                            operator: Comparison::Always,
-                        }],
-                    },
-                    Op::Not {
-                        operand: Op::JsonPath {
-                            value: "$.status".into(),
-                            operator: Comparison::Equals,
-                            operand: JSONPathOperand::Literal {
-                                value: "123".to_owned(),
-                            },
-                        }
-                        .into(),
-                    },
-                ],
-            },
-        };
-
-        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
-        let res = assert.eval(
-            200,
-            &hmap,
-            "{ \"status\": { \"foo\": 123 } }".as_bytes(),
-            MAX_ASSERTION_OPS,
-            REGION,
-        );
-
-        let err = res.err().unwrap();
-
-        assert!(matches!(err, RuntimeError::InvalidTypeComparison {
-            assert_path,
-            msg: _,
-        } if assert_path == vec![0, 2, 0]));
     }
 
     #[test]
@@ -1657,11 +1456,7 @@ mod tests {
         let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap_err();
         assert!(matches!(
             assert,
-            CompilationError::InvalidGlob {
-                msg: _,
-                glob: _,
-                assert_path: _
-            }
+            CompilationError::InvalidGlob { msg: _, glob: _ }
         ));
     }
     #[test]

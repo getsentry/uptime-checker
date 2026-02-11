@@ -177,7 +177,6 @@ impl CheckResult {
             status_reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::MissProduced,
                 description: "Check was not completed within the expected time window".to_string(),
-                details: None,
             }),
             trace_id: Default::default(),
             span_id: Default::default(),
