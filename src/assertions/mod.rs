@@ -14,7 +14,7 @@ impl Assertion {
         match op {
             Op::And { children } => children.iter().any(Assertion::requires_body_impl),
             Op::Or { children } => children.iter().any(Assertion::requires_body_impl),
-            Op::Not { operand } => Assertion::requires_body_impl(&*operand),
+            Op::Not { operand } => Assertion::requires_body_impl(operand),
             Op::StatusCodeCheck {
                 value: _,
                 operator: _,
