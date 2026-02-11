@@ -632,13 +632,11 @@ mod tests {
             status_reason: CheckStatusReason {
                 status_type: CheckStatusReasonType::Failure,
                 description: "description".to_owned(),
-                details: Some(
-                    crate::types::result::CheckFailureDetails::AssertionCompilationError(
-                        crate::assertions::compiled::CompilationError::InvalidJsonPath {
-                            assert_path: vec![0],
-                            msg: "".to_string(),
-                        },
-                    ),
+                details: crate::types::result::CheckFailureDetails::AssertionCompilationError(
+                    crate::assertions::compiled::CompilationError::InvalidJsonPath {
+                        assert_path: vec![0],
+                        msg: "".to_string(),
+                    },
                 )
                 .into(),
             }
@@ -701,14 +699,12 @@ mod tests {
         check_result.status_reason = CheckStatusReason {
             status_type: CheckStatusReasonType::Failure,
             description: "description".to_owned(),
-            details: Some(
-                crate::types::result::CheckFailureDetails::AssertionCompilationError(
-                    crate::assertions::compiled::CompilationError::InvalidGlob {
-                        assert_path: vec![0],
-                        glob: "".to_string(),
-                        msg: "".to_string(),
-                    },
-                ),
+            details: crate::types::result::CheckFailureDetails::AssertionCompilationError(
+                crate::assertions::compiled::CompilationError::InvalidGlob {
+                    assert_path: vec![0],
+                    glob: "".to_string(),
+                    msg: "".to_string(),
+                },
             )
             .into(),
         }
@@ -719,15 +715,13 @@ mod tests {
         check_result.status_reason = CheckStatusReason {
             status_type: CheckStatusReasonType::Failure,
             description: "description".to_owned(),
-            details: Some(
-                crate::types::result::CheckFailureDetails::AssertionCompilationError(
-                    crate::assertions::compiled::CompilationError::JsonPathParser {
-                        assert_path: vec![0],
-                        msg: "".to_string(),
-                        path: "".to_string(),
-                        pos: 1,
-                    },
-                ),
+            details: crate::types::result::CheckFailureDetails::AssertionCompilationError(
+                crate::assertions::compiled::CompilationError::JsonPathParser {
+                    assert_path: vec![0],
+                    msg: "".to_string(),
+                    path: "".to_string(),
+                    pos: 1,
+                },
             )
             .into(),
         }
@@ -738,12 +732,10 @@ mod tests {
         check_result.status_reason = CheckStatusReason {
             status_type: CheckStatusReasonType::Failure,
             description: "description".to_owned(),
-            details: Some(
-                crate::types::result::CheckFailureDetails::AssertionCompilationError(
-                    crate::assertions::compiled::CompilationError::TooManyOperations {
-                        assert_path: vec![1],
-                    },
-                ),
+            details: crate::types::result::CheckFailureDetails::AssertionCompilationError(
+                crate::assertions::compiled::CompilationError::TooManyOperations {
+                    assert_path: vec![1],
+                },
             )
             .into(),
         }
@@ -754,12 +746,10 @@ mod tests {
         check_result.status_reason = CheckStatusReason {
             status_type: CheckStatusReasonType::Failure,
             description: "description".to_owned(),
-            details: Some(
-                crate::types::result::CheckFailureDetails::AssertionEvaluationError(
-                    compiled::RuntimeError::InvalidJsonBody {
-                        body: "".to_string(),
-                    },
-                ),
+            details: crate::types::result::CheckFailureDetails::AssertionEvaluationError(
+                compiled::RuntimeError::InvalidJsonBody {
+                    body: "".to_string(),
+                },
             )
             .into(),
         }
@@ -770,13 +760,11 @@ mod tests {
         check_result.status_reason = CheckStatusReason {
             status_type: CheckStatusReasonType::Failure,
             description: "description".to_owned(),
-            details: Some(
-                crate::types::result::CheckFailureDetails::AssertionEvaluationError(
-                    compiled::RuntimeError::InvalidJsonPath {
-                        assert_path: vec![0],
-                        msg: "".to_string(),
-                    },
-                ),
+            details: crate::types::result::CheckFailureDetails::AssertionEvaluationError(
+                compiled::RuntimeError::InvalidJsonPath {
+                    assert_path: vec![0],
+                    msg: "".to_string(),
+                },
             )
             .into(),
         }
@@ -787,13 +775,11 @@ mod tests {
         check_result.status_reason = CheckStatusReason {
             status_type: CheckStatusReasonType::Failure,
             description: "description".to_owned(),
-            details: Some(
-                crate::types::result::CheckFailureDetails::AssertionEvaluationError(
-                    compiled::RuntimeError::InvalidTypeComparison {
-                        assert_path: vec![0],
-                        msg: "".to_string(),
-                    },
-                ),
+            details: crate::types::result::CheckFailureDetails::AssertionEvaluationError(
+                compiled::RuntimeError::InvalidTypeComparison {
+                    assert_path: vec![0],
+                    msg: "".to_string(),
+                },
             )
             .into(),
         }
@@ -804,12 +790,10 @@ mod tests {
         check_result.status_reason = CheckStatusReason {
             status_type: CheckStatusReasonType::Failure,
             description: "description".to_owned(),
-            details: Some(
-                crate::types::result::CheckFailureDetails::AssertionEvaluationError(
-                    compiled::RuntimeError::TookTooLong {
-                        assert_path: vec![0],
-                    },
-                ),
+            details: crate::types::result::CheckFailureDetails::AssertionEvaluationError(
+                compiled::RuntimeError::TookTooLong {
+                    assert_path: vec![0],
+                },
             )
             .into(),
         }
