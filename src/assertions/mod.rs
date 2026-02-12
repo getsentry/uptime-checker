@@ -9,6 +9,35 @@ pub struct Assertion {
     pub(crate) root: Op,
 }
 
+impl Assertion {
+    fn requires_body_impl(op: &Op) -> bool {
+        match op {
+            Op::And { children } => children.iter().any(Assertion::requires_body_impl),
+            Op::Or { children } => children.iter().any(Assertion::requires_body_impl),
+            Op::Not { operand } => Assertion::requires_body_impl(operand),
+            Op::StatusCodeCheck {
+                value: _,
+                operator: _,
+            } => false,
+            Op::JsonPath {
+                value: _,
+                operator: _,
+                operand: _,
+            } => true,
+            Op::HeaderCheck {
+                key_op: _,
+                key_operand: _,
+                value_op: _,
+                value_operand: _,
+            } => false,
+        }
+    }
+
+    pub fn requires_body(&self) -> bool {
+        Assertion::requires_body_impl(&self.root)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "cmp", rename_all = "snake_case")]
 #[derive(Default)]
