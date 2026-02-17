@@ -1,3 +1,30 @@
+## 26.2.0
+
+### New Features ✨
+
+#### Uptime
+
+- Provide detail and paths for comp/runtime assertion errors by @klochek in [#482](https://github.com/getsentry/uptime-checker/pull/482)
+- Allow preview checks to capture response body bytes by @klochek in [#472](https://github.com/getsentry/uptime-checker/pull/472)
+- Metrics for asserts by @klochek in [#477](https://github.com/getsentry/uptime-checker/pull/477)
+- Set assertion limits using config/env vars by @klochek in [#476](https://github.com/getsentry/uptime-checker/pull/476)
+- Add response capture support for failure debugging by @wedamija in [#464](https://github.com/getsentry/uptime-checker/pull/464)
+
+### Bug Fixes 🐛
+
+#### Uptime
+
+- Only download body bytes if the assertion needs them by @klochek in [#483](https://github.com/getsentry/uptime-checker/pull/483)
+- Devservices fixes (port, repo) by @klochek in [#479](https://github.com/getsentry/uptime-checker/pull/479)
+- Add bounds to number of operations allowed in an assertion by @klochek in [#474](https://github.com/getsentry/uptime-checker/pull/474)
+- Have jsonpath asserts compare against values by @klochek in [#471](https://github.com/getsentry/uptime-checker/pull/471)
+- For asserts, wrap json objects in arrays by @klochek in [#470](https://github.com/getsentry/uptime-checker/pull/470)
+- Open the endpoint on the adapter, not localhost by @klochek in [#466](https://github.com/getsentry/uptime-checker/pull/466)
+
+### Internal Changes 🔧
+
+- (uptime) Add comparison tests for uptime asserts by @klochek in [#473](https://github.com/getsentry/uptime-checker/pull/473)
+
 ## 26.1.0
 
 ### New Features ✨
