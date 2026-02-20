@@ -72,23 +72,27 @@ impl VectorResultsProducer {
             // Avoid cloning this string over and over again.
             let region: &'static str = config.region.clone().leak();
             let mut batch = Vec::with_capacity(config.vector_batch_size);
+            let mut batch_element_count = 0;
 
-            while let Some(json) = receiver.recv().await {
-                let new_count = pending_items.fetch_sub(1, Ordering::Relaxed);
-                metrics::gauge!("producer.pending_items").set(new_count as f64);
-
-                batch.push(json);
-
+            while receiver
+                .recv_many(&mut batch, config.vector_batch_size - batch_element_count)
+                .await
+                > 0
+            {
                 if batch.len() < config.vector_batch_size {
+                    batch_element_count = batch.len();
                     continue;
                 }
+                batch_element_count = 0;
 
-                let batch_to_send =
-                    std::mem::replace(&mut batch, Vec::with_capacity(config.vector_batch_size));
+                let new_count = pending_items.fetch_sub(batch.len(), Ordering::Relaxed);
+                metrics::gauge!("producer.pending_items", "uptime_region" => region)
+                    .set(new_count as f64);
+
                 if let Err(e) = {
                     let start = std::time::Instant::now();
                     let result = send_batch(
-                        batch_to_send,
+                        &mut batch,
                         client.clone(),
                         config.endpoint.clone(),
                         config.retry_vector_errors_forever,
@@ -104,7 +108,7 @@ impl VectorResultsProducer {
 
             if !batch.is_empty() {
                 if let Err(e) = send_batch(
-                    batch,
+                    &mut batch,
                     client,
                     config.endpoint,
                     config.retry_vector_errors_forever,
@@ -139,7 +143,7 @@ impl ResultsProducer for VectorResultsProducer {
 }
 
 async fn send_batch(
-    batch: Vec<Vec<u8>>,
+    batch: &mut Vec<Vec<u8>>,
     client: Client,
     endpoint: String,
     retry_vector_errors_forever: bool,
@@ -149,11 +153,14 @@ async fn send_batch(
         return Ok(());
     }
 
-    let body: String = batch
-        .iter()
-        .filter_map(|json| String::from_utf8(json.clone()).ok())
-        .map(|s| s + "\n")
-        .collect();
+    let vec_size = batch.iter().fold(0, |acc, b| acc + b.len() + 1);
+    let batch_len = batch.len();
+
+    let mut body = Vec::with_capacity(vec_size);
+    for s in batch.drain(..) {
+        body.extend(s);
+        body.push(b'\n');
+    }
 
     const BASE_DELAY_MS: u64 = 100;
     const MAX_DELAY_MS: u64 = 2000;
@@ -206,7 +213,7 @@ async fn send_batch(
                             status = ?resp.status(),
                             retry = num_of_retries,
                             delay_ms = ?delay.as_millis(),
-                            batch_size = batch.len(),
+                            batch_size = batch_len,
                             "request.failed_to_vector_retrying"
                         );
                     }
@@ -214,7 +221,7 @@ async fn send_batch(
                         tracing::warn!(
                             error = ?e,
                             retry = num_of_retries,
-                            batch_size = batch.len(),
+                            batch_size = batch_len,
                             delay_ms = ?delay.as_millis(),
                             "request.failed_to_vector_retrying"
                         );
