@@ -8,6 +8,7 @@ use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::formats::CommaSeparator;
 use serde_with::serde_as;
+use serde_with::with_prefix;
 use std::str::FromStr;
 
 use crate::{app::cli, logging};
@@ -44,6 +45,51 @@ pub struct MetricsConfig {
 
     /// Tag name to report the hostname to for each metric. Defaults to not sending such a tag.
     pub hostname_tag: Option<String>,
+}
+
+#[serde_as]
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KafkaSecurityProtocol {
+    Plaintext,
+    Ssl,
+    SaslPlaintext,
+    SaslSsl,
+}
+
+// We need snake-case to_string() elsewhere, and during serialization, so....
+impl std::fmt::Display for KafkaSecurityProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let serialized = serde_json::to_string(self).expect("This must be serializable");
+        // Ignore the quotes!
+        write!(f, "{}", &serialized[1..serialized.len() - 1])
+    }
+}
+
+#[serde_as]
+#[derive(PartialEq, Debug, Serialize, Deserialize, Default)]
+pub struct KafkaConfig {
+    /// Kafka security protocol to use. The value must be one of "plaintext, "ssl", "sasl_plaintext", "sasl_ssl".
+    /// If not specified, defaults to "plaintext".
+    pub security_protocol: Option<KafkaSecurityProtocol>,
+
+    /// TLS CA certificate location for Kafka.
+    pub ssl_ca_location: Option<String>,
+
+    /// TLS certificate location for Kafka.
+    pub ssl_cert_location: Option<String>,
+
+    /// TLS private key location for Kafka.
+    pub ssl_key_location: Option<String>,
+
+    /// SASL mechanism to use for Kafka. The value must be one of "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512".
+    pub sasl_mechanism: Option<String>,
+
+    /// SASL username for Kafka.
+    pub sasl_username: Option<String>,
+
+    /// SASL password for Kafka.
+    pub sasl_password: Option<String>,
 }
 
 #[serde_as]
@@ -85,6 +131,10 @@ pub struct Config {
 
     /// The topic to produce uptime checks into.
     pub results_kafka_topic: String,
+
+    /// Kafka extended configuration
+    #[serde(flatten, with = "kafka_config")]
+    pub kafka_config: KafkaConfig,
 
     /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
@@ -181,6 +231,9 @@ pub struct Config {
     pub max_assertion_ops: u32,
 }
 
+// Adding a kafka_ prefix to all the kafka config fields.
+with_prefix!(kafka_config "kafka_");
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -198,6 +251,7 @@ impl Default for Config {
             },
             results_kafka_cluster: vec!["127.0.0.1:9092".to_owned()],
             results_kafka_topic: "uptime-results".to_owned(),
+            kafka_config: KafkaConfig::default(),
             config_provider_mode: ConfigProviderMode::Redis,
             checker_mode: CheckerMode::Reqwest,
             vector_batch_size: 10,
@@ -292,9 +346,12 @@ mod tests {
     use std::net::IpAddr;
     use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
+    use crate::app::config::KafkaSecurityProtocol;
     use crate::{app::cli, logging};
 
-    use super::{CheckerMode, Config, ConfigProviderMode, MetricsConfig, ProducerMode};
+    use super::{
+        CheckerMode, Config, ConfigProviderMode, KafkaConfig, MetricsConfig, ProducerMode,
+    };
 
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where
@@ -359,6 +416,7 @@ mod tests {
                             "10.0.0.2:9000".to_owned()
                         ],
                         results_kafka_topic: "uptime-results".to_owned(),
+                        kafka_config: KafkaConfig::default(),
                         config_provider_mode: ConfigProviderMode::Redis,
                         checker_mode: CheckerMode::Reqwest,
                         config_provider_redis_update_ms: 1000,
@@ -411,6 +469,16 @@ mod tests {
                     "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
                     "10.0.0.1,10.0.0.2:7000",
                 ),
+                ("UPTIME_CHECKER_KAFKA_SECURITY_PROTOCOL", "sasl_plaintext"),
+                ("UPTIME_CHECKER_KAFKA_SSL_CA_LOCATION", "/path/to/ca.crt"),
+                (
+                    "UPTIME_CHECKER_KAFKA_SSL_CERT_LOCATION",
+                    "/path/to/cert.crt",
+                ),
+                ("UPTIME_CHECKER_KAFKA_SSL_KEY_LOCATION", "/path/to/key.key"),
+                ("UPTIME_CHECKER_KAFKA_SASL_MECHANISM", "scram-sha-256"),
+                ("UPTIME_CHECKER_KAFKA_SASL_USERNAME", "my_user"),
+                ("UPTIME_CHECKER_KAFKA_SASL_PASSWORD", "my_password"),
                 ("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "redis"),
                 ("UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_UPDATE_MS", "2000"),
                 (
@@ -459,6 +527,15 @@ mod tests {
                             "10.0.0.2:7000".to_owned()
                         ],
                         results_kafka_topic: "uptime-results".to_owned(),
+                        kafka_config: KafkaConfig {
+                            security_protocol: Some(KafkaSecurityProtocol::SaslPlaintext),
+                            ssl_ca_location: Some("/path/to/ca.crt".to_owned()),
+                            ssl_cert_location: Some("/path/to/cert.crt".to_owned()),
+                            ssl_key_location: Some("/path/to/key.key".to_owned()),
+                            sasl_mechanism: Some("scram-sha-256".to_owned()),
+                            sasl_username: Some("my_user".to_owned()),
+                            sasl_password: Some("my_password".to_owned()),
+                        },
                         config_provider_mode: ConfigProviderMode::Redis,
                         checker_mode: CheckerMode::Reqwest,
                         config_provider_redis_update_ms: 2000,
@@ -494,6 +571,61 @@ mod tests {
                 );
             },
         )
+    }
+    // We have to do some impl Display tomfoolery to convert our enum into a nice
+    // snake_case string, so this just sanity-checks that feature.
+    #[test]
+    fn test_config_kafka_tostring() {
+        let c = Config {
+            sentry_dsn: Some("my_dsn".to_owned()),
+            sentry_env: Some(Cow::from("my_env_override")),
+            checker_concurrency: 200,
+            checker_parallel: false,
+            log_level: logging::Level::Warn,
+            log_format: logging::LogFormat::Json,
+            interface: Some("eth0".to_owned()),
+            metrics: MetricsConfig {
+                statsd_addr: "10.0.0.1:1234".parse().unwrap(),
+                default_tags: BTreeMap::new(),
+                hostname_tag: None,
+            },
+            results_kafka_cluster: vec!["10.0.0.1".to_owned(), "10.0.0.2:7000".to_owned()],
+            results_kafka_topic: "uptime-results".to_owned(),
+            kafka_config: KafkaConfig {
+                security_protocol: Some(KafkaSecurityProtocol::SaslPlaintext),
+                ..Default::default()
+            },
+            config_provider_mode: ConfigProviderMode::Redis,
+            checker_mode: CheckerMode::Reqwest,
+            config_provider_redis_update_ms: 2000,
+            config_provider_redis_total_partitions: 32,
+            redis_enable_cluster: true,
+            redis_host: "10.0.0.3:6379".to_owned(),
+            region: "us-west",
+            allow_internal_ips: true,
+            disable_connection_reuse: false,
+            record_task_metrics: false,
+            pool_idle_timeout_secs: 600,
+            checker_number: 2,
+            total_checkers: 5,
+            producer_mode: ProducerMode::Kafka,
+            vector_batch_size: 10,
+            vector_endpoint: "http://localhost:8020".to_owned(),
+            retry_vector_errors_forever: false,
+            failure_retries: 2,
+            http_checker_dns_nameservers: Some(vec![
+                IpAddr::from([8, 8, 8, 8]),
+                IpAddr::from([8, 8, 4, 4]),
+            ]),
+            thread_cpu_scale_factor: 3,
+            redis_timeouts_ms: 30_000,
+            enable_metrics: false,
+        };
+
+        assert_eq!(
+            c.kafka_config.security_protocol.unwrap().to_string(),
+            "sasl_plaintext"
+        );
     }
 
     #[test]
