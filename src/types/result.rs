@@ -2,7 +2,6 @@ use crate::assertions::compiled;
 use crate::assertions::compiled::EvalPath;
 use crate::assertions::Assertion;
 use chrono::{DateTime, TimeDelta, Utc};
-use http::StatusCode;
 use hyper::rt::ConnectionStats;
 use hyper::stats::AbsoluteDuration;
 use hyper::stats::RequestStats;
@@ -410,18 +409,6 @@ impl Check {
         Check {
             result: CheckStatus::Success,
             reason: None,
-            assert_path: None,
-        }
-    }
-
-    pub fn code_failure(status: StatusCode) -> Self {
-        Self {
-            result: CheckStatus::Failure,
-            reason: Some(CheckStatusReason {
-                status_type: CheckStatusReasonType::Failure,
-                description: format!("Got non 2xx status: {status}"),
-                details: None,
-            }),
             assert_path: None,
         }
     }

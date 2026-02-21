@@ -44,7 +44,7 @@ fn make_trace_header(config: &CheckConfig, trace_id: &Uuid, span_id: SpanId) -> 
 /// which the check is being made.
 pub trait Checker: Send + Sync {
     /// Makes a request to a url to determine whether it is up.
-    /// Up is defined as returning a 2xx within a specific timeframe.
+    /// Up is defined as responding within a specific timeframe, optionally validated by assertions.
     fn check_url(
         &self,
         check: &ScheduledCheck,

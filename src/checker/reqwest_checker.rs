@@ -334,18 +334,11 @@ fn to_check_result(
                         max_assertion_ops,
                         region,
                     )
-                } else if r.status().is_success() {
-                    Check::success()
                 } else {
-                    Check::code_failure(r.status())
+                    Check::success()
                 }
             } else {
-                // TODO: rust 2024 allows let-chaining, so the enclosing if-statement can be
-                // folded into the the if let
-                match r.status().is_success() {
-                    true => Check::success(),
-                    false => Check::code_failure(r.status()),
-                }
+                Check::success()
             }
         }
         Err(e) => Check::other_failure(e.into()),
@@ -510,7 +503,7 @@ fn to_errored_request_infos(
 
 impl Checker for ReqwestChecker {
     /// Makes a request to a url to determine whether it is up.
-    /// Up is defined as returning a 2xx within a specific timeframe, along with executing
+    /// Up is defined as responding within a specific timeframe, along with passing
     /// an optional user-defined assert that is specified by the user which can use
     /// the result json, status code, and response header values.
     #[tracing::instrument]
@@ -889,7 +882,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_simple_400() {
+    async fn test_simple_400_no_assertion() {
         let server = MockServer::start();
         let checker = ReqwestChecker::new_internal(
             Options {
@@ -916,14 +909,13 @@ mod tests {
         let check = ScheduledCheck::new_for_test(tick, config);
         let result = checker.check_url(&check, "us-west").await;
 
-        assert_eq!(result.status, CheckStatus::Failure);
+        // Without an assertion, a non-2xx response is still considered a success.
+        // Callers are expected to configure a status code assertion to validate the response.
+        assert_eq!(result.status, CheckStatus::Success);
         assert_eq!(
             result.request_info.and_then(|i| i.http_status_code),
             Some(400)
         );
-        let reason = result.status_reason.unwrap();
-        assert_eq!(reason.status_type, CheckStatusReasonType::Failure);
-        assert_eq!(reason.description, "Got non 2xx status: 400 Bad Request");
 
         head_mock.assert();
     }
@@ -953,6 +945,13 @@ mod tests {
 
         let config = CheckConfig {
             url: server.url("/error").to_string(),
+            assertion: crate::assertions::Assertion {
+                root: crate::assertions::Op::StatusCodeCheck {
+                    value: 500,
+                    operator: crate::assertions::Comparison::NotEqual,
+                },
+            }
+            .into(),
             ..Default::default()
         };
 
@@ -1007,6 +1006,13 @@ mod tests {
 
         let config = CheckConfig {
             url: server.url("/error").to_string(),
+            assertion: crate::assertions::Assertion {
+                root: crate::assertions::Op::StatusCodeCheck {
+                    value: 500,
+                    operator: crate::assertions::Comparison::NotEqual,
+                },
+            }
+            .into(),
             ..Default::default()
         };
 
