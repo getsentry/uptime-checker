@@ -611,7 +611,7 @@ impl Checker for ReqwestChecker {
             }
         }
 
-        let final_req = rinfos.last().unwrap().clone();
+        let request_info = rinfos.last().cloned();
 
         let assertion_failure_data = if let Some(path) = check_result.assert_path {
             Assertion {
@@ -621,7 +621,7 @@ impl Checker for ReqwestChecker {
                         .get_config()
                         .assertion
                         .as_ref()
-                        .expect("cannot have assertion failure data with an assertion")
+                        .expect("cannot have assertion failure data without an assertion")
                         .root,
                 ),
             }

@@ -168,7 +168,10 @@ pub fn extract_failure_data(
             crate::assertions::Op::Not { operand } => crate::assertions::Op::Not {
                 operand: extract_failure_data(child, operand).into(),
             },
-            _ => panic!(),
+            _ => {
+                tracing::error!("unexpected assert_op; this should be impossible");
+                unreachable!();
+            }
         },
     }
 }
