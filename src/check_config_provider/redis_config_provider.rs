@@ -71,7 +71,7 @@ pub struct RedisConfigProvider {
     check_interval: Duration,
 }
 
-fn deserialize_rmp(config_payload: &Vec<u8>) -> Option<CheckConfig> {
+fn deserialize_rmp(config_payload: &[u8]) -> Option<CheckConfig> {
     match rmp_serde::from_slice::<CheckConfig>(config_payload) {
         Ok(config) => Some(config),
         Err(err) => {
