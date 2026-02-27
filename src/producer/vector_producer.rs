@@ -98,7 +98,7 @@ impl VectorResultsProducer {
                     metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => region, "histogram" => "timer").record(start.elapsed().as_secs_f64());
                     result
                 } {
-                    tracing::error!(error = ?e, "vector_batch.send_failed");
+                    tracing::error!(error = %e, "vector_batch.send_failed");
                 }
             }
 
@@ -112,7 +112,7 @@ impl VectorResultsProducer {
                 )
                 .await
                 {
-                    tracing::error!(error = ?e, "final_batch.send_failed");
+                    tracing::error!(error = %e, "final_batch.send_failed");
                 }
             }
 
@@ -129,7 +129,9 @@ impl ResultsProducer for VectorResultsProducer {
         // Send the serialized result to the worker task
         if self.sender.send(json).is_err() {
             tracing::error!("event.send_failed_channel_closed");
-            return Err(ExtractCodeError::VectorError);
+            return Err(ExtractCodeError::VectorError {
+                msg: "send failed channel closed".to_owned(),
+            });
         }
         self.pending_items
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -165,7 +167,7 @@ async fn send_batch(
             .header("Content-Type", "application/json")
             .body(body.clone())
             .build()
-            .map_err(|_e| ExtractCodeError::VectorError)?;
+            .map_err(|e| ExtractCodeError::VectorError { msg: e.to_string() })?;
         let req_id = req.req_id().clone();
         let response = client.execute(req).await;
         let stats = hyper::stats::consume_request_stats(req_id);
@@ -221,7 +223,9 @@ async fn send_batch(
                     }
                 }
                 if !retry_vector_errors_forever {
-                    return Err(ExtractCodeError::VectorError);
+                    return Err(ExtractCodeError::VectorError {
+                        msg: "retries exhausted".to_owned(),
+                    });
                 }
                 sleep(delay).await;
             }

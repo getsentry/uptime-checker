@@ -17,8 +17,8 @@ pub enum ExtractCodeError {
     Producer(#[from] ProducerError),
     #[error(transparent)]
     Schema(#[from] SchemaError),
-    #[error("Vector request failed")]
-    VectorError,
+    #[error("Vector request failed: {msg}")]
+    VectorError { msg: String },
 }
 
 pub trait ResultsProducer: Send + Sync {
