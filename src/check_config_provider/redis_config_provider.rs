@@ -158,17 +158,15 @@ impl RedisConfigProvider {
                 .set(config_payloads.len() as f64);
 
             for config_payload in config_payloads {
-                let config: CheckConfig = rmp_serde::from_slice(&config_payload)
-                    .map_err(|err| {
-                        tracing::error!(?err, "config_consumer.invalid_config_message");
-                    })
-                    .unwrap();
-                manager
-                    .get_service(partition.number)
-                    .get_config_store()
-                    .write()
-                    .unwrap()
-                    .add_config(config);
+                match rmp_serde::from_slice(&config_payload) {
+                    Ok(config) => manager
+                        .get_service(partition.number)
+                        .get_config_store()
+                        .write()
+                        .expect("lock not poisoned")
+                        .add_config(config),
+                    Err(err) => tracing::error!(?err, "config_consumer.invalid_config_message"),
+                }
             }
             let partition_loading_time = partition_start_loading.elapsed().as_secs_f64();
             metrics::histogram!(
@@ -252,22 +250,22 @@ impl RedisConfigProvider {
                     .await;
 
                 for config_payload in config_payloads {
-                    let config: CheckConfig = rmp_serde::from_slice(&config_payload)
-                        .map_err(|err| {
-                            tracing::error!(?err, "config_consumer.invalid_config_message");
-                        })
-                        .unwrap();
-                    tracing::debug!(
-                        partition = partition.number,
-                        subscription_id = %config.subscription_id,
-                        "redis_config_provider.upserting_config"
-                    );
-                    manager
-                        .get_service(partition.number)
-                        .get_config_store()
-                        .write()
-                        .unwrap()
-                        .add_config(config);
+                    match rmp_serde::from_slice::<CheckConfig>(&config_payload) {
+                        Ok(config) => {
+                            tracing::debug!(
+                                partition = partition.number,
+                                subscription_id = %config.subscription_id,
+                                "redis_config_provider.upserting_config"
+                            );
+                            manager
+                                .get_service(partition.number)
+                                .get_config_store()
+                                .write()
+                                .expect("lock not poisoned")
+                                .add_config(config);
+                        }
+                        Err(err) => tracing::error!(?err, "config_consumer.invalid_config_message"),
+                    }
                 }
                 let partition_update_duration = partition_update_start.elapsed().as_secs_f64();
                 metrics::histogram!(
@@ -329,6 +327,9 @@ pub fn run_config_provider(
     })
 }
 
+// This function is allowed to panic, as an incorrect checker number represents a fatal
+// logic error for the uptime checker.
+#[allow(clippy::panic)]
 pub fn determine_owned_partitions(config: &Config) -> HashSet<u16> {
     // Determines which partitions this checker owns based on number of partitions,
     // number of checkers and checker number

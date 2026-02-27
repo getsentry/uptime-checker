@@ -301,18 +301,19 @@ async fn executor_loop(
                     job_producer,
                     conf.region,
                 );
-                if conf.record_task_metrics {
+                let check_task_result = if conf.record_task_metrics {
                     if conf.checker_parallel {
-                        tokio::spawn(metrics_monitor.instrument(check_fut))
-                            .await
-                            .expect("The check task should not fail");
+                        tokio::spawn(metrics_monitor.instrument(check_fut)).await
                     } else {
                         metrics_monitor.instrument(check_fut).await;
+                        Ok(())
                     }
                 } else {
-                    tokio::spawn(check_fut)
-                        .await
-                        .expect("The check task should not fail");
+                    tokio::spawn(check_fut).await
+                };
+
+                if let Err(err) = check_task_result {
+                    tracing::error!(%err, "executor.check_task_failed");
                 }
                 let num_running_val = num_running.fetch_sub(1, Ordering::Relaxed) - 1;
                 num_running_gauge.set(num_running_val as f64);
@@ -351,9 +352,9 @@ pub(crate) async fn do_check(
             {
                 Some(check_result) => check_result,
                 None => {
-                    scheduled_check
-                        .record_result(None)
-                        .expect("Check recording channel should exist");
+                    if let Err(err) = scheduled_check.record_result(None) {
+                        tracing::error!(%err, "executor.do_check.robots_record_results_error");
+                    }
                     return;
                 }
             },

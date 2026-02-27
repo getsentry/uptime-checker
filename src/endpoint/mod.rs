@@ -37,15 +37,14 @@ pub fn start_endpoint(
     let endpoint_port = config.webserver_port;
 
     tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", endpoint_port)).await;
-
-        let Ok(listener) = listener else {
-            tracing::error!(
-                "Could not listen on webserver endpoint: {}",
-                listener.err().unwrap().to_string()
-            );
-            return;
-        };
+        let listener =
+            match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", endpoint_port)).await {
+                Ok(listener) => listener,
+                Err(err) => {
+                    tracing::error!(%err, "endpoint.listen_error");
+                    return;
+                }
+            };
         let shutdown_fut = shutdown_signal.cancelled_owned();
         let result = axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_fut)

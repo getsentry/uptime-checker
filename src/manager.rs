@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tokio::sync::mpsc::{self, UnboundedSender};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
@@ -104,8 +104,9 @@ impl PartitionedService {
     pub async fn stop(self) {
         self.shutdown_signal.cancel();
 
-        // Okay to unwrap here, since we're just shutting down.
-        self.scheduler_join_handle.await.unwrap();
+        if let Err(err) = self.scheduler_join_handle.await {
+            tracing::error!(%err, "partionied_service.shutdown_error");
+        }
         tracing::info!(partition = self.partition, "partitioned_service.shutdown");
     }
 }
@@ -130,20 +131,20 @@ pub struct ManagerHandle {
 }
 
 impl ManagerHandle {
-    pub async fn stop(self) {
+    pub async fn stop(self) -> Result<(), JoinError> {
         self.shutdown_signal.cancel();
-        // Unwrapping here because we're just shutting down; it's okay to fail badly
-        // at this point.
 
-        self.endpoint_join_handle.await.unwrap();
+        self.endpoint_join_handle.await?;
 
-        self.consumer_join_handle.await.unwrap();
+        self.consumer_join_handle.await?;
 
-        self.results_worker.await.unwrap();
+        self.results_worker.await?;
 
-        self.services_join_handle.await.unwrap();
+        self.services_join_handle.await?;
 
-        self.executor_join_handle.await.unwrap();
+        self.executor_join_handle.await?;
+
+        Ok(())
     }
 
     pub async fn recv_task_finished(&mut self) -> Option<anyhow::Result<()>> {
