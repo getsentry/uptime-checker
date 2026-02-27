@@ -104,7 +104,6 @@ impl PartitionedService {
     pub async fn stop(self) {
         self.shutdown_signal.cancel();
 
-        // Okay to unwrap here, since we're just shutting down.
         if let Err(err) = self.scheduler_join_handle.await {
             tracing::error!(%err, "partionied_service.shutdown_error");
         }
