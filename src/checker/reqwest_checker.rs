@@ -516,8 +516,8 @@ impl Checker for ReqwestChecker {
         let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
         let force_capture = check.should_force_capture();
         // Determine if we should capture response data on failure
-        let should_capture = force_capture
-            || (self.response_capture_enabled && check.get_config().capture_response_on_failure);
+        let should_capture =
+            self.response_capture_enabled && check.get_config().capture_response_on_failure;
 
         let response = do_request(&self.client, check.get_config(), &trace_header).await;
 
