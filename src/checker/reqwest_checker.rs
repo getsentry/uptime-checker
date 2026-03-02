@@ -19,7 +19,7 @@ use std::error::Error;
 use std::net::IpAddr;
 use std::time::Duration;
 use texting_robots::Robot;
-use tokio::time::{timeout, Instant};
+use tokio::time::{timeout_at, Instant};
 
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
@@ -273,13 +273,13 @@ impl ReqwestChecker {
 }
 
 async fn read_body_bounded(
-    time_allotment: Duration,
+    timeout_instant: Instant,
     max_bytes: usize,
     res: &mut Response,
 ) -> Vec<u8> {
     let mut all_bytes = vec![];
     loop {
-        let maybe_timeout = timeout(time_allotment, res.chunk()).await;
+        let maybe_timeout = timeout_at(timeout_instant, res.chunk()).await;
         let Ok(maybe_conn_err) = maybe_timeout else {
             tracing::info!("waited too long for body");
             break all_bytes;
@@ -315,10 +315,11 @@ async fn to_check_result(
         if let Some(assertion) = &scheduled_check.get_config().assertion {
             let body_bytes = if assertion.requires_body() {
                 read_body_bounded(
-                    Duration::from_millis(
-                        scheduled_check.get_config().timeout.num_milliseconds() as u64
-                    )
-                    .saturating_sub(start.elapsed()),
+                    start
+                        .checked_add(Duration::from_millis(
+                            scheduled_check.get_config().timeout.num_milliseconds() as u64,
+                        ))
+                        .unwrap_or(Instant::now()),
                     MAX_BODY_BYTES,
                     r,
                 )
@@ -555,10 +556,11 @@ impl Checker for ReqwestChecker {
                 if will_capture && check_result.body_bytes.is_none() {
                     check_result.body_bytes = Some(
                         read_body_bounded(
-                            Duration::from_millis(
-                                check.get_config().timeout.num_milliseconds() as u64
-                            )
-                            .saturating_sub(start.elapsed()),
+                            start
+                                .checked_add(Duration::from_millis(
+                                    check.get_config().timeout.num_milliseconds() as u64,
+                                ))
+                                .unwrap_or(Instant::now()),
                             MAX_BODY_BYTES,
                             &mut response,
                         )
@@ -676,7 +678,9 @@ impl Checker for ReqwestChecker {
             };
 
             read_body_bounded(
-                time_allotment.saturating_sub(start_time.elapsed()),
+                start_time
+                    .checked_add(time_allotment)
+                    .unwrap_or(Instant::now()),
                 MAX_ROBOTS_BYTES,
                 &mut res,
             )
