@@ -409,6 +409,8 @@ pub(crate) struct Check {
     pub(crate) result: CheckStatus,
     pub(crate) reason: Option<CheckStatusReason>,
     pub(crate) assert_path: Option<EvalPath>,
+    pub(crate) body_bytes: Option<Vec<u8>>,
+    pub(crate) request_infos: Vec<RequestInfo>,
 }
 
 impl Check {
@@ -417,6 +419,8 @@ impl Check {
             result: CheckStatus::Success,
             reason: None,
             assert_path: None,
+            body_bytes: None,
+            request_infos: vec![],
         }
     }
 
@@ -429,14 +433,18 @@ impl Check {
                 details: None,
             }),
             assert_path: None,
+            body_bytes: None,
+            request_infos: vec![],
         }
     }
 
-    pub fn other_failure(reason: CheckStatusReason) -> Self {
+    pub fn other_failure(reason: CheckStatusReason, request_infos: Vec<RequestInfo>) -> Self {
         Self {
             result: CheckStatus::Failure,
             reason: Some(reason),
             assert_path: None,
+            body_bytes: None,
+            request_infos,
         }
     }
 
@@ -449,6 +457,8 @@ impl Check {
                 details: Some(CheckFailureDetails::AssertionCompilationError(err.clone())),
             }),
             assert_path: None,
+            body_bytes: None,
+            request_infos: vec![],
         }
     }
 
@@ -461,6 +471,8 @@ impl Check {
                 details: Some(CheckFailureDetails::AssertionEvaluationError(err.clone())),
             }),
             assert_path: None,
+            body_bytes: None,
+            request_infos: vec![],
         }
     }
 
@@ -473,21 +485,8 @@ impl Check {
                 details: None,
             }),
             assert_path: Some(path),
-        }
-    }
-}
-
-impl From<Result<compiled::EvalResult, compiled::RuntimeError>> for Check {
-    fn from(value: Result<compiled::EvalResult, compiled::RuntimeError>) -> Self {
-        match value {
-            Ok(e) => {
-                if e.result {
-                    Check::success()
-                } else {
-                    Check::assert_failure(e.reason_path)
-                }
-            }
-            Err(err) => Check::assert_evaluation_failure(&err),
+            body_bytes: None,
+            request_infos: vec![],
         }
     }
 }
