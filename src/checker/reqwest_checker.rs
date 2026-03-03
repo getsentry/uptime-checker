@@ -19,8 +19,7 @@ use std::error::Error;
 use std::net::IpAddr;
 use std::time::Duration;
 use texting_robots::Robot;
-use tokio::time::{timeout, Instant};
-use uuid::Uuid;
+use tokio::time::{timeout_at, Instant};
 
 const UPTIME_USER_AGENT: &str =
     "SentryUptimeBot/1.0 (+http://docs.sentry.io/product/alerts/uptime-monitoring/)";
@@ -274,18 +273,13 @@ impl ReqwestChecker {
 }
 
 async fn read_body_bounded(
-    time_allotment: Duration,
+    timeout_instant: Instant,
     max_bytes: usize,
-    start_time: Instant,
     res: &mut Response,
 ) -> Vec<u8> {
     let mut all_bytes = vec![];
     loop {
-        let maybe_timeout = timeout(
-            time_allotment.saturating_sub(start_time.elapsed()),
-            res.chunk(),
-        )
-        .await;
+        let maybe_timeout = timeout_at(timeout_instant, res.chunk()).await;
         let Ok(maybe_conn_err) = maybe_timeout else {
             tracing::info!("waited too long for body");
             break all_bytes;
@@ -307,82 +301,86 @@ async fn read_body_bounded(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn to_check_result(
+async fn to_check_result(
     assert_cache: &assertions::cache::Cache,
-    response: Result<(Response, RequestId), reqwest::Error>,
-    check: &ScheduledCheck,
-    body_bytes: &[u8],
+    r: &mut Response,
+    scheduled_check: &ScheduledCheck,
     disable_assertions: bool,
     assertion_complexity: u32,
     max_assertion_ops: u32,
     region: &'static str,
+    start: Instant,
 ) -> Check {
-    match response {
-        Ok((r, _)) => {
-            if !disable_assertions {
-                if let Some(assertion) = &check.get_config().assertion {
-                    run_assertion(
-                        assert_cache,
-                        body_bytes,
-                        &check.get_config().subscription_id,
-                        &r,
-                        assertion,
-                        assertion_complexity,
-                        max_assertion_ops,
-                        region,
-                    )
-                } else if r.status().is_success() {
-                    Check::success()
-                } else {
-                    Check::code_failure(r.status())
-                }
+    let check = if !disable_assertions {
+        if let Some(assertion) = &scheduled_check.get_config().assertion {
+            let body_bytes = if assertion.requires_body() {
+                read_body_bounded(
+                    start
+                        .checked_add(Duration::from_millis(
+                            scheduled_check.get_config().timeout.num_milliseconds() as u64,
+                        ))
+                        .unwrap_or(Instant::now()),
+                    MAX_BODY_BYTES,
+                    r,
+                )
+                .await
             } else {
-                // TODO: rust 2024 allows let-chaining, so the enclosing if-statement can be
-                // folded into the the if let
-                match r.status().is_success() {
-                    true => Check::success(),
-                    false => Check::code_failure(r.status()),
+                vec![]
+            };
+
+            let compiled_assertion =
+                match assert_cache.get_or_compile(assertion, max_assertion_ops, region) {
+                    Err(err) => {
+                        tracing::warn!(
+                            "a bad assertion made it to compile from {} : {}",
+                            scheduled_check.get_config().subscription_id,
+                            err.to_string(),
+                        );
+                        return Check::assert_compile_failure(&err);
+                    }
+                    Ok(assertion) => assertion,
+                };
+
+            let mut check = match compiled_assertion.eval(
+                r.status().as_u16(),
+                r.headers(),
+                &body_bytes,
+                assertion_complexity,
+                region,
+            ) {
+                Ok(e) => {
+                    if e.result {
+                        Check::success()
+                    } else {
+                        Check::assert_failure(e.reason_path)
+                    }
                 }
-            }
-        }
-        Err(e) => Check::other_failure(e.into()),
-    }
-}
+                Err(err) => Check::assert_evaluation_failure(&err),
+            };
 
-#[allow(clippy::too_many_arguments)]
-fn run_assertion(
-    assert_cache: &assertions::cache::Cache,
-    body_bytes: &[u8],
-    subscription_id: &Uuid,
-    r: &Response,
-    assertion: &assertions::Assertion,
-    assertion_complexity: u32,
-    max_assertion_ops: u32,
-    region: &'static str,
-) -> Check {
-    let comp_assert = assert_cache.get_or_compile(assertion, max_assertion_ops, region);
-
-    let assertion = match comp_assert {
-        Err(err) => {
-            tracing::warn!(
-                "a bad assertion made it to compile from {} : {}",
-                subscription_id,
-                err.to_string(),
-            );
-            return Check::assert_compile_failure(&err);
+            // Only set the body bytes if we actually downloaded them; otherwise, set to none
+            // so that upstream code can tell if we actually need to download the body (for error capture.)
+            check.body_bytes = if assertion.requires_body() {
+                Some(body_bytes)
+            } else {
+                None
+            };
+            check
+        } else if r.status().is_success() {
+            Check::success()
+        } else {
+            Check::code_failure(r.status())
         }
-        Ok(assertion) => assertion,
+    } else {
+        // TODO: rust 2024 allows let-chaining, so the enclosing if-statement can be
+        // folded into the the if let
+        match r.status().is_success() {
+            true => Check::success(),
+            false => Check::code_failure(r.status()),
+        }
     };
 
-    let result = assertion.eval(
-        r.status().as_u16(),
-        r.headers(),
-        body_bytes,
-        assertion_complexity,
-        region,
-    );
-
-    result.into()
+    check
 }
 
 impl From<reqwest::Error> for CheckStatusReason {
@@ -506,112 +504,111 @@ fn to_errored_request_infos(
 
 impl Checker for ReqwestChecker {
     /// Makes a request to a url to determine whether it is up.
-    /// Up is defined as returning a 2xx within a specific timeframe, along with executing
+    /// Up is defined as either (a) returning a 2xx within a specific timeframe, or (b) executing
     /// an optional user-defined assert that is specified by the user which can use
     /// the result json, status code, and response header values.
     #[tracing::instrument]
     async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
+        let start = Instant::now();
         let scheduled_check_time = check.get_tick().time();
         let actual_check_time = Utc::now();
         let span_id = SpanId::default();
         let trace_id = make_trace_id(check.get_config(), check.get_tick(), check.get_retry());
         let trace_header = make_trace_header(check.get_config(), &trace_id, span_id);
-
-        let start = Instant::now();
-        let mut response = do_request(&self.client, check.get_config(), &trace_header).await;
-
         let force_capture = check.should_force_capture();
-
         // Determine if we should capture response data on failure
-        let should_capture = force_capture
-            || (self.response_capture_enabled && check.get_config().capture_response_on_failure);
+        let should_capture =
+            self.response_capture_enabled && check.get_config().capture_response_on_failure;
 
-        // Read body bytes if we have an assertion OR if we should capture on failure.
-        let needs_body_for_assertion = if let Some(assertion) = &check.get_config().assertion {
-            assertion.requires_body()
-        } else {
-            false
-        };
-        let body_bytes = if (needs_body_for_assertion || should_capture) && response.is_ok() {
-            let Ok((resp, _req_id)) = &mut response else {
-                unreachable!("enclosing if-statement means this cannot happen");
-            };
-            read_body_bounded(
-                Duration::from_millis(check.get_config().timeout.num_milliseconds() as u64),
-                MAX_BODY_BYTES,
-                start,
-                resp,
-            )
-            .await
-        } else {
-            vec![]
-        };
+        let response = do_request(&self.client, check.get_config(), &trace_header).await;
 
-        let captured_headers: Option<Vec<(String, String)>> = if should_capture {
-            response.as_ref().ok().map(|(resp, _)| {
-                resp.headers()
-                    .iter()
-                    .map(|(name, value)| {
-                        (
-                            name.to_string(),
-                            value.to_str().unwrap_or("<non-utf8>").to_string(),
+        let check_result = match response {
+            Ok((mut response, req_id)) => {
+                let mut check_result = to_check_result(
+                    &self.assert_cache,
+                    &mut response,
+                    check,
+                    self.disable_assertions,
+                    self.assertion_complexity,
+                    self.max_assertion_ops,
+                    region,
+                    start,
+                )
+                .await;
+
+                // TODO: this is how to extract the leaf cert from the request we run.
+
+                // let cert = response
+                //     .as_ref()
+                //     .map(|resp| resp.extensions().get::<reqwest::tls::TlsInfo>());
+
+                // if let Ok(Some(cert)) = cert {
+                //     eprintln!(
+                //         "got a cert: {}",
+                //         cert.peer_certificate().map_or(12345, |bytes| bytes.len())
+                //     );
+                // }
+
+                let will_capture = force_capture
+                    || (should_capture && check_result.result == CheckStatus::Failure);
+
+                // Download the body, if required
+                if will_capture && check_result.body_bytes.is_none() {
+                    check_result.body_bytes = Some(
+                        read_body_bounded(
+                            start
+                                .checked_add(Duration::from_millis(
+                                    check.get_config().timeout.num_milliseconds() as u64,
+                                ))
+                                .unwrap_or(Instant::now()),
+                            MAX_BODY_BYTES,
+                            &mut response,
                         )
-                    })
-                    .collect()
-            })
-        } else {
-            None
-        };
+                        .await,
+                    );
+                }
 
-        // TODO: this is how to extract the leaf cert from the request we run.
+                // Because the body download can occur in two different places (because we might need the body for error reporting,
+                // but not for the assertion,) we defer pulling stats until here.
+                let stats = hyper::stats::consume_request_stats(req_id);
+                check_result.request_infos =
+                    to_request_info_list(&stats, check.get_config().request_method);
 
-        // let cert = response
-        //     .as_ref()
-        //     .map(|resp| resp.extensions().get::<reqwest::tls::TlsInfo>());
+                // Attach the body, if required
+                if will_capture {
+                    if let Some(last_req) = check_result.request_infos.last_mut() {
+                        if let Some(body_bytes) = &check_result.body_bytes {
+                            // Base64 encode the body and truncate if needed
+                            if !body_bytes.is_empty() {
+                                last_req.response_body = Some(BASE64_STANDARD.encode(body_bytes));
+                            }
 
-        // if let Ok(Some(cert)) = cert {
-        //     eprintln!(
-        //         "got a cert: {}",
-        //         cert.peer_certificate().map_or(12345, |bytes| bytes.len())
-        //     );
-        // }
+                            last_req.response_headers = Some(
+                                response
+                                    .headers()
+                                    .iter()
+                                    .map(|(name, value)| {
+                                        (
+                                            name.to_string(),
+                                            value.to_str().unwrap_or("<non-utf8>").to_string(),
+                                        )
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    }
+                }
 
-        let rinfos = match &response {
-            Ok((_resp, req_id)) => {
-                let stats = hyper::stats::consume_request_stats(req_id.clone());
-                to_request_info_list(&stats, check.get_config().request_method)
+                check_result
             }
-            Err(err) => to_errored_request_infos(&actual_check_time, start, err, check),
+            Err(err) => {
+                let rinfos = to_errored_request_infos(&actual_check_time, start, &err, check);
+                Check::other_failure(err.into(), rinfos)
+            }
         };
-
-        let check_result = to_check_result(
-            &self.assert_cache,
-            response,
-            check,
-            &body_bytes,
-            self.disable_assertions,
-            self.assertion_complexity,
-            self.max_assertion_ops,
-            region,
-        );
 
         // Our total duration includes the additional processing time, including running the assert.
         let duration = TimeDelta::from_std(start.elapsed()).unwrap_or_default();
-
-        let mut rinfos = rinfos;
-
-        // Add captured response data if this is a failure
-        if force_capture || (should_capture && check_result.result == CheckStatus::Failure) {
-            if let Some(last_req) = rinfos.last_mut() {
-                // Base64 encode the body and truncate if needed
-                if !body_bytes.is_empty() {
-                    last_req.response_body = Some(BASE64_STANDARD.encode(&body_bytes));
-                }
-                last_req.response_headers = captured_headers;
-            }
-        }
-
-        let request_info = rinfos.last().cloned();
 
         let assertion_failure_data = if let Some(path) = check_result.assert_path {
             Assertion {
@@ -630,6 +627,8 @@ impl Checker for ReqwestChecker {
             None
         };
 
+        let request_info = check_result.request_infos.last().cloned();
+
         CheckResult {
             guid: trace_id,
             subscription_id: check.get_config().subscription_id,
@@ -645,7 +644,7 @@ impl Checker for ReqwestChecker {
             duration_us: Some(duration),
             request_info,
             region,
-            request_info_list: rinfos,
+            request_info_list: check_result.request_infos,
             assertion_failure_data,
         }
     }
@@ -678,7 +677,14 @@ impl Checker for ReqwestChecker {
                 return None;
             };
 
-            read_body_bounded(time_allotment, MAX_ROBOTS_BYTES, start_time, &mut res).await
+            read_body_bounded(
+                start_time
+                    .checked_add(time_allotment)
+                    .unwrap_or(Instant::now()),
+                MAX_ROBOTS_BYTES,
+                &mut res,
+            )
+            .await
         };
 
         let Ok(r) = Robot::new("SentryUptimeBot", &robots_txt) else {
