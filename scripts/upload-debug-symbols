@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Usage:
+#   upload-debug-symbols <debug-file>
+
+# Required environment variables (semicolon-delimited for multiple targets):
+#   SENTRY_ORGS:        e.g. "org1;org2"
+#   SENTRY_PROJECTS:    e.g. "proj1;proj2"
+#   SENTRY_AUTH_TOKENS: e.g. "token1;token2"
+set -euo pipefail
+
+DEBUG_FILE="${1:?Usage: $0 <debug-file>}"
+
+if [ ! -f "$DEBUG_FILE" ]; then
+  echo "Error: debug file not found: $DEBUG_FILE" >&2
+  exit 1
+fi
+
+IFS=';' read -ra ORGS <<< "${SENTRY_ORGS:?SENTRY_ORGS is required}"
+IFS=';' read -ra PROJECTS <<< "${SENTRY_PROJECTS:?SENTRY_PROJECTS is required}"
+IFS=';' read -ra TOKENS <<< "${SENTRY_AUTH_TOKENS:?SENTRY_AUTH_TOKENS is required}"
+
+if [ ${#ORGS[@]} -ne ${#PROJECTS[@]} ] || [ ${#ORGS[@]} -ne ${#TOKENS[@]} ]; then
+  echo "Error: SENTRY_ORGS, SENTRY_PROJECTS, and SENTRY_AUTH_TOKENS must have the same number of entries" >&2
+  exit 1
+fi
+
+for i in "${!ORGS[@]}"; do
+  echo "Uploading debug symbols to ${ORGS[$i]}/${PROJECTS[$i]}..."
+  SENTRY_ORG="${ORGS[$i]}" \
+  SENTRY_PROJECT="${PROJECTS[$i]}" \
+  SENTRY_AUTH_TOKEN="${TOKENS[$i]}" \
+    sentry-cli debug-files upload "$DEBUG_FILE"
+done
+
+echo "Done."

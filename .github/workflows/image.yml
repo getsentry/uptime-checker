@@ -113,3 +113,21 @@ jobs:
           google_ar_image_name: us-central1-docker.pkg.dev/sentryio/uptime-checker/image
           google_workload_identity_provider: projects/868781662168/locations/global/workloadIdentityPools/prod-github/providers/github-oidc-pool
           google_service_account: gha-gcr-push@sac-prod-sa.iam.gserviceaccount.com
+
+      - name: Extract debug symbols
+        run: |
+          docker build \
+            --target debug-symbols \
+            --build-arg UPTIME_CHECKER_GIT_REVISION=${{ github.sha }} \
+            --output type=local,dest=./debug-out \
+            -f Dockerfile .
+
+      - name: Install sentry-cli
+        run: curl -sL https://sentry.io/get-cli/ | bash
+
+      - name: Upload debug symbols to Sentry
+        run: scripts/upload-debug-symbols ./debug-out/uptime-checker.debug
+        env:
+          SENTRY_ORGS: ${{ secrets.SENTRY_ORGS }}
+          SENTRY_PROJECTS: ${{ secrets.SENTRY_PROJECTS }}
+          SENTRY_AUTH_TOKENS: ${{ secrets.SENTRY_AUTH_TOKENS }}
