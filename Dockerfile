@@ -40,7 +40,7 @@ ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
 # Copy the actual source code and build
 COPY . .
 
-# Do the build, and then strip off debug info into a separate .debug file 
+# Do the build, and then strip off debug info into a separate .debug file
 RUN cargo build --release && \
     objcopy --only-keep-debug target/release/uptime-checker target/release/uptime-checker.debug && \
     objcopy --strip-debug --strip-unneeded target/release/uptime-checker && \
