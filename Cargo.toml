@@ -74,10 +74,10 @@ rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
 # we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
 
 [profile.release]
+debug = true
 lto = true
 codegen-units = 1
 panic = 'abort'
-strip = "debuginfo"
 
 [dev-dependencies]
 redis-test-macro = { path = "./redis-test-macro" }

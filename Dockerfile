@@ -8,7 +8,8 @@ RUN apk add --no-cache \
     g++ \
     pkgconfig \
     openssl-dev \
-    protoc
+    protoc \
+    binutils
 
 # Configure cargo
 RUN mkdir -p ~/.cargo && \
@@ -38,7 +39,16 @@ ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
 
 # Copy the actual source code and build
 COPY . .
-RUN cargo build --release
+
+# Do the build, and then strip off debug info into a separate .debug file 
+RUN cargo build --release && \
+    objcopy --only-keep-debug target/release/uptime-checker target/release/uptime-checker.debug && \
+    objcopy --strip-debug --strip-unneeded target/release/uptime-checker && \
+    objcopy --add-gnu-debuglink target/release/uptime-checker.debug target/release/uptime-checker
+
+# Stage for extracting debug symbols in CI
+FROM scratch AS debug-symbols
+COPY --from=builder /app/target/release/uptime-checker.debug /uptime-checker.debug
 
 FROM alpine:3.22.1
 
