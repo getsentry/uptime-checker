@@ -86,6 +86,7 @@ pub fn init(config: LoggingConfig) {
             dsn,
             release: Some(Cow::Borrowed(VERSION)),
             environment: config.sentry_env.to_owned(),
+            attach_stacktrace: true,
             ..Default::default()
         });
 
