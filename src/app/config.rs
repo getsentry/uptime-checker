@@ -296,6 +296,7 @@ mod tests {
 
     use super::{CheckerMode, Config, ConfigProviderMode, MetricsConfig, ProducerMode};
 
+    #[allow(clippy::result_large_err)]
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where
         F: FnOnce(Config),
