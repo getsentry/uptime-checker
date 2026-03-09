@@ -39,7 +39,7 @@ similar-asserts = "1.4.2"
 sentry = { version = "0.34.0", features = ["tracing"] }
 thiserror = "1.0.61"
 tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["json"] }
+tracing-subscriber = { version = "0.3.20", features = ["json"] }
 tracing-test = "0.2.5"
 console = "0.15.8"
 sentry-kafka-schemas = "2.1.23"
