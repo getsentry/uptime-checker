@@ -321,6 +321,8 @@ pub fn run_config_provider(
                 .await
         });
 
+        // The monitor task also responds to the shutdown event, but it's possible it could be
+        // stuck doing other things, so we race it here, too.
         tokio::select! {
             _ = shutdown.cancelled() => {
                 tracing::info!("redis_config_provider.shutdown_requested");
@@ -329,7 +331,7 @@ pub fn run_config_provider(
                 manager.update_partitions(&HashSet::default());
             }
             _ = monitor_task => {
-                tracing::error!("redis_config_provider.monitor_task_ended");
+                tracing::info!("redis_config_provider.monitor_task_ended");
             }
         }
     })
