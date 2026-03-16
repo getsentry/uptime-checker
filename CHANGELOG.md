@@ -1,3 +1,21 @@
+## 26.3.0
+
+### New Features ✨
+
+- (uptime) Attach stacktraces for sentry errors by @klochek in [#491](https://github.com/getsentry/uptime-checker/pull/491)
+
+### Bug Fixes 🐛
+
+#### Uptime
+
+- Don't report monitor_task_ended as an error by @klochek in [#492](https://github.com/getsentry/uptime-checker/pull/492)
+- Rust 1.94 breaks bad borrowing behavior; update deps to fix by @klochek in [#490](https://github.com/getsentry/uptime-checker/pull/490)
+- In ci, generate and upload debug symbols to sentry, per project/org by @klochek in [#488](https://github.com/getsentry/uptime-checker/pull/488)
+- Only download body if necessary by @klochek in [#487](https://github.com/getsentry/uptime-checker/pull/487)
+- Better vector error messages by @klochek in [#486](https://github.com/getsentry/uptime-checker/pull/486)
+- Add better logging for check config failures by @klochek in [#485](https://github.com/getsentry/uptime-checker/pull/485)
+- Remove and prevent unwrap/panic by @klochek in [#462](https://github.com/getsentry/uptime-checker/pull/462)
+
 ## 26.2.1
 
 - No documented changes.
