@@ -62,7 +62,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
 
       - name: Cache rust cargo artifacts
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
 
       - name: Install protoc
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
