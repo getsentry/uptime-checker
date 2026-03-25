@@ -83,7 +83,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Run Sentry self-hosted e2e CI
-        uses: getsentry/self-hosted@master
+        uses: getsentry/self-hosted@871c182cb0a99dc1fad72cc7ce7889b514b0c5f0 # master
         with:
           project_name: uptime_checker
           image_url: ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}
