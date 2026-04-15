@@ -1,3 +1,13 @@
+## 26.4.0
+
+### Bug Fixes 🐛
+
+- (linting) Changelog pre-commit fix by @hubertdeng123 in [#494](https://github.com/getsentry/uptime-checker/pull/494)
+
+### Internal Changes 🔧
+
+- Pin GitHub Actions to full-length commit SHAs by @joshuarli in [#493](https://github.com/getsentry/uptime-checker/pull/493)
+
 ## 26.3.1
 
 - No documented changes.
