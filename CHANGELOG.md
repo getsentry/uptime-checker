@@ -219,4 +219,3 @@ _Plus 8 more_
 - ci: Bring the release target back for images (#336) by @evanpurkhiser
 - ci: Fix bump-version script (#335) by @evanpurkhiser
 - craft: Add changelog (#334) by @evanpurkhiser
-
