@@ -19,7 +19,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tag release version
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
         run: |
           docker buildx imagetools create --tag \
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/"$REPOSITORY":"$REF_NAME" \
+            ghcr.io/"$REPOSITORY":"$SHA"
