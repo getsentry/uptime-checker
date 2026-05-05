@@ -1,3 +1,7 @@
+## 26.4.2
+
+- No documented changes.
+
 ## 26.4.1
 
 - No documented changes.
