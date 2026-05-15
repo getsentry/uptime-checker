@@ -1,6 +1,6 @@
 [package]
 name = "uptime-checker"
-version = "26.4.2"
+version = "26.5.0"
 # keep edition in sync with .pre-commit-config.yaml
 edition = "2021"
 rust-version = "1.88"
