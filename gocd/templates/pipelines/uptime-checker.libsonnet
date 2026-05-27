@@ -14,10 +14,7 @@ local region_pops = {
     'us-east-sc',  // uptime-sc
     'us-east-va',  // uptime-va
   ],
-  s4s: [
-    's4s',
-    'pop-st-1',
-  ],
+  us2: []
 };
 
 local checks_stage = {
