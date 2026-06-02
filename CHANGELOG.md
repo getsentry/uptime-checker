@@ -1,3 +1,12 @@
+## 26.5.2
+
+### Internal Changes 🔧
+
+#### Gocd
+
+- Fix region map by @dmajere in [#497](https://github.com/getsentry/uptime-checker/pull/497)
+- Gocd-jsonnet 3.0.4 by @dmajere in [#496](https://github.com/getsentry/uptime-checker/pull/496)
+
 ## 26.5.1
 
 - No documented changes.
