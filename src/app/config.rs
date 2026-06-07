@@ -2,13 +2,13 @@ use figment::{
     providers::{Env, Format, Serialized, Yaml},
     Figment,
 };
-use std::net::IpAddr;
-use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
-
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::formats::CommaSeparator;
 use serde_with::{serde_as, with_prefix};
+use std::fmt::Display;
+use std::net::IpAddr;
 use std::str::FromStr;
+use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
 
 use crate::{app::cli, logging};
 
@@ -68,7 +68,7 @@ impl Display for KafkaSecurityProtocol {
 }
 
 #[serde_as]
-#[derive(Default, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Default, PartialEq, Serialize, Deserialize)]
 pub struct KafkaConfig {
     /// Kafka security protocol to use. The value must be one of "plaintext, "ssl", "sasl_plaintext", "sasl_ssl".
     /// If not specified, defaults to "plaintext".
