@@ -72,7 +72,7 @@ impl Display for KafkaSecurityProtocol {
 pub struct KafkaConfig {
     /// Kafka security protocol to use. The value must be one of "plaintext, "ssl", "sasl_plaintext", "sasl_ssl".
     /// If not specified, defaults to "plaintext".
-    pub securiy_protocol: Option<KafkaSecurityProtocol>,
+    pub security_protocol: Option<KafkaSecurityProtocol>,
 
     /// TLS CA certificate location for Kafka.
     pub ssl_ca_location: Option<String>,
@@ -360,6 +360,7 @@ mod tests {
     use std::net::IpAddr;
     use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
+    use crate::app::config::KafkaSecurityProtocol;
     use crate::{app::cli, logging};
 
     use super::{
