@@ -5,7 +5,7 @@ use figment::{
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::formats::CommaSeparator;
 use serde_with::{serde_as, with_prefix};
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
