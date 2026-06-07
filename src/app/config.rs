@@ -7,7 +7,7 @@ use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::formats::CommaSeparator;
-use serde_with::serde_as;
+use serde_with::{serde_as, with_prefix};
 use std::str::FromStr;
 
 use crate::{app::cli, logging};
@@ -55,12 +55,24 @@ pub enum KafkaSecurityProtocol {
     SaslSsl,
 }
 
+impl Display for KafkaSecurityProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            KafkaSecurityProtocol::Plaintext => "plaintext",
+            KafkaSecurityProtocol::Ssl => "ssl",
+            KafkaSecurityProtocol::SaslPlaintext => "sasl_plaintext",
+            KafkaSecurityProtocol::SaslSsl => "sasl_ssl",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[serde_as]
-#[derive(PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct KafkaConfig {
     /// Kafka security protocol to use. The value must be one of "plaintext, "ssl", "sasl_plaintext", "sasl_ssl".
     /// If not specified, defaults to "plaintext".
-    pub security_protocol: Option<KafkaSecurityProtocol>,
+    pub securiy_protocol: Option<KafkaSecurityProtocol>,
 
     /// TLS CA certificate location for Kafka.
     pub ssl_ca_location: Option<String>,
@@ -79,6 +91,22 @@ pub struct KafkaConfig {
 
     /// SASL password for Kafka.
     pub sasl_password: Option<String>,
+}
+
+with_prefix!(prefix_kafka_config "kafka_");
+
+impl Debug for KafkaConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KafkaConfig")
+            .field("security_protocol", &self.security_protocol)
+            .field("ssl_ca_location", &self.ssl_ca_location)
+            .field("ssl_cert_location", &self.ssl_cert_location)
+            .field("ssl_key_location", &"***redacted***")
+            .field("sasl_mechanism", &self.sasl_mechanism)
+            .field("sasl_username", &self.sasl_username)
+            .field("sasl_password", &"***redacted***")
+            .finish()
+    }
 }
 
 #[serde_as]
@@ -122,7 +150,7 @@ pub struct Config {
     pub results_kafka_topic: String,
 
     /// Kafka extended configuration
-    #[serde(flatten, with = "kafka_")]
+    #[serde(flatten, with = "prefix_kafka_config")]
     pub kafka_config: KafkaConfig,
 
     /// Which config provider to use to load configs into memory
@@ -218,20 +246,6 @@ pub struct Config {
     /// The maximum number of assertion operations allowed in a complete assertion (including
     /// logical operations like AND and OR and NOT.)
     pub max_assertion_ops: u32,
-}
-
-impl Default for KafkaConfig {
-    fn default() -> Self {
-        Self {
-            security_protocol: None,
-            ssl_ca_location: None,
-            ssl_cert_location: None,
-            ssl_key_location: None,
-            sasl_mechanism: None,
-            sasl_username: None,
-            sasl_password: None,
-        }
-    }
 }
 
 impl Default for Config {
