@@ -1,11 +1,14 @@
+#![deny(clippy::unwrap_used, clippy::panic)]
 // TODO: We might want to remove this once more stable, but it's just noisy for now.
 #![allow(dead_code)]
 mod app;
+mod assertions;
 mod check_config_provider;
 mod check_executor;
 mod checker;
 mod config_store;
 mod config_waiter;
+mod endpoint;
 mod logging;
 mod manager;
 mod metrics;

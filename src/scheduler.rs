@@ -11,12 +11,11 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval, Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::check_executor::CheckSender;
+use crate::check_executor::{CheckKind, CheckSender};
 use crate::config_store::{RwConfigStore, Tick};
 use crate::config_waiter::BootResult;
-use crate::redis::build_redis_client;
+use crate::redis::RedisClient;
 use crate::types::result::CheckResult;
-use redis::AsyncCommands;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_scheduler(
@@ -25,11 +24,9 @@ pub fn run_scheduler(
     executor_sender: Arc<CheckSender>,
     shutdown: CancellationToken,
     progress_key: String,
-    redis_host: String,
+    redis_client: RedisClient,
     config_loaded_receiver: Receiver<BootResult>,
     region: &'static str,
-    redis_enable_cluster: bool,
-    redis_timeouts_ms: u64,
     tasks_finished_tx: mpsc::UnboundedSender<Result<(), anyhow::Error>>,
 ) -> JoinHandle<()> {
     tracing::info!(partition, "scheduler.starting");
@@ -42,10 +39,8 @@ pub fn run_scheduler(
             executor_sender,
             shutdown,
             progress_key,
-            redis_host,
+            redis_client,
             region,
-            redis_enable_cluster,
-            redis_timeouts_ms,
         )
         .await;
 
@@ -58,7 +53,7 @@ pub fn run_scheduler(
 struct ExecutionBundle {
     start: Instant,
     tick: Tick,
-    checks: JoinAll<Receiver<CheckResult>>,
+    checks: JoinAll<Receiver<Option<CheckResult>>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -68,19 +63,15 @@ async fn scheduler_loop(
     executor_sender: Arc<CheckSender>,
     shutdown: CancellationToken,
     progress_key: String,
-    redis_host: String,
+    client: RedisClient,
     region: &'static str,
-    redis_enable_cluster: bool,
-    redis_timeouts_ms: u64,
 ) -> anyhow::Result<()> {
-    let client = build_redis_client(&redis_host, redis_enable_cluster)
-        .context("failure building redis client")?;
-    let mut connection = client
-        .get_async_connection(redis_timeouts_ms)
+    let mut ops = client
+        .get_async_connection()
         .await
         .context("failure getting async redis connection")?;
-    let last_progress: Option<String> = connection
-        .get(&progress_key)
+    let last_progress: Option<i64> = ops
+        .read_watermark(&progress_key)
         .await
         .context("failure getting progress key")?;
     let tick_frequency = Duration::from_secs(1);
@@ -93,8 +84,7 @@ async fn scheduler_loop(
     // Determine when to start the ticker from when we last made progress. This may be a number of
     // seconds ago when the checker is restarting
     let start = match last_progress {
-        Some(result) => {
-            let last_completed_check_nanos: i64 = result.parse().unwrap_or(Utc::now().timestamp());
+        Some(last_completed_check_nanos) => {
             let next_check = Utc.timestamp_nanos(last_completed_check_nanos) + tick_frequency;
             // There's a race where a checker is running for a given progress_key, and another is starting.
             // Since we add `tick_frequency` to the date here, the date can end up in the future, which causes
@@ -132,9 +122,17 @@ async fn scheduler_loop(
                 "uptime_region" => region,
             )
             .increment(1);
+
             if config.should_run(tick, region) {
+                // if config.should_check_robots(tick) {
+                //     let check = executor_sender
+                //         .queue_check(tick, config.clone(), CheckKind::Robots)
+                //         .context("executor_sender.queue_check failed")?;
+                //     results.push(check);
+                // };
+
                 let check = executor_sender
-                    .queue_check(tick, config)
+                    .queue_check(tick, config, CheckKind::Uptime)
                     .context("executor_sender.queue_check failed")?;
                 results.push(check);
                 bucket_size += 1;
@@ -228,7 +226,7 @@ async fn scheduler_loop(
             tracing::info!(tick = %tick, progress, num_read, "scheduler.tick_complete_join_handle");
 
             let result: Result<(), redis::RedisError> =
-                connection.set(&progress_key, progress.to_string()).await;
+                ops.write_watermark(&progress_key, progress).await;
 
             // Right now (April 25th,) we're seeing the occasional hang here, seemingly due to a
             // stale connection.  Let's be more explicit with the error handling and logging here,
@@ -241,10 +239,10 @@ async fn scheduler_loop(
                     // Log and try reconnecting.
                     tracing::error!(progress_key, "scheduler.progress_saving_connection_dropped");
 
-                    let new_connection = client.get_async_connection(redis_timeouts_ms).await;
+                    let new_ops = client.get_async_connection().await;
 
-                    match new_connection {
-                        Ok(new_connection) => connection = new_connection,
+                    match new_ops {
+                        Ok(new_ops) => ops = new_ops,
                         Err(err) => {
                             tracing::error!(progress_key, error = %err, "scheduler.progress_saving_reconnect_failure");
 
@@ -259,6 +257,7 @@ async fn scheduler_loop(
                     );
                 }
             }
+
             tracing::debug!(tick = %tick, "scheduler.tick_execution_complete_in_order");
         }
         tracing::debug!("scheduler.tick_complete_join_handle_finished");
@@ -285,6 +284,7 @@ async fn scheduler_loop(
 mod tests {
     use crate::app::config::Config;
     use crate::check_executor::CheckSender;
+    use crate::redis::build_redis_client;
     use chrono::{Duration, TimeDelta, Utc};
     use redis::{Client, Commands};
     use redis_test_macro::redis_test;
@@ -326,14 +326,14 @@ mod tests {
 
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(435),
             ..Default::default()
-        });
-        let config2 = Arc::new(CheckConfig {
+        };
+        let config2 = CheckConfig {
             subscription_id: Uuid::from_u128(14),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -346,17 +346,17 @@ mod tests {
         let shutdown_token = CancellationToken::new();
         let (shutdown_signal, _) = mpsc::unbounded_channel();
 
+        let redis_client = build_redis_client(&config.redis_host, false, 0, false).unwrap();
+
         let join_handle = run_scheduler(
             partition,
             config_store,
             Arc::new(executor_tx),
             shutdown_token.clone(),
             build_progress_key(0),
-            config.redis_host.clone(),
+            redis_client,
             boot_rx,
             config.region,
-            false,
-            0,
             shutdown_signal,
         );
         let _ = boot_tx.send(BootResult::Started);
@@ -364,11 +364,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(scheduled_check2.get_config().clone(), config2);
+        assert_eq!(**scheduled_check2.get_config(), config2);
 
         // The second tick should have been scheduled two seconds after the first tick since it is
         // two buckets after the first tick.
@@ -379,34 +379,50 @@ mod tests {
 
         // Record results for both to complete both ticks
         scheduled_check1
-            .record_result(CheckResult {
-                guid: Uuid::new_v4(),
-                subscription_id: config1.subscription_id,
-                status: CheckStatus::Success,
-                status_reason: None,
-                trace_id: Default::default(),
-                span_id: Default::default(),
-                scheduled_check_time: scheduled_check1_time,
-                actual_check_time: Utc::now(),
-                duration: Some(Duration::seconds(1)),
-                request_info: None,
-                region: config.region,
-            })
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config1.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check1_time,
+                    scheduled_check_time_us: scheduled_check1_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
             .unwrap();
         scheduled_check2
-            .record_result(CheckResult {
-                guid: Uuid::new_v4(),
-                subscription_id: config2.subscription_id,
-                status: CheckStatus::Success,
-                status_reason: None,
-                trace_id: Default::default(),
-                span_id: Default::default(),
-                scheduled_check_time: scheduled_check2_time,
-                actual_check_time: Utc::now(),
-                duration: Some(Duration::seconds(1)),
-                request_info: None,
-                region: config.region,
-            })
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config2.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check2_time,
+                    scheduled_check_time_us: scheduled_check2_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
             .unwrap();
 
         shutdown_token.cancel();
@@ -453,12 +469,12 @@ mod tests {
             .expect("Couldn't save progress of scheduler");
 
         let config_store = Arc::new(ConfigStore::new_rw());
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(2500),
             active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -469,6 +485,7 @@ mod tests {
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
         let (shutdown_signal, _) = mpsc::unbounded_channel();
+        let redis_client = build_redis_client(&redis_url, false, 100, false).unwrap();
 
         let join_handle = run_scheduler(
             partition,
@@ -476,11 +493,9 @@ mod tests {
             Arc::new(executor_tx),
             shutdown_token.clone(),
             build_progress_key(0),
-            redis_url,
+            redis_client,
             boot_rx,
             config.region,
-            false,
-            100,
             shutdown_signal,
         );
         let _ = boot_tx.send(BootResult::Started);
@@ -488,23 +503,31 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         // Record results for both to complete both ticks
         scheduled_check1
-            .record_result(CheckResult {
-                guid: Uuid::new_v4(),
-                subscription_id: config1.subscription_id,
-                status: CheckStatus::Success,
-                status_reason: None,
-                trace_id: Default::default(),
-                span_id: Default::default(),
-                scheduled_check_time: scheduled_check1_time,
-                actual_check_time: Utc::now(),
-                duration: Some(Duration::seconds(1)),
-                request_info: None,
-                region: config.region,
-            })
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config1.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check1_time,
+                    scheduled_check_time_us: scheduled_check1_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
             .unwrap();
 
         shutdown_token.cancel();
@@ -538,18 +561,18 @@ mod tests {
         // `<val> % active_regions.length() == 1` so that it's in us_east.
         // Note: These numbers are chosen so that the uuid5 we generate for them modulos to 1/3
         // respectively, and places them in the same slot.
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(2500),
             active_regions: Some(vec!["us_west".to_string(), "us_east".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
-        });
-        let config2 = Arc::new(CheckConfig {
+        };
+        let config2 = CheckConfig {
             subscription_id: Uuid::from_u128(1317),
             active_regions: Some(vec!["us_east".to_string(), "us_west".to_string()]),
             region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -561,6 +584,7 @@ mod tests {
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
         let (shutdown_signal, _) = mpsc::unbounded_channel();
+        let redis_client = build_redis_client(&config.redis_host, false, 0, false).unwrap();
 
         let join_handle = run_scheduler(
             partition,
@@ -568,11 +592,9 @@ mod tests {
             Arc::new(executor_tx),
             shutdown_token.clone(),
             build_progress_key(0),
-            config.redis_host.clone(),
+            redis_client,
             boot_rx,
             config.region,
-            false,
-            0,
             shutdown_signal,
         );
         let _ = boot_tx.send(BootResult::Started);
@@ -580,11 +602,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(scheduled_check2.get_config().clone(), config2);
+        assert_eq!(**scheduled_check2.get_config(), config2);
 
         // The second tick should have been scheduled 62 seconds after the first tick since it is
         // two buckets after the first tick, but in an alternating region
@@ -595,34 +617,50 @@ mod tests {
 
         // Record results for both to complete both ticks
         scheduled_check1
-            .record_result(CheckResult {
-                guid: Uuid::new_v4(),
-                subscription_id: config1.subscription_id,
-                status: CheckStatus::Success,
-                status_reason: None,
-                trace_id: Default::default(),
-                span_id: Default::default(),
-                scheduled_check_time: scheduled_check1_time,
-                actual_check_time: Utc::now(),
-                duration: Some(Duration::seconds(1)),
-                request_info: None,
-                region: config.region,
-            })
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config1.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check1_time,
+                    scheduled_check_time_us: scheduled_check1_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
             .unwrap();
         scheduled_check2
-            .record_result(CheckResult {
-                guid: Uuid::new_v4(),
-                subscription_id: config2.subscription_id,
-                status: CheckStatus::Success,
-                status_reason: None,
-                trace_id: Default::default(),
-                span_id: Default::default(),
-                scheduled_check_time: scheduled_check2_time,
-                actual_check_time: Utc::now(),
-                duration: Some(Duration::seconds(1)),
-                request_info: None,
-                region: config.region,
-            })
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config2.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check2_time,
+                    scheduled_check_time_us: scheduled_check2_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
             .unwrap();
 
         shutdown_token.cancel();
@@ -654,14 +692,14 @@ mod tests {
 
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(435),
             ..Default::default()
-        });
-        let config2 = Arc::new(CheckConfig {
+        };
+        let config2 = CheckConfig {
             subscription_id: Uuid::from_u128(14),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -673,6 +711,7 @@ mod tests {
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
         let (shutdown_signal, _) = mpsc::unbounded_channel();
+        let redis_client = build_redis_client(&config.redis_host, false, 0, false).unwrap();
 
         let join_handle = run_scheduler(
             partition,
@@ -680,11 +719,9 @@ mod tests {
             Arc::new(executor_tx),
             shutdown_token.clone(),
             progress_key.clone(),
-            config.redis_host.clone(),
+            redis_client,
             boot_rx,
             config.region,
-            false,
-            0,
             shutdown_signal,
         );
 
@@ -693,11 +730,11 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config2);
+        assert_eq!(**scheduled_check1.get_config(), config2);
 
         let scheduled_check2 = executor_rx.recv().await.unwrap();
         let scheduled_check2_time = scheduled_check2.get_tick().time();
-        assert_eq!(scheduled_check2.get_config().clone(), config1);
+        assert_eq!(**scheduled_check2.get_config(), config1);
 
         // The second tick should have been scheduled 58 seconds after the first tick since it is
         // 58 buckets after the first tick.
@@ -708,34 +745,50 @@ mod tests {
 
         // Record results for both to complete both ticks
         scheduled_check1
-            .record_result(CheckResult {
-                guid: Uuid::new_v4(),
-                subscription_id: config2.subscription_id,
-                status: CheckStatus::Success,
-                status_reason: None,
-                trace_id: Default::default(),
-                span_id: Default::default(),
-                scheduled_check_time: scheduled_check1_time,
-                actual_check_time: Utc::now(),
-                duration: Some(Duration::seconds(1)),
-                request_info: None,
-                region: config.region,
-            })
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config2.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check1_time,
+                    scheduled_check_time_us: scheduled_check1_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
             .unwrap();
         scheduled_check2
-            .record_result(CheckResult {
-                guid: Uuid::new_v4(),
-                subscription_id: config1.subscription_id,
-                status: CheckStatus::Success,
-                status_reason: None,
-                trace_id: Default::default(),
-                span_id: Default::default(),
-                scheduled_check_time: scheduled_check2_time,
-                actual_check_time: Utc::now(),
-                duration: Some(Duration::seconds(1)),
-                request_info: None,
-                region: config.region,
-            })
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config1.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check2_time,
+                    scheduled_check_time_us: scheduled_check2_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
             .unwrap();
 
         shutdown_token.cancel();
@@ -769,10 +822,10 @@ mod tests {
 
         let config_store = Arc::new(ConfigStore::new_rw());
 
-        let config1 = Arc::new(CheckConfig {
+        let config1 = CheckConfig {
             subscription_id: Uuid::from_u128(1),
             ..Default::default()
-        });
+        };
 
         {
             let mut rw_store = config_store.write().unwrap();
@@ -783,6 +836,7 @@ mod tests {
         let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
         let shutdown_token = CancellationToken::new();
         let (shutdown_signal, _) = mpsc::unbounded_channel();
+        let redis_client = build_redis_client(&config.redis_host, false, 0, false).unwrap();
 
         let join_handle = run_scheduler(
             partition,
@@ -790,11 +844,9 @@ mod tests {
             Arc::new(executor_tx),
             shutdown_token.clone(),
             progress_key.clone(),
-            config.redis_host.clone(),
+            redis_client,
             boot_rx,
             config.region,
-            false,
-            0,
             shutdown_signal,
         );
 
@@ -803,23 +855,31 @@ mod tests {
         // // Wait and execute both ticks
         let scheduled_check1 = executor_rx.recv().await.unwrap();
         let scheduled_check1_time = scheduled_check1.get_tick().time();
-        assert_eq!(scheduled_check1.get_config().clone(), config1);
+        assert_eq!(**scheduled_check1.get_config(), config1);
 
         // Record results for both to complete both ticks
         scheduled_check1
-            .record_result(CheckResult {
-                guid: Uuid::new_v4(),
-                subscription_id: config1.subscription_id,
-                status: CheckStatus::Success,
-                status_reason: None,
-                trace_id: Default::default(),
-                span_id: Default::default(),
-                scheduled_check_time: scheduled_check1_time,
-                actual_check_time: Utc::now(),
-                duration: Some(Duration::seconds(1)),
-                request_info: None,
-                region: config.region,
-            })
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config1.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check1_time,
+                    scheduled_check_time_us: scheduled_check1_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
             .unwrap();
 
         shutdown_token.cancel();
@@ -827,4 +887,234 @@ mod tests {
         join_handle.await.unwrap();
         assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
     }
+
+    #[traced_test]
+    #[redis_test(start_paused = true)]
+    async fn test_readonly_scheduler() {
+        // This is actually the same test (with the same results) as test_scheduler, though
+        // we construct a read-only redis client.  In case of future divergence, let's keep
+        // this test around.
+        let config = Config::default();
+        let partition = 0;
+
+        let progress_key = build_progress_key(partition);
+        let client = Client::open(config.redis_host.clone()).unwrap();
+        let mut connection = client.get_connection().expect("Unable to connect to Redis");
+        let _: () = connection
+            .set(progress_key.clone(), 0)
+            .expect("Couldn't save progress of scheduler");
+
+        let config_store = Arc::new(ConfigStore::new_rw());
+
+        let config1 = CheckConfig {
+            subscription_id: Uuid::from_u128(435),
+            ..Default::default()
+        };
+        let config2 = CheckConfig {
+            subscription_id: Uuid::from_u128(14),
+            ..Default::default()
+        };
+
+        {
+            let mut rw_store = config_store.write().unwrap();
+            rw_store.add_config(config1.clone());
+            rw_store.add_config(config2.clone());
+        }
+
+        let (executor_tx, mut executor_rx) = CheckSender::new();
+        let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
+        let shutdown_token = CancellationToken::new();
+        let (shutdown_signal, _) = mpsc::unbounded_channel();
+
+        let redis_client = build_redis_client(&config.redis_host, false, 0, true).unwrap();
+
+        let join_handle = run_scheduler(
+            partition,
+            config_store,
+            Arc::new(executor_tx),
+            shutdown_token.clone(),
+            build_progress_key(0),
+            redis_client,
+            boot_rx,
+            config.region,
+            shutdown_signal,
+        );
+        let _ = boot_tx.send(BootResult::Started);
+
+        // // Wait and execute both ticks
+        let scheduled_check1 = executor_rx.recv().await.unwrap();
+        let scheduled_check1_time = scheduled_check1.get_tick().time();
+        assert_eq!(**scheduled_check1.get_config(), config1);
+
+        let scheduled_check2 = executor_rx.recv().await.unwrap();
+        let scheduled_check2_time = scheduled_check2.get_tick().time();
+        assert_eq!(**scheduled_check2.get_config(), config2);
+
+        // The second tick should have been scheduled two seconds after the first tick since it is
+        // two buckets after the first tick.
+        assert_eq!(
+            scheduled_check2_time - scheduled_check1_time,
+            Duration::seconds(2)
+        );
+
+        // Record results for both to complete both ticks
+        scheduled_check1
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config1.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check1_time,
+                    scheduled_check_time_us: scheduled_check1_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
+            .unwrap();
+        scheduled_check2
+            .record_result(
+                CheckResult {
+                    guid: Uuid::new_v4(),
+                    subscription_id: config2.subscription_id,
+                    status: CheckStatus::Success,
+                    status_reason: None,
+                    trace_id: Default::default(),
+                    span_id: Default::default(),
+                    scheduled_check_time: scheduled_check2_time,
+                    scheduled_check_time_us: scheduled_check2_time,
+                    actual_check_time: Utc::now(),
+                    actual_check_time_us: Utc::now(),
+                    duration: Some(Duration::seconds(1)),
+                    duration_us: Some(Duration::seconds(1)),
+                    request_info: None,
+                    region: config.region,
+                    request_info_list: vec![],
+                    assertion_failure_data: None,
+                }
+                .into(),
+            )
+            .unwrap();
+
+        shutdown_token.cancel();
+        drop(executor_rx);
+        join_handle.await.unwrap();
+        assert!(logs_contain("scheduler.tick_execution_complete_in_order"));
+        let progress: u64 = connection
+            .get(progress_key)
+            .expect("Couldn't save progress of scheduler");
+        assert_eq!(progress, 7140000000000);
+    }
+
+    // #[traced_test]
+    // #[redis_test(start_paused = true)]
+    // async fn test_robots_check_once_a_day() {
+    //     let config = Config::default();
+    //     let partition = 0;
+
+    //     let progress_key = build_progress_key(partition);
+    //     let client = Client::open(config.redis_host.clone()).unwrap();
+    //     let mut connection = client.get_connection().expect("Unable to connect to Redis");
+    //     let _: () = connection
+    //         .set(progress_key.clone(), 0)
+    //         .expect("Couldn't save progress of scheduler");
+
+    //     let config_store = Arc::new(ConfigStore::new_rw());
+
+    //     let config1 = Arc::new(CheckConfig {
+    //         subscription_id: Uuid::from_u128(435),
+    //         interval: CheckInterval::SixtyMinutes,
+    //         ..Default::default()
+    //     });
+
+    //     {
+    //         let mut rw_store = config_store.write().unwrap();
+    //         rw_store.add_config(config1.clone());
+    //     }
+
+    //     let (executor_tx, mut executor_rx) = CheckSender::new();
+    //     let (boot_tx, boot_rx) = oneshot::channel::<BootResult>();
+    //     let shutdown_token = CancellationToken::new();
+    //     let (shutdown_signal, _) = mpsc::unbounded_channel();
+
+    //     let join_handle = run_scheduler(
+    //         partition,
+    //         config_store,
+    //         Arc::new(executor_tx),
+    //         shutdown_token.clone(),
+    //         build_progress_key(0),
+    //         config.redis_host.clone(),
+    //         boot_rx,
+    //         config.region,
+    //         false,
+    //         0,
+    //         shutdown_signal,
+    //     );
+    //     let _ = boot_tx.send(BootResult::Started);
+
+    //     // // Wait and execute both ticks
+    //     let mut num_loops = 0;
+    //     let mut num_uptimes = 0;
+    //     let mut num_robots = 0;
+    //     loop {
+    //         num_loops += 1;
+    //         let scheduled_check1 = executor_rx.recv().await.unwrap();
+    //         let scheduled_check1_time = scheduled_check1.get_tick().time();
+
+    //         match scheduled_check1.get_kind() {
+    //             CheckKind::Uptime => num_uptimes += 1,
+    //             CheckKind::Robots => {
+    //                 num_robots += 1;
+
+    //                 // We ought to recieve another check.
+    //                 let check = executor_rx.recv().await.unwrap();
+    //                 assert_eq!(*check.get_kind(), CheckKind::Uptime);
+    //                 num_uptimes += 1;
+    //             }
+    //         }
+
+    //         scheduled_check1
+    //             .record_result(
+    //                 CheckResult {
+    //                     guid: Uuid::new_v4(),
+    //                     subscription_id: config1.subscription_id,
+    //                     status: CheckStatus::Success,
+    //                     status_reason: None,
+    //                     trace_id: Default::default(),
+    //                     span_id: Default::default(),
+    //                     scheduled_check_time: scheduled_check1_time,
+    //                     scheduled_check_time_us: scheduled_check1_time,
+    //                     actual_check_time: Utc::now(),
+    //                     actual_check_time_us: Utc::now(),
+    //                     duration: Some(Duration::seconds(1)),
+    //                     duration_us: Some(Duration::seconds(1)),
+    //                     request_info: None,
+    //                     region: config.region,
+    //                     request_info_list: vec![],
+    //                 }
+    //                 .into(),
+    //             )
+    //             .unwrap();
+    //         tokio::time::advance(std::time::Duration::from_secs(3600)).await;
+    //         if num_loops == 24 {
+    //             break;
+    //         }
+    //     }
+
+    //     assert_eq!(num_uptimes, 24);
+    //     assert_eq!(num_robots, 1);
+
+    //     shutdown_token.cancel();
+    //     drop(executor_rx);
+    //     join_handle.await.unwrap();
+    // }
 }

@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 /// Common requets methods.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum RequestMethod {
+    #[default]
     Get,
     Post,
     Head,
@@ -17,12 +18,6 @@ pub enum RequestMethod {
 #[serde(rename_all = "snake_case")]
 pub enum RegionScheduleMode {
     RoundRobin,
-}
-
-impl Default for RequestMethod {
-    fn default() -> Self {
-        Self::Get
-    }
 }
 
 impl From<RequestMethod> for http::Method {

@@ -2,14 +2,14 @@ pub mod dummy_checker;
 pub mod ip_filter;
 pub mod reqwest_checker;
 
-use std::future::Future;
-
 use reqwest_checker::ReqwestChecker;
 use sentry::protocol::SpanId;
+use std::future::Future;
 use uuid::Uuid;
 
 use crate::{
     check_executor::ScheduledCheck,
+    checker::dummy_checker::DummyChecker,
     config_store::Tick,
     types::{check_config::CheckConfig, result::CheckResult},
 };
@@ -50,17 +50,36 @@ pub trait Checker: Send + Sync {
         check: &ScheduledCheck,
         region: &'static str,
     ) -> impl Future<Output = CheckResult> + Send;
+
+    fn check_robots(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+    ) -> impl Future<Output = Option<CheckResult>> + Send;
 }
 
 #[derive(Debug)]
 pub enum HttpChecker {
     ReqwestChecker(ReqwestChecker),
+    DummyChecker(DummyChecker),
 }
 
-impl Checker for HttpChecker {
-    async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
+impl HttpChecker {
+    pub async fn check_url(&self, check: &ScheduledCheck, region: &'static str) -> CheckResult {
         match self {
-            Self::ReqwestChecker(c) => c.check_url(check, region).await,
+            HttpChecker::ReqwestChecker(c) => c.check_url(check, region).await,
+            HttpChecker::DummyChecker(c) => c.check_url(check, region).await,
+        }
+    }
+
+    pub async fn check_robots(
+        &self,
+        check: &ScheduledCheck,
+        region: &'static str,
+    ) -> Option<CheckResult> {
+        match self {
+            HttpChecker::ReqwestChecker(c) => c.check_robots(check, region).await,
+            HttpChecker::DummyChecker(c) => c.check_robots(check, region).await,
         }
     }
 }
@@ -68,5 +87,11 @@ impl Checker for HttpChecker {
 impl From<ReqwestChecker> for HttpChecker {
     fn from(checker: ReqwestChecker) -> Self {
         HttpChecker::ReqwestChecker(checker)
+    }
+}
+
+impl From<DummyChecker> for HttpChecker {
+    fn from(checker: DummyChecker) -> Self {
+        HttpChecker::DummyChecker(checker)
     }
 }

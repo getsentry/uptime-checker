@@ -42,15 +42,17 @@ pub fn execute() -> io::Result<()> {
                     }
                     result = shutdown.recv_task_finished() => {
                         match result {
-                            None => panic!("tasks_finished channel unexpectedly closed"),
+                            None => tracing::info!("system.recv_task_finished.channel_closed"),
                             Some(Err(err)) => {
-                                panic!("Error in partition: {err:?}");
+                                tracing::error!(%err, "system.recv_task_finished.shutdown_error");
                             },
-                            _ => panic!("Unexpected end of task"),
+                            Some(Ok(_)) => tracing::info!("system.recv_task_finished.end_of_task"),
                         }
                     }
                 }
-                shutdown.stop().await;
+                if let Err(err) = shutdown.stop().await {
+                    tracing::error!(%err, "system.shutdown_error");
+                }
                 tracing::info!("system.shutdown");
                 Ok(())
             }),

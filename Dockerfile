@@ -1,4 +1,4 @@
-FROM rust:1.85-alpine3.20 as builder
+FROM rust:1.88-alpine3.22 AS builder
 
 # Install system dependencies
 RUN apk add --no-cache \
@@ -8,7 +8,8 @@ RUN apk add --no-cache \
     g++ \
     pkgconfig \
     openssl-dev \
-    protoc
+    protoc \
+    binutils
 
 # Configure cargo
 RUN mkdir -p ~/.cargo && \
@@ -38,16 +39,39 @@ ENV UPTIME_CHECKER_GIT_REVISION=$UPTIME_CHECKER_GIT_REVISION
 
 # Copy the actual source code and build
 COPY . .
-RUN cargo build --release
 
-FROM alpine:3.20
+# Do the build, and then strip off debug info into a separate .debug file
+RUN cargo build --release && \
+    objcopy --only-keep-debug target/release/uptime-checker target/release/uptime-checker.debug && \
+    objcopy --strip-debug --strip-unneeded target/release/uptime-checker && \
+    objcopy --add-gnu-debuglink target/release/uptime-checker.debug target/release/uptime-checker
 
-RUN apk add --no-cache tini libgcc curl && \
+# Stage for extracting debug symbols in CI
+FROM scratch AS debug-symbols
+COPY --from=builder /app/target/release/uptime-checker.debug /uptime-checker.debug
+
+FROM alpine:3.22.1
+
+RUN apk add --no-cache tini libgcc ca-certificates curl && \
     addgroup -S app --gid 1000 && \
     adduser -S app -G app --uid 1000
+
+# XXX(epurkhiser): Install a missing Intermediary certificate the cloudflare
+# does not seem to serve and expects browsers to use AIA to download the
+# intermediary.
+#
+# Refs https://sentry.zendesk.com/agent/tickets/158451
+#
+# XXX(epurkhiser): I'm not sure why the ca-certificates package on alpine
+# doesn't include this, but maybe with a newer or different distribution we
+# wouldn't need this?
+RUN curl -sSL https://ssl.com/repo/certs/SSL.com-TLS-T-ECC-R2.pem -o /usr/local/share/ca-certificates/SSl.com-TLS-T-ECC-R2.crt && \
+    update-ca-certificates
 
 COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
 
 USER app
+
+ENV RUST_BACKTRACE=1
 
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/uptime-checker"]

@@ -7,16 +7,19 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tokio::sync::mpsc::{self, UnboundedSender};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::app::config::{CheckerMode, ConfigProviderMode, ProducerMode};
+use crate::assertions;
 use crate::check_config_provider::redis_config_provider::run_config_provider;
 use crate::check_executor::{run_executor, CheckSender, ExecutorConfig};
 use crate::checker::HttpChecker;
 use crate::config_waiter::wait_for_partition_boot;
+use crate::endpoint::start_endpoint;
 use crate::producer::kafka_producer::KafkaResultsProducer;
+use crate::redis::build_redis_client;
 use crate::{
     app::config::Config,
     checker::reqwest_checker::ReqwestChecker,
@@ -61,17 +64,23 @@ impl PartitionedService {
             config.region,
         );
 
+        let client = build_redis_client(
+            &config.redis_host,
+            config.redis_enable_cluster,
+            config.redis_timeouts_ms,
+            config.redis_readonly,
+        )
+        .expect("could not build reddis client");
+
         let scheduler_join_handle = run_scheduler(
             partition,
             config_store.clone(),
             executor_sender,
             shutdown_signal.clone(),
             build_progress_key(partition),
-            config.redis_host.clone(),
+            client,
             config_loaded,
             config.region,
-            config.redis_enable_cluster,
-            config.redis_timeouts_ms,
             tasks_finished_tx,
         );
 
@@ -95,8 +104,9 @@ impl PartitionedService {
     pub async fn stop(self) {
         self.shutdown_signal.cancel();
 
-        // Okay to unwrap here, since we're just shutting down.
-        self.scheduler_join_handle.await.unwrap();
+        if let Err(err) = self.scheduler_join_handle.await {
+            tracing::error!(%err, "partionied_service.shutdown_error");
+        }
         tracing::info!(partition = self.partition, "partitioned_service.shutdown");
     }
 }
@@ -110,27 +120,31 @@ pub struct Manager {
     tasks_finished_tx: tokio::sync::mpsc::UnboundedSender<Result<(), anyhow::Error>>,
 }
 
-pub struct ManagerShutdown {
+pub struct ManagerHandle {
     tasks_finished_rx: mpsc::UnboundedReceiver<Result<(), anyhow::Error>>,
     shutdown_signal: CancellationToken,
     consumer_join_handle: JoinHandle<()>,
     results_worker: JoinHandle<()>,
     services_join_handle: JoinHandle<()>,
     executor_join_handle: JoinHandle<()>,
+    endpoint_join_handle: JoinHandle<()>,
 }
 
-impl ManagerShutdown {
-    pub async fn stop(self) {
+impl ManagerHandle {
+    pub async fn stop(self) -> Result<(), JoinError> {
         self.shutdown_signal.cancel();
-        // Unwrapping here because we're just shutting down; it's okay to fail badly
-        // at this point.
-        self.consumer_join_handle.await.unwrap();
 
-        self.results_worker.await.unwrap();
+        self.endpoint_join_handle.await?;
 
-        self.services_join_handle.await.unwrap();
+        self.consumer_join_handle.await?;
 
-        self.executor_join_handle.await.unwrap();
+        self.results_worker.await?;
+
+        self.services_join_handle.await?;
+
+        self.executor_join_handle.await?;
+
+        Ok(())
     }
 
     pub async fn recv_task_finished(&mut self) -> Option<anyhow::Result<()>> {
@@ -145,7 +159,7 @@ impl Manager {
     ///
     /// The returned shutdown function may be called to stop the consumer and thus shutdown all
     /// PartitionedService's, stopping check execution.
-    pub fn start(config: Arc<Config>) -> ManagerShutdown {
+    pub fn start(config: Arc<Config>) -> ManagerHandle {
         let checker: Arc<HttpChecker> = Arc::new(match config.checker_mode {
             CheckerMode::Reqwest => ReqwestChecker::new(
                 !config.allow_internal_ips,
@@ -153,6 +167,11 @@ impl Manager {
                 Duration::from_secs(config.pool_idle_timeout_secs),
                 config.http_checker_dns_nameservers.clone(),
                 config.interface.to_owned(),
+                assertions::cache::Cache::new(),
+                config.disable_asserts,
+                config.response_capture_enabled,
+                config.assertion_complexity,
+                config.max_assertion_ops,
             )
             .into(),
         });
@@ -173,6 +192,8 @@ impl Manager {
                     &config.results_kafka_topic,
                     config.vector_endpoint.clone(),
                     config.vector_batch_size,
+                    config.retry_vector_errors_forever,
+                    config.region.to_owned(),
                 );
                 let producer = Arc::new(results_producer);
                 // XXX: Executor will shutdown once the sender goes out of scope. This will happen once all
@@ -261,7 +282,7 @@ impl Manager {
         let (tasks_finished_tx, tasks_finished_rx) = mpsc::unbounded_channel();
 
         let manager = Arc::new(Self {
-            config,
+            config: config.clone(),
             services: RwLock::new(HashMap::new()),
             executor_sender,
             shutdown_sender,
@@ -287,14 +308,17 @@ impl Manager {
                 .for_each_concurrent(None, |service| service.stop())
                 .await
         });
+        let endpoint_join_handle =
+            start_endpoint(&config, shutdown_signal.clone(), checker.clone());
 
-        ManagerShutdown {
+        ManagerHandle {
             tasks_finished_rx,
             shutdown_signal,
             consumer_join_handle,
             results_worker,
             services_join_handle,
             executor_join_handle,
+            endpoint_join_handle,
         }
     }
 

@@ -1,6 +1,6 @@
 use super::shared::{RegionScheduleMode, RequestMethod};
-use crate::config_store::Tick;
-use chrono::TimeDelta;
+use crate::{assertions, config_store::Tick};
+use chrono::{TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::serde_as;
@@ -33,6 +33,9 @@ pub const SUBSCRIPTION_SLOT_NAMESPACE: Uuid =
 /// whether a subscription should run in this region.
 pub const SUBSCRIPTION_SHOULD_RUN_NAMESPACE: Uuid =
     Uuid::from_u128(31415926535897932384626433832795u128);
+
+// Check the robots.txt file every day, per subscription.
+const ROBOTS_TXT_CHECK_INTERVAL_MINUTES: u128 = 60 * 24;
 
 /// The CheckConfig represents a configuration for a single check.
 #[serde_as]
@@ -75,6 +78,20 @@ pub struct CheckConfig {
 
     #[serde(default)]
     pub region_schedule_mode: Option<RegionScheduleMode>,
+
+    #[serde(default)]
+    pub assertion: Option<assertions::Assertion>,
+
+    /// When true, response body and headers will be captured on failure.
+    /// This flag can be toggled via the set_response_capture action.
+    /// Defaults to true (capture enabled), but requires the global
+    /// response_capture_enabled config to be true for capturing to occur.
+    #[serde(default = "default_capture_response")]
+    pub capture_response_on_failure: bool,
+}
+
+fn default_capture_response() -> bool {
+    true
 }
 
 impl Hash for CheckConfig {
@@ -108,6 +125,19 @@ impl CheckConfig {
         (0..pattern_count)
             .map(|c| first_slot + (interval_secs * c))
             .collect()
+    }
+
+    pub fn should_check_robots(&self, tick: Tick) -> bool {
+        // Trigger a check of the robots.txt every 24 hrs at some particular minute of the day (per subscription).
+        let daily_minute_to_check =
+            (self.subscription_id.as_u128() % ROBOTS_TXT_CHECK_INTERVAL_MINUTES) as i32;
+        let current_minute = (tick.time().minute() + tick.time().hour() * 60) as i32;
+        let interval_in_minutes = self.interval as i32 / 60;
+
+        // If the checker is really running slow/behind, we could wind up missing a check interval; this should
+        // be rare, and so probably okay.
+        current_minute - interval_in_minutes < daily_minute_to_check
+            && current_minute >= daily_minute_to_check
     }
 
     pub fn should_run(&self, tick: Tick, current_region: &str) -> bool {
@@ -168,6 +198,8 @@ mod tests {
                 trace_sampling: false,
                 active_regions: None,
                 region_schedule_mode: None,
+                assertion: None,
+                capture_response_on_failure: true,
             }
         }
     }
@@ -212,6 +244,8 @@ mod tests {
                 trace_sampling: false,
                 active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+                assertion: None,
+                capture_response_on_failure: true,
             }
         );
     }
@@ -267,6 +301,8 @@ mod tests {
                 trace_sampling: false,
                 active_regions: Some(vec!["us-west".to_string(), "europe".to_string()]),
                 region_schedule_mode: Some(RegionScheduleMode::RoundRobin),
+                assertion: None,
+                capture_response_on_failure: true,
             }
         );
     }

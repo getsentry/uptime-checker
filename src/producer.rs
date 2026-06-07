@@ -1,5 +1,6 @@
 pub mod dummy_producer;
 pub mod kafka_producer;
+pub mod noop_producer;
 pub mod vector_producer;
 
 use sentry_kafka_schemas::SchemaError;
@@ -16,8 +17,8 @@ pub enum ExtractCodeError {
     Producer(#[from] ProducerError),
     #[error(transparent)]
     Schema(#[from] SchemaError),
-    #[error("Vector request failed")]
-    VectorError,
+    #[error("Vector request failed: {msg}")]
+    VectorError { msg: String },
 }
 
 pub trait ResultsProducer: Send + Sync {

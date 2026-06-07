@@ -141,6 +141,9 @@ pub struct Config {
     /// Whether we're using redis in standalone or cluster mode
     pub redis_enable_cluster: bool,
 
+    /// Whether to retry sending results to vector indefinitely
+    pub retry_vector_errors_forever: bool,
+
     /// The general purpose redis node to use with this service
     pub redis_host: String,
 
@@ -183,6 +186,29 @@ pub struct Config {
 
     /// Whether to collect connection-level metrics (only available on Isahc)
     pub enable_metrics: bool,
+
+    /// Whether this uptime checker will write to redis or not.
+    pub redis_readonly: bool,
+
+    /// The port on which to run the checker webserver.
+    pub webserver_port: u16,
+
+    /// Disable runtime assert evaluation.
+    pub disable_asserts: bool,
+
+    /// Enable response capture feature. When enabled, response body and headers
+    /// will be captured on failures and included in the check result.
+    pub response_capture_enabled: bool,
+
+    /// The maximum "complexity" an assertion is allowed to be; this roughly represents
+    /// how much time an assertion has to complete its ops; assertions with JSONPath queries
+    /// and glob pattern matching will contribute more to consuming this value (in proportion
+    /// to their individual complexity.)
+    pub assertion_complexity: u32,
+
+    /// The maximum number of assertion operations allowed in a complete assertion (including
+    /// logical operations like AND and OR and NOT.)
+    pub max_assertion_ops: u32,
 }
 
 impl Default for Config {
@@ -215,6 +241,7 @@ impl Default for Config {
             checker_mode: CheckerMode::Reqwest,
             vector_batch_size: 10,
             vector_endpoint: "http://localhost:8020".to_owned(),
+            retry_vector_errors_forever: false,
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
             config_provider_redis_total_partitions: 128,
@@ -232,6 +259,12 @@ impl Default for Config {
             thread_cpu_scale_factor: 1,
             redis_timeouts_ms: 30_000,
             enable_metrics: false,
+            redis_readonly: false,
+            webserver_port: 12345,
+            disable_asserts: false,
+            response_capture_enabled: false,
+            assertion_complexity: 100,
+            max_assertion_ops: 16,
         }
     }
 }
@@ -304,6 +337,7 @@ mod tests {
         CheckerMode, Config, ConfigProviderMode, KafkaConfig, MetricsConfig, ProducerMode,
     };
 
+    #[allow(clippy::result_large_err)]
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
     where
         F: FnOnce(Config),
@@ -392,11 +426,18 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        retry_vector_errors_forever: false,
                         failure_retries: 0,
                         http_checker_dns_nameservers: None,
                         thread_cpu_scale_factor: 1,
                         redis_timeouts_ms: 30_000,
                         enable_metrics: false,
+                        redis_readonly: false,
+                        webserver_port: 12345,
+                        disable_asserts: false,
+                        response_capture_enabled: false,
+                        assertion_complexity: 100,
+                        max_assertion_ops: 16,
                     }
                 );
             },
@@ -453,6 +494,10 @@ mod tests {
                     "8.8.8.8,8.8.4.4",
                 ),
                 ("UPTIME_CHECKER_INTERFACE", "eth0"),
+                ("UPTIME_CHECKER_REDIS_READONLY", "true"),
+                ("UPTIME_CHECKER_WEBSERVER_PORT", "81"),
+                ("UPTIME_CHECKER_ASSERTION_COMPLEXITY", "120"),
+                ("UPTIME_CHECKER_MAX_ASSERTION_OPS", "15"),
             ],
             |config| {
                 assert_eq!(
@@ -500,6 +545,7 @@ mod tests {
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
+                        retry_vector_errors_forever: false,
                         failure_retries: 2,
                         http_checker_dns_nameservers: Some(vec![
                             IpAddr::from([8, 8, 8, 8]),
@@ -508,6 +554,12 @@ mod tests {
                         thread_cpu_scale_factor: 3,
                         redis_timeouts_ms: 30_000,
                         enable_metrics: false,
+                        redis_readonly: true,
+                        webserver_port: 81,
+                        disable_asserts: false,
+                        response_capture_enabled: false,
+                        assertion_complexity: 120,
+                        max_assertion_ops: 15,
                     }
                 );
             },

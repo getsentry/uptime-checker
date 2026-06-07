@@ -56,7 +56,8 @@ mod tests {
         producer::{ExtractCodeError, ResultsProducer},
         types::{
             result::{
-                CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType, RequestInfo,
+                CheckResult, CheckStatus, CheckStatusReason, CheckStatusReasonType,
+                RequestDurations, RequestInfo,
             },
             shared::RequestMethod,
         },
@@ -68,6 +69,19 @@ mod tests {
 
     pub fn send_result(result: CheckStatus) -> Result<(), ExtractCodeError> {
         let guid = Uuid::new_v4();
+        let ri = RequestInfo {
+            certificate_info: None,
+            request_type: RequestMethod::Get,
+            http_status_code: Some(200),
+            url: "http://santry.ayo".to_string(),
+            request_body_size_bytes: 0,
+            response_body_size_bytes: 0,
+            request_duration_us: 123456,
+            durations: RequestDurations::default(),
+            response_body: None,
+            response_headers: None,
+        };
+
         let result = CheckResult {
             guid,
             subscription_id: uuid!("23d6048d67c948d9a19c0b47979e9a03"),
@@ -75,17 +89,20 @@ mod tests {
             status_reason: Some(CheckStatusReason {
                 status_type: CheckStatusReasonType::DnsError,
                 description: "hi".to_string(),
+                details: None,
             }),
             trace_id: guid,
             span_id: SpanId::default(),
             scheduled_check_time: Utc::now(),
+            scheduled_check_time_us: Utc::now(),
             actual_check_time: Utc::now(),
+            actual_check_time_us: Utc::now(),
             duration: Some(TimeDelta::seconds(1)),
-            request_info: Some(RequestInfo {
-                request_type: RequestMethod::Get,
-                http_status_code: Some(200),
-            }),
+            duration_us: Some(TimeDelta::seconds(1)),
+            request_info: Some(ri.clone()),
+            request_info_list: vec![ri],
             region: "us-west-1",
+            assertion_failure_data: None,
         };
         // TODO: Have an actual Kafka running for a real test. At the moment this is fine since
         // it will fail async
