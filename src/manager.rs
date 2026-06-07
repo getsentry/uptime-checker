@@ -217,8 +217,7 @@ impl Manager {
                     );
                 }
 
-                if let Some(kafka_ssl_cert_location) = &config.kafka_config.ssl_cert_location
-                {
+                if let Some(kafka_ssl_cert_location) = &config.kafka_config.ssl_cert_location {
                     kafka_overrides.insert(
                         "ssl.certificate.location".to_string(),
                         kafka_ssl_cert_location.to_owned(),
@@ -232,8 +231,7 @@ impl Manager {
                     );
                 }
 
-                if let Some(kafka_security_protocol) = &config.kafka_config.security_protocol
-                {
+                if let Some(kafka_security_protocol) = &config.kafka_config.security_protocol {
                     kafka_overrides.insert(
                         "security.protocol".to_string(),
                         kafka_security_protocol.to_string(),
