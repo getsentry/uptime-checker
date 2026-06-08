@@ -2,13 +2,13 @@ use figment::{
     providers::{Env, Format, Serialized, Yaml},
     Figment,
 };
-use std::net::IpAddr;
-use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
-
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::formats::CommaSeparator;
-use serde_with::serde_as;
+use serde_with::{serde_as, with_prefix};
+use std::fmt::{Debug, Display};
+use std::net::IpAddr;
 use std::str::FromStr;
+use std::{borrow::Cow, collections::BTreeMap, net::SocketAddr};
 
 use crate::{app::cli, logging};
 
@@ -44,6 +44,69 @@ pub struct MetricsConfig {
 
     /// Tag name to report the hostname to for each metric. Defaults to not sending such a tag.
     pub hostname_tag: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KafkaSecurityProtocol {
+    Plaintext,
+    Ssl,
+    SaslPlaintext,
+    SaslSsl,
+}
+
+impl Display for KafkaSecurityProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            KafkaSecurityProtocol::Plaintext => "plaintext",
+            KafkaSecurityProtocol::Ssl => "ssl",
+            KafkaSecurityProtocol::SaslPlaintext => "sasl_plaintext",
+            KafkaSecurityProtocol::SaslSsl => "sasl_ssl",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+#[serde_as]
+#[derive(Default, PartialEq, Serialize, Deserialize)]
+pub struct KafkaConfig {
+    /// Kafka security protocol to use. The value must be one of "plaintext, "ssl", "sasl_plaintext", "sasl_ssl".
+    /// If not specified, defaults to "plaintext".
+    pub security_protocol: Option<KafkaSecurityProtocol>,
+
+    /// TLS CA certificate location for Kafka.
+    pub ssl_ca_location: Option<String>,
+
+    /// TLS certificate location for Kafka.
+    pub ssl_cert_location: Option<String>,
+
+    /// TLS private key location for Kafka.
+    pub ssl_key_location: Option<String>,
+
+    /// SASL mechanism to use for Kafka. The value must be one of "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512".
+    pub sasl_mechanism: Option<String>,
+
+    /// SASL username for Kafka.
+    pub sasl_username: Option<String>,
+
+    /// SASL password for Kafka.
+    pub sasl_password: Option<String>,
+}
+
+with_prefix!(prefix_kafka_config "kafka_");
+
+impl Debug for KafkaConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KafkaConfig")
+            .field("security_protocol", &self.security_protocol)
+            .field("ssl_ca_location", &self.ssl_ca_location)
+            .field("ssl_cert_location", &self.ssl_cert_location)
+            .field("ssl_key_location", &"***redacted***")
+            .field("sasl_mechanism", &self.sasl_mechanism)
+            .field("sasl_username", &self.sasl_username)
+            .field("sasl_password", &"***redacted***")
+            .finish()
+    }
 }
 
 #[serde_as]
@@ -85,6 +148,10 @@ pub struct Config {
 
     /// The topic to produce uptime checks into.
     pub results_kafka_topic: String,
+
+    /// Kafka extended configuration
+    #[serde(flatten, with = "prefix_kafka_config")]
+    pub kafka_config: KafkaConfig,
 
     /// Which config provider to use to load configs into memory
     pub config_provider_mode: ConfigProviderMode,
@@ -198,6 +265,7 @@ impl Default for Config {
             },
             results_kafka_cluster: vec!["127.0.0.1:9092".to_owned()],
             results_kafka_topic: "uptime-results".to_owned(),
+            kafka_config: KafkaConfig::default(),
             config_provider_mode: ConfigProviderMode::Redis,
             checker_mode: CheckerMode::Reqwest,
             vector_batch_size: 10,
@@ -292,9 +360,12 @@ mod tests {
     use std::net::IpAddr;
     use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
+    use crate::app::config::KafkaSecurityProtocol;
     use crate::{app::cli, logging};
 
-    use super::{CheckerMode, Config, ConfigProviderMode, MetricsConfig, ProducerMode};
+    use super::{
+        CheckerMode, Config, ConfigProviderMode, KafkaConfig, MetricsConfig, ProducerMode,
+    };
 
     #[allow(clippy::result_large_err)]
     fn test_with_config<F>(yaml: &str, env_vars: &[(&str, &str)], test_fn: F)
@@ -360,6 +431,15 @@ mod tests {
                             "10.0.0.2:9000".to_owned()
                         ],
                         results_kafka_topic: "uptime-results".to_owned(),
+                        kafka_config: KafkaConfig {
+                            security_protocol: None,
+                            ssl_ca_location: None,
+                            ssl_cert_location: None,
+                            ssl_key_location: None,
+                            sasl_mechanism: None,
+                            sasl_username: None,
+                            sasl_password: None,
+                        },
                         config_provider_mode: ConfigProviderMode::Redis,
                         checker_mode: CheckerMode::Reqwest,
                         config_provider_redis_update_ms: 1000,
@@ -412,6 +492,16 @@ mod tests {
                     "UPTIME_CHECKER_CONFIGS_KAFKA_CLUSTER",
                     "10.0.0.1,10.0.0.2:7000",
                 ),
+                ("UPTIME_CHECKER_KAFKA_SECURITY_PROTOCOL", "plaintext"),
+                ("UPTIME_CHECKER_KAFKA_SSL_CA_LOCATION", "/path/to/ca.crt"),
+                (
+                    "UPTIME_CHECKER_KAFKA_SSL_CERT_LOCATION",
+                    "/path/to/cert.crt",
+                ),
+                ("UPTIME_CHECKER_KAFKA_SSL_KEY_LOCATION", "/path/to/key.key"),
+                ("UPTIME_CHECKER_KAFKA_SASL_MECHANISM", "scram-sha-256"),
+                ("UPTIME_CHECKER_KAFKA_SASL_USERNAME", "my_user"),
+                ("UPTIME_CHECKER_KAFKA_SASL_PASSWORD", "my_password"),
                 ("UPTIME_CHECKER_CONFIG_PROVIDER_MODE", "redis"),
                 ("UPTIME_CHECKER_CONFIG_PROVIDER_REDIS_UPDATE_MS", "2000"),
                 (
@@ -460,6 +550,15 @@ mod tests {
                             "10.0.0.2:7000".to_owned()
                         ],
                         results_kafka_topic: "uptime-results".to_owned(),
+                        kafka_config: KafkaConfig {
+                            security_protocol: Some(KafkaSecurityProtocol::Plaintext),
+                            ssl_ca_location: Some("/path/to/ca.crt".to_owned()),
+                            ssl_cert_location: Some("/path/to/cert.crt".to_owned()),
+                            ssl_key_location: Some("/path/to/key.key".to_owned()),
+                            sasl_mechanism: Some("scram-sha-256".to_owned()),
+                            sasl_username: Some("my_user".to_owned()),
+                            sasl_password: Some("my_password".to_owned()),
+                        },
                         config_provider_mode: ConfigProviderMode::Redis,
                         checker_mode: CheckerMode::Reqwest,
                         config_provider_redis_update_ms: 2000,
