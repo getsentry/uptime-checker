@@ -1,3 +1,9 @@
+## 26.6.0
+
+### New Features ✨
+
+- Kafka extended configuration for SASL auth & TLS by @aldy505 in [#355](https://github.com/getsentry/uptime-checker/pull/355)
+
 ## 26.5.2
 
 ### Internal Changes 🔧
