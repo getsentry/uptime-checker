@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::producer::{ExtractCodeError, ResultsProducer};
 use crate::types::result::CheckResult;
@@ -7,10 +9,11 @@ use reqwest::Client;
 use sentry_kafka_schemas::Schema;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, timeout_at};
 
 struct VectorRequestWorkerConfig {
     vector_batch_size: usize,
+    vector_batch_timeout_secs: u64,
     endpoint: String,
     retry_vector_errors_forever: bool,
     region: String,
@@ -27,6 +30,7 @@ impl VectorResultsProducer {
         topic_name: &str,
         endpoint: String,
         vector_batch_size: usize,
+        vector_batch_timeout_secs: u64,
         retry_vector_errors_forever: bool,
         region: String,
     ) -> (Self, JoinHandle<()>) {
@@ -42,6 +46,7 @@ impl VectorResultsProducer {
 
         let config = VectorRequestWorkerConfig {
             vector_batch_size,
+            vector_batch_timeout_secs,
             endpoint,
             retry_vector_errors_forever,
             region,
@@ -72,38 +77,56 @@ impl VectorResultsProducer {
             // Avoid cloning this string over and over again.
             let region: &'static str = config.region.clone().leak();
             let mut batch = Vec::with_capacity(config.vector_batch_size);
-            let mut batch_element_count = 0;
+            let mut batch_element_remaining = config.vector_batch_size;
+            let timeout_duration: Duration = Duration::from_secs(config.vector_batch_timeout_secs);
+            let mut deadline = Instant::now()
+                .checked_add(timeout_duration)
+                .expect("timeout_duration is small");
 
-            while receiver
-                .recv_many(&mut batch, config.vector_batch_size - batch_element_count)
-                .await
-                > 0
-            {
-                if batch.len() < config.vector_batch_size {
-                    batch_element_count = batch.len();
+            loop {
+                let receive_fut = receiver.recv_many(&mut batch, batch_element_remaining);
+                let result = timeout_at(deadline.into(), receive_fut).await;
+
+                match result {
+                    Ok(num_read) => {
+                        if num_read == 0 {
+                            break;
+                        }
+                        batch_element_remaining -= num_read;
+                    }
+                    Err(_) => batch_element_remaining = 0,
+                }
+
+                if batch_element_remaining > 0 {
                     continue;
                 }
-                batch_element_count = 0;
 
-                let new_count = pending_items.fetch_sub(batch.len(), Ordering::Relaxed);
-                metrics::gauge!("producer.pending_items", "uptime_region" => region)
-                    .set(new_count as f64);
+                if !batch.is_empty() {
+                    let new_count = pending_items.fetch_sub(batch.len(), Ordering::Relaxed);
+                    metrics::gauge!("producer.pending_items", "uptime_region" => region)
+                        .set(new_count as f64);
 
-                if let Err(e) = {
-                    let start = std::time::Instant::now();
-                    let result = send_batch(
-                        &mut batch,
-                        client.clone(),
-                        config.endpoint.clone(),
-                        config.retry_vector_errors_forever,
-                        region,
-                    )
-                    .await;
-                    metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => region, "histogram" => "timer").record(start.elapsed().as_secs_f64());
-                    result
-                } {
-                    tracing::error!(error = %e, "vector_batch.send_failed");
+                    if let Err(e) = {
+                        let start = std::time::Instant::now();
+                        let result = send_batch(
+                            &mut batch,
+                            client.clone(),
+                            config.endpoint.clone(),
+                            config.retry_vector_errors_forever,
+                            region,
+                        )
+                        .await;
+                        metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => region, "histogram" => "timer").record(start.elapsed().as_secs_f64());
+                        result
+                    } {
+                        tracing::error!(error = %e, "vector_batch.send_failed");
+                    }
                 }
+
+                batch_element_remaining = config.vector_batch_size;
+                deadline = Instant::now()
+                    .checked_add(timeout_duration)
+                    .expect("timeout_duration is small");
             }
 
             if !batch.is_empty() {
@@ -308,6 +331,7 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            10,
             false,
             "us-west-1".to_string(),
         );
@@ -365,6 +389,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_batch_timeout() {
+        let mock_server = MockServer::start();
+        let (producer, _) = VectorResultsProducer::new(
+            "uptime-results",
+            mock_server.url("/").to_string(),
+            TEST_BATCH_SIZE,
+            1,
+            false,
+            "us-west-1".to_string(),
+        );
+
+        // Only send one event
+        let test_result = create_test_result();
+        let result = producer.produce_checker_result(&test_result);
+        assert!(result.is_ok());
+
+        // Mock for full batch and remainder
+        let mock = mock_server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/")
+                .header("Content-Type", "application/json")
+                .matches(|req| {
+                    if let Some(body) = &req.body {
+                        let lines: Vec<_> = body
+                            .split(|&b| b == b'\n')
+                            .filter(|l| !l.is_empty())
+                            .collect();
+
+                        // Verify each line is valid JSON with expected fields
+                        lines.iter().all(|line| {
+                            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) {
+                                return value["subscription_id"]
+                                    == "23d6048d67c948d9a19c0b47979e9a03"
+                                    && value["status"] == "success"
+                                    && value["region"] == "us-west-1";
+                            }
+                            false
+                        })
+                    } else {
+                        false
+                    }
+                });
+            then.status(200);
+        });
+
+        // Waiting, but a bit shy of the timeout
+        sleep(Duration::from_millis(500)).await;
+
+        // We shouldn't have breached the timeout, so assert that nothing has been produced
+        mock.assert_hits(0);
+
+        // Wait a bit for the timeout to definitely have been breached
+        sleep(Duration::from_secs(1)).await;
+
+        // We should have got something by now
+        mock.assert_hits(1);
+    }
+
+    #[tokio::test]
     async fn test_flush_on_shutdown() {
         let mock_server = MockServer::start();
         // Create a mock that expects a single request with less than BATCH_SIZE events
@@ -397,6 +480,7 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            10,
             false,
             "us-west-1".to_string(),
         );
