@@ -220,11 +220,7 @@ impl RedisConfigProvider {
         shutdown: CancellationToken,
         region: &'static str,
     ) -> Result<(), RedisError> {
-        let mut ops = self
-            .redis
-            .get_async_connection()
-            .await
-            .expect("Redis should be available");
+        let mut ops = self.redis.get_async_connection().await?;
         let mut interval = interval(self.check_interval);
 
         while !shutdown.is_cancelled() {
