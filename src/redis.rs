@@ -36,7 +36,7 @@ impl RedisOperations {
     pub async fn read_watermark(
         &mut self,
         progress_key: &String,
-    ) -> Result<Option<i64>, redis::RedisError> {
+    ) -> Result<Option<i64>, RedisError> {
         let conn = self.get_conn();
         let progress: Option<String> = conn.get(progress_key).await?;
 
@@ -48,16 +48,13 @@ impl RedisOperations {
         &mut self,
         progress_key: &String,
         progress: i64,
-    ) -> Result<(), redis::RedisError> {
+    ) -> Result<(), RedisError> {
         let conn = self.get_conn();
 
         conn.set(progress_key, progress.to_string()).await
     }
 
-    pub async fn read_configs(
-        &mut self,
-        config_key: &String,
-    ) -> Result<Vec<Vec<u8>>, redis::RedisError> {
+    pub async fn read_configs(&mut self, config_key: &String) -> Result<Vec<Vec<u8>>, RedisError> {
         let conn = self.get_conn();
         conn.hvals(config_key).await
     }
@@ -65,7 +62,7 @@ impl RedisOperations {
     pub async fn consume_config_updates(
         &mut self,
         update_key: &String,
-    ) -> (Vec<ConfigUpdate>, Vec<ConfigUpdate>) {
+    ) -> Result<(Vec<ConfigUpdate>, Vec<ConfigUpdate>), RedisError> {
         let conn = self
             .get_readwrite_conn()
             .expect("must be in read-write mode to access");
@@ -78,11 +75,7 @@ impl RedisOperations {
             .hvals(update_key)
             .del(update_key)
             .query_async::<(Vec<Vec<u8>>, ())>(conn)
-            .await
-            .unwrap_or_else(|err| {
-                tracing::error!(?err, "redis_config_provider.redis_query_failed");
-                (vec![], ())
-            })
+            .await?
             .0 // Get just the LRANGE results
             .iter()
             .map(|payload| {
@@ -100,21 +93,16 @@ impl RedisOperations {
                 (upserts, deletes)
             });
 
-        (config_upserts, config_deletes)
+        Ok((config_upserts, config_deletes))
     }
 
     pub async fn get_config_key_payloads(
         &mut self,
         config_key: &String,
         config_keys: Vec<String>,
-    ) -> Vec<Vec<u8>> {
+    ) -> Result<Vec<Vec<u8>>, RedisError> {
         let conn = self.get_conn();
-        conn.hget(config_key, config_keys)
-            .await
-            .unwrap_or_else(|err| {
-                tracing::error!(?err, "redis_config_provider.config_key_get_failed");
-                vec![]
-            })
+        conn.hget(config_key, config_keys).await
     }
 }
 
