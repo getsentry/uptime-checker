@@ -123,19 +123,16 @@ impl RedisConfigProvider {
             .await;
 
         if !self.redis.is_readonly() {
-            loop {
+            while !shutdown.is_cancelled() {
                 let result = self
                     .monitor_updates(manager.clone(), &partitions, shutdown.clone(), region)
                     .await;
 
-                match result {
-                    Ok(_) => break,
-                    Err(err) => {
-                        tracing::error!(?err, "redis_config_provider.monitor_configs");
+                if let Err(err) = result {
+                    tracing::error!(?err, "redis_config_provider.monitor_configs");
 
-                        // For reddis errors, wait and retry.
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                    }
+                    // For reddis errors, wait and retry.
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             }
         }
