@@ -15,9 +15,9 @@ local region_pops = {
     'us-east-va',  // uptime-va
   ],
   us2: [
-    'us-west-or',  // uptime-or
-    'us-east-sc',  // uptime-sc
-    'us-east-va',  // uptime-va
+    'us2-west-or',  // uptime-or
+    'us2-east-sc',  // uptime-sc
+    'us2-east-va',  // uptime-va
   ],
   s4s2: [],
 };
