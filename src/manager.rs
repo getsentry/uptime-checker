@@ -192,6 +192,7 @@ impl Manager {
                     &config.results_kafka_topic,
                     config.vector_endpoint.clone(),
                     config.vector_batch_size,
+                    config.vector_batch_timeout_secs,
                     config.retry_vector_errors_forever,
                     config.region.to_owned(),
                 );

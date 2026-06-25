@@ -172,6 +172,9 @@ pub struct Config {
     /// The batch size to use for vector producer
     pub vector_batch_size: usize,
 
+    /// The timeout to control batch flushing for vector producer
+    pub vector_batch_timeout_secs: u64,
+
     /// The vector endpoint to send results to
     pub vector_endpoint: String,
 
@@ -270,6 +273,7 @@ impl Default for Config {
             checker_mode: CheckerMode::Reqwest,
             vector_batch_size: 10,
             vector_endpoint: "http://localhost:8020".to_owned(),
+            vector_batch_timeout_secs: 10,
             retry_vector_errors_forever: false,
             producer_mode: ProducerMode::Kafka,
             config_provider_redis_update_ms: 1000,
@@ -455,6 +459,7 @@ mod tests {
                         total_checkers: 1,
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
+                        vector_batch_timeout_secs: 10,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         retry_vector_errors_forever: false,
                         failure_retries: 0,
@@ -528,6 +533,7 @@ mod tests {
                 ("UPTIME_CHECKER_WEBSERVER_PORT", "81"),
                 ("UPTIME_CHECKER_ASSERTION_COMPLEXITY", "120"),
                 ("UPTIME_CHECKER_MAX_ASSERTION_OPS", "15"),
+                ("UPTIME_CHECKER_VECTOR_BATCH_TIMEOUT_SECS", "11"),
             ],
             |config| {
                 assert_eq!(
@@ -574,6 +580,7 @@ mod tests {
                         total_checkers: 5,
                         producer_mode: ProducerMode::Kafka,
                         vector_batch_size: 10,
+                        vector_batch_timeout_secs: 11,
                         vector_endpoint: "http://localhost:8020".to_owned(),
                         retry_vector_errors_forever: false,
                         failure_retries: 2,

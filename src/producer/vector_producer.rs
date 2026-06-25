@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::producer::{ExtractCodeError, ResultsProducer};
 use crate::types::result::CheckResult;
@@ -7,10 +8,13 @@ use reqwest::Client;
 use sentry_kafka_schemas::Schema;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
+use tokio::time::sleep;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::StreamExt;
 
 struct VectorRequestWorkerConfig {
     vector_batch_size: usize,
+    vector_batch_timeout_secs: u64,
     endpoint: String,
     retry_vector_errors_forever: bool,
     region: String,
@@ -27,6 +31,7 @@ impl VectorResultsProducer {
         topic_name: &str,
         endpoint: String,
         vector_batch_size: usize,
+        vector_batch_timeout_secs: u64,
         retry_vector_errors_forever: bool,
         region: String,
     ) -> (Self, JoinHandle<()>) {
@@ -42,6 +47,7 @@ impl VectorResultsProducer {
 
         let config = VectorRequestWorkerConfig {
             vector_batch_size,
+            vector_batch_timeout_secs,
             endpoint,
             retry_vector_errors_forever,
             region,
@@ -63,7 +69,7 @@ impl VectorResultsProducer {
     fn spawn_worker(
         config: VectorRequestWorkerConfig,
         client: Client,
-        mut receiver: UnboundedReceiver<Vec<u8>>,
+        receiver: UnboundedReceiver<Vec<u8>>,
         pending_items: Arc<AtomicUsize>,
     ) -> JoinHandle<()> {
         tracing::info!("vector_worker.starting");
@@ -71,24 +77,24 @@ impl VectorResultsProducer {
         tokio::spawn(async move {
             // Avoid cloning this string over and over again.
             let region: &'static str = config.region.clone().leak();
-            let mut batch = Vec::with_capacity(config.vector_batch_size);
+            let receiver_stream = UnboundedReceiverStream::new(receiver);
 
-            while let Some(json) = receiver.recv().await {
-                let new_count = pending_items.fetch_sub(1, Ordering::Relaxed);
-                metrics::gauge!("producer.pending_items").set(new_count as f64);
+            let chunk_stream = receiver_stream.chunks_timeout(
+                config.vector_batch_size,
+                Duration::from_secs(config.vector_batch_timeout_secs),
+            );
 
-                batch.push(json);
+            tokio::pin!(chunk_stream);
 
-                if batch.len() < config.vector_batch_size {
-                    continue;
-                }
+            while let Some(batch) = chunk_stream.next().await {
+                let new_count = pending_items.fetch_sub(batch.len(), Ordering::Relaxed);
+                metrics::gauge!("producer.pending_items", "uptime_region" => region)
+                    .set(new_count as f64);
 
-                let batch_to_send =
-                    std::mem::replace(&mut batch, Vec::with_capacity(config.vector_batch_size));
                 if let Err(e) = {
                     let start = std::time::Instant::now();
                     let result = send_batch(
-                        batch_to_send,
+                        batch,
                         client.clone(),
                         config.endpoint.clone(),
                         config.retry_vector_errors_forever,
@@ -99,20 +105,6 @@ impl VectorResultsProducer {
                     result
                 } {
                     tracing::error!(error = %e, "vector_batch.send_failed");
-                }
-            }
-
-            if !batch.is_empty() {
-                if let Err(e) = send_batch(
-                    batch,
-                    client,
-                    config.endpoint,
-                    config.retry_vector_errors_forever,
-                    region,
-                )
-                .await
-                {
-                    tracing::error!(error = %e, "final_batch.send_failed");
                 }
             }
 
@@ -141,7 +133,7 @@ impl ResultsProducer for VectorResultsProducer {
 }
 
 async fn send_batch(
-    batch: Vec<Vec<u8>>,
+    mut batch: Vec<Vec<u8>>,
     client: Client,
     endpoint: String,
     retry_vector_errors_forever: bool,
@@ -151,11 +143,14 @@ async fn send_batch(
         return Ok(());
     }
 
-    let body: String = batch
-        .iter()
-        .filter_map(|json| String::from_utf8(json.clone()).ok())
-        .map(|s| s + "\n")
-        .collect();
+    let vec_size = batch.iter().fold(0, |acc, b| acc + b.len() + 1);
+    let batch_len = batch.len();
+
+    let mut body = Vec::with_capacity(vec_size);
+    for s in batch.drain(..) {
+        body.extend(s);
+        body.push(b'\n');
+    }
 
     const BASE_DELAY_MS: u64 = 100;
     const MAX_DELAY_MS: u64 = 2000;
@@ -172,8 +167,9 @@ async fn send_batch(
         let response = client.execute(req).await;
         let stats = hyper::stats::consume_request_stats(req_id);
         // Calculate delay with a maximum cap
-        let delay =
-            Duration::from_millis((BASE_DELAY_MS * (2_u64.pow(num_of_retries))).max(MAX_DELAY_MS));
+        let delay = Duration::from_millis(
+            (BASE_DELAY_MS * (2_u64.pow(num_of_retries.min(63)))).min(MAX_DELAY_MS),
+        );
 
         match response {
             Ok(resp) if !resp.status().is_server_error() => {
@@ -208,7 +204,7 @@ async fn send_batch(
                             status = ?resp.status(),
                             retry = num_of_retries,
                             delay_ms = ?delay.as_millis(),
-                            batch_size = batch.len(),
+                            batch_size = batch_len,
                             "request.failed_to_vector_retrying"
                         );
                     }
@@ -216,7 +212,7 @@ async fn send_batch(
                         tracing::warn!(
                             error = ?e,
                             retry = num_of_retries,
-                            batch_size = batch.len(),
+                            batch_size = batch_len,
                             delay_ms = ?delay.as_millis(),
                             "request.failed_to_vector_retrying"
                         );
@@ -301,6 +297,7 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            10,
             false,
             "us-west-1".to_string(),
         );
@@ -358,6 +355,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_batch_timeout() {
+        let mock_server = MockServer::start();
+        let (producer, _) = VectorResultsProducer::new(
+            "uptime-results",
+            mock_server.url("/").to_string(),
+            TEST_BATCH_SIZE,
+            1,
+            false,
+            "us-west-1".to_string(),
+        );
+
+        // Only send one event
+        let test_result = create_test_result();
+        let result = producer.produce_checker_result(&test_result);
+        assert!(result.is_ok());
+
+        // Mock for full batch and remainder
+        let mock = mock_server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/")
+                .header("Content-Type", "application/json")
+                .matches(|req| {
+                    if let Some(body) = &req.body {
+                        let lines: Vec<_> = body
+                            .split(|&b| b == b'\n')
+                            .filter(|l| !l.is_empty())
+                            .collect();
+
+                        // Verify each line is valid JSON with expected fields
+                        lines.iter().all(|line| {
+                            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) {
+                                return value["subscription_id"]
+                                    == "23d6048d67c948d9a19c0b47979e9a03"
+                                    && value["status"] == "success"
+                                    && value["region"] == "us-west-1";
+                            }
+                            false
+                        })
+                    } else {
+                        false
+                    }
+                });
+            then.status(200);
+        });
+
+        // Waiting, but a bit shy of the timeout
+        sleep(Duration::from_millis(500)).await;
+
+        // We shouldn't have breached the timeout, so assert that nothing has been produced
+        mock.assert_hits(0);
+
+        // Wait a bit for the timeout to definitely have been breached
+        sleep(Duration::from_secs(1)).await;
+
+        // We should have got something by now
+        mock.assert_hits(1);
+    }
+
+    #[tokio::test]
     async fn test_flush_on_shutdown() {
         let mock_server = MockServer::start();
         // Create a mock that expects a single request with less than BATCH_SIZE events
@@ -390,6 +446,7 @@ mod tests {
             "uptime-results",
             mock_server.url("/").to_string(),
             TEST_BATCH_SIZE,
+            10,
             false,
             "us-west-1".to_string(),
         );
