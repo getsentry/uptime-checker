@@ -131,7 +131,7 @@ impl RedisConfigProvider {
                 if let Err(err) = result {
                     tracing::error!(?err, "redis_config_provider.monitor_configs");
 
-                    // For reddis errors, wait and retry.
+                    // For redis errors, wait and retry.
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             }
