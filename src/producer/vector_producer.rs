@@ -1,7 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use crate::producer::{ExtractCodeError, ResultsProducer};
 use crate::types::result::CheckResult;
@@ -9,7 +8,9 @@ use reqwest::Client;
 use sentry_kafka_schemas::Schema;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, timeout_at};
+use tokio::time::sleep;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::StreamExt;
 
 struct VectorRequestWorkerConfig {
     vector_batch_size: usize,
@@ -68,7 +69,7 @@ impl VectorResultsProducer {
     fn spawn_worker(
         config: VectorRequestWorkerConfig,
         client: Client,
-        mut receiver: UnboundedReceiver<Vec<u8>>,
+        receiver: UnboundedReceiver<Vec<u8>>,
         pending_items: Arc<AtomicUsize>,
     ) -> JoinHandle<()> {
         tracing::info!("vector_worker.starting");
@@ -76,70 +77,34 @@ impl VectorResultsProducer {
         tokio::spawn(async move {
             // Avoid cloning this string over and over again.
             let region: &'static str = config.region.clone().leak();
-            let mut batch = Vec::with_capacity(config.vector_batch_size);
-            let mut batch_element_remaining = config.vector_batch_size;
-            let timeout_duration: Duration = Duration::from_secs(config.vector_batch_timeout_secs);
-            let mut deadline = Instant::now()
-                .checked_add(timeout_duration)
-                .expect("timeout_duration is small");
+            let receiver_stream = UnboundedReceiverStream::new(receiver);
 
-            loop {
-                let receive_fut = receiver.recv_many(&mut batch, batch_element_remaining);
-                let result = timeout_at(deadline.into(), receive_fut).await;
+            let chunk_stream = receiver_stream.chunks_timeout(
+                config.vector_batch_size,
+                Duration::from_secs(config.vector_batch_timeout_secs),
+            );
 
-                match result {
-                    Ok(num_read) => {
-                        if num_read == 0 {
-                            break;
-                        }
-                        batch_element_remaining -= num_read;
-                    }
-                    Err(_) => batch_element_remaining = 0,
-                }
+            tokio::pin!(chunk_stream);
 
-                if batch_element_remaining > 0 {
-                    continue;
-                }
+            while let Some(batch) = chunk_stream.next().await {
+                let new_count = pending_items.fetch_sub(batch.len(), Ordering::Relaxed);
+                metrics::gauge!("producer.pending_items", "uptime_region" => region)
+                    .set(new_count as f64);
 
-                if !batch.is_empty() {
-                    let new_count = pending_items.fetch_sub(batch.len(), Ordering::Relaxed);
-                    metrics::gauge!("producer.pending_items", "uptime_region" => region)
-                        .set(new_count as f64);
-
-                    if let Err(e) = {
-                        let start = std::time::Instant::now();
-                        let result = send_batch(
-                            &mut batch,
-                            client.clone(),
-                            config.endpoint.clone(),
-                            config.retry_vector_errors_forever,
-                            region,
-                        )
-                        .await;
-                        metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => region, "histogram" => "timer").record(start.elapsed().as_secs_f64());
-                        result
-                    } {
-                        tracing::error!(error = %e, "vector_batch.send_failed");
-                    }
-                }
-
-                batch_element_remaining = config.vector_batch_size;
-                deadline = Instant::now()
-                    .checked_add(timeout_duration)
-                    .expect("timeout_duration is small");
-            }
-
-            if !batch.is_empty() {
-                if let Err(e) = send_batch(
-                    &mut batch,
-                    client,
-                    config.endpoint,
-                    config.retry_vector_errors_forever,
-                    region,
-                )
-                .await
-                {
-                    tracing::error!(error = %e, "final_batch.send_failed");
+                if let Err(e) = {
+                    let start = std::time::Instant::now();
+                    let result = send_batch(
+                        batch,
+                        client.clone(),
+                        config.endpoint.clone(),
+                        config.retry_vector_errors_forever,
+                        region,
+                    )
+                    .await;
+                    metrics::histogram!("vector_producer.send_batch.duration", "uptime_region" => region, "histogram" => "timer").record(start.elapsed().as_secs_f64());
+                    result
+                } {
+                    tracing::error!(error = %e, "vector_batch.send_failed");
                 }
             }
 
@@ -168,7 +133,7 @@ impl ResultsProducer for VectorResultsProducer {
 }
 
 async fn send_batch(
-    batch: &mut Vec<Vec<u8>>,
+    mut batch: Vec<Vec<u8>>,
     client: Client,
     endpoint: String,
     retry_vector_errors_forever: bool,
