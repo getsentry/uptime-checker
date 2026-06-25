@@ -168,7 +168,7 @@ async fn send_batch(
         let stats = hyper::stats::consume_request_stats(req_id);
         // Calculate delay with a maximum cap
         let delay =
-            Duration::from_millis((BASE_DELAY_MS * (2_u64.pow(num_of_retries))).max(MAX_DELAY_MS));
+            Duration::from_millis((BASE_DELAY_MS * (2_u64.pow(num_of_retries))).min(MAX_DELAY_MS));
 
         match response {
             Ok(resp) if !resp.status().is_server_error() => {
