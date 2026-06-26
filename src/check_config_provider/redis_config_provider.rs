@@ -2,6 +2,7 @@ use crate::{
     app::config::Config, manager::Manager, redis::RedisClient, types::check_config::CheckConfig,
 };
 use anyhow::Result;
+use redis::RedisError;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::sync::Arc;
@@ -122,8 +123,18 @@ impl RedisConfigProvider {
             .await;
 
         if !self.redis.is_readonly() {
-            self.monitor_updates(manager.clone(), &partitions, shutdown, region)
-                .await;
+            while !shutdown.is_cancelled() {
+                let result = self
+                    .monitor_updates(manager.clone(), &partitions, shutdown.clone(), region)
+                    .await;
+
+                if let Err(err) = result {
+                    tracing::error!(?err, "redis_config_provider.monitor_configs");
+
+                    // For redis errors, wait and retry.
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            }
         }
     }
 
@@ -205,12 +216,8 @@ impl RedisConfigProvider {
         partitions: &[RedisPartition],
         shutdown: CancellationToken,
         region: &'static str,
-    ) {
-        let mut ops = self
-            .redis
-            .get_async_connection()
-            .await
-            .expect("Redis should be available");
+    ) -> Result<(), RedisError> {
+        let mut ops = self.redis.get_async_connection().await?;
         let mut interval = interval(self.check_interval);
 
         while !shutdown.is_cancelled() {
@@ -226,7 +233,7 @@ impl RedisConfigProvider {
                 // We fetch all updates from the list and then delete the key. We do this
                 // atomically so that there isn't any chance of a race
                 let (config_upserts, config_deletes) =
-                    ops.consume_config_updates(&partition.update_key).await;
+                    ops.consume_config_updates(&partition.update_key).await?;
 
                 metrics::counter!("config_provider.updater.upserts", "uptime_region" => region, "partition" => partition.number.to_string())
                     .increment(config_upserts.len() as u64);
@@ -258,7 +265,7 @@ impl RedisConfigProvider {
                             .map(|config| config.redis_key())
                             .collect::<Vec<_>>(),
                     )
-                    .await;
+                    .await?;
 
                 for config_payload in config_payloads {
                     if let Some(config) = deserialize_rmp(&config_payload) {
@@ -292,6 +299,8 @@ impl RedisConfigProvider {
             )
             .record(update_duration);
         }
+
+        Ok(())
     }
 }
 
