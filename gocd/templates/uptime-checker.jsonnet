@@ -19,8 +19,8 @@ local pipedream_config = {
     stage: 'deploy-primary',
     elastic_profile_id: 'uptime-checker',
   },
-  // us2 and s4s2 have no uptime-checker POPs yet, so exclude them until they do (kept in sync with ops/gocd/templates/uptime-checker-k8s.jsonnet)
-  exclude_regions: ['us2', 's4s2', 'customer-1', 'customer-2', 'customer-3', 'customer-4', 'customer-6', 'customer-7'],
+  // s4s2 has no uptime-checker POPs yet, so exclude it until it does (kept in sync with ops/gocd/templates/uptime-checker-k8s.jsonnet)
+  exclude_regions: ['s4s2', 'customer-1', 'customer-2', 'customer-3', 'customer-4', 'customer-6', 'customer-7'],
 };
 
 pipedream.render(pipedream_config, uptime_checker)
