@@ -71,7 +71,7 @@ associative-cache = "2.0.0"
 base64 = "0.22"
 
 [patch.crates-io]
-rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
+rdkafka = { git = "https://github.com/fede1024/rust-rdkafka", features = ["default", "sasl", "ssl", "external-lz4"] }
 # we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
 
 [profile.release]
