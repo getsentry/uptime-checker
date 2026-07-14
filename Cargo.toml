@@ -22,7 +22,6 @@ chrono = { version = "0.4.31", default-features = false, features = [
   "serde",
 ] }
 openssl = "0.10.72"
-rust_arroyo = { version = "*", git = "https://github.com/getsentry/arroyo", rev = "e1c29819924c4318e73dd15ff7b518ee9f7fc5b4", features = ["ssl"] }
 tokio = { version = "1.43.1", features = [
   "macros",
   "sync",
@@ -38,6 +37,7 @@ serde_json = "1.0.93"
 figment = { version = "0.10", features = ["yaml", "env", "test"] }
 similar-asserts = "1.4.2"
 sentry = { version = "0.34.0", features = ["tracing"] }
+sentry_arroyo = { version = "2.41.4", features = ["ssl"] }
 thiserror = "1.0.61"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json"] }
@@ -71,7 +71,7 @@ associative-cache = "2.0.0"
 base64 = "0.22"
 
 [patch.crates-io]
-rdkafka = { git = "https://github.com/fede1024/rust-rdkafka", features = ["default", "sasl", "ssl"] }
+rdkafka = { git = "https://github.com/fede1024/rust-rdkafka" }
 # we're using the danf/hickory-dns-nameservers branch on the reqwest-uptime fork
 
 [profile.release]
