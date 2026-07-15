@@ -1,3 +1,31 @@
+## 26.7.0
+
+### New Features ✨
+
+- (deps) Missing sasl and ssl features for rdkafka crate by @aldy505 in [#504](https://github.com/getsentry/uptime-checker/pull/504)
+- Add ssl feature on arroyo by @aldy505 in [#505](https://github.com/getsentry/uptime-checker/pull/505)
+
+### Bug Fixes 🐛
+
+#### Gocd
+
+- Re-enable us2 uptime-checker deploys by @mchen-sentry in [#503](https://github.com/getsentry/uptime-checker/pull/503)
+- Exclude s4s2 from uptime-checker pipedream by @mchen-sentry in [#498](https://github.com/getsentry/uptime-checker/pull/498)
+
+#### Uptime
+
+- Handle redis broken pipes better by @klochek in [#499](https://github.com/getsentry/uptime-checker/pull/499)
+- Clean up some recv() usage and vec allocs by @klochek in [#411](https://github.com/getsentry/uptime-checker/pull/411)
+
+#### Other
+
+- Use correct uptime clusters for US2 by @BojanOro in [#501](https://github.com/getsentry/uptime-checker/pull/501)
+
+### Internal Changes 🔧
+
+- (codeowners) Add ingest to list of code-owners by @Dav1dde in [#500](https://github.com/getsentry/uptime-checker/pull/500)
+- (gocd) Bump gocd-jsonnet to v3.0.6 by @mchen-sentry in [#502](https://github.com/getsentry/uptime-checker/pull/502)
+
 ## 26.6.0
 
 ### New Features ✨
