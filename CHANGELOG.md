@@ -1,3 +1,9 @@
+## 26.7.2
+
+### Internal Changes 🔧
+
+- Bump gocd-jsonnet to v3.0.7 by @dmajere in [#507](https://github.com/getsentry/uptime-checker/pull/507)
+
 ## 26.7.1
 
 - No documented changes.
