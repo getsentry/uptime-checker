@@ -23,6 +23,14 @@ use std::process;
 use sentry::Hub;
 
 pub fn main() {
+    // Rustls 0.23 no longer auto-selects a crypto provider; libraries that
+    // use rustls (e.g. `redis` with tls-rustls) panic on first TLS handshake
+    // without this. Installing here — the only spot that can, since the
+    // choice is process-wide.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+
     let exit_code = match app::execute() {
         Ok(()) => 0,
         Err(_err) => {
