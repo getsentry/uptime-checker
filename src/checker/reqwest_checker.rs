@@ -738,7 +738,7 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
-
+    
     use sentry::protocol::SpanId;
     use uuid::Uuid;
     #[cfg(target_os = "linux")]
@@ -1260,6 +1260,8 @@ mod tests {
     #[tokio::test]
     #[cfg(target_os = "linux")]
     async fn test_ssl_errors_linux() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         #[derive(Debug, Copy, Clone)]
         enum TestCertType {
             Expired,
