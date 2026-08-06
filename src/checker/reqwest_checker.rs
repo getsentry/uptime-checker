@@ -738,7 +738,7 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use httpmock::prelude::*;
     use httpmock::Method;
-    
+
     use sentry::protocol::SpanId;
     use uuid::Uuid;
     #[cfg(target_os = "linux")]
