@@ -123,7 +123,7 @@ jobs:
             -f Dockerfile .
 
       - name: Install sentry-cli
-        run: curl -sL https://sentry.io/get-cli/ | bash
+        uses: getsentry/action-setup-cli@70d7e587b84c2e78cf4d37cd33d7b74fb3729c1b # v1
 
       - name: Upload debug symbols to Sentry
         run: scripts/upload-debug-symbols ./debug-out/uptime-checker.debug
