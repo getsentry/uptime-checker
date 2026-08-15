@@ -1,3 +1,13 @@
+## 26.8.0
+
+### New Features ✨
+
+- TLS capability for Redis by @aldy505 in [#506](https://github.com/getsentry/uptime-checker/pull/506)
+
+### Internal Changes 🔧
+
+- Replace curl-pipe-bash with action-setup-cli for Sentry CLI setup by @oioki in [#508](https://github.com/getsentry/uptime-checker/pull/508)
+
 ## 26.7.2
 
 ### Internal Changes 🔧
