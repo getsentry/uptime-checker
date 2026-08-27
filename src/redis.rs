@@ -68,15 +68,15 @@ impl RedisOperations {
             .expect("must be in read-write mode to access");
 
         let mut pipe = redis::pipe();
-        // We fetch all updates from the list and then delete the key. We do this
-        // atomically so that there isn't any chance of a race
+        // HVALS and DEL the update hash in one MULTI, so an update written between the
+        // two commands cannot be dropped unread.
         let (config_upserts, config_deletes) = pipe
             .atomic()
             .hvals(update_key)
             .del(update_key)
             .query_async::<(Vec<Vec<u8>>, ())>(conn)
             .await?
-            .0 // Get just the LRANGE results
+            .0 // Get just the HVALS results
             .iter()
             .map(|payload| {
                 rmp_serde::from_slice::<ConfigUpdate>(payload).map_err(|err| {
