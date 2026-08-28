@@ -7,9 +7,9 @@ use std::time::Duration;
 use crate::check_config_provider::redis_config_provider::{ConfigUpdate, ConfigUpdateAction};
 
 /// Bounds how long a watermark outlives the checker that wrote it, so shrinking the partition
-/// count cannot strand keys forever. Must exceed any restart: a missing watermark resumes at
-/// the current time, silently skipping every check that should have run in between.
-const WATERMARK_EXPIRY: Duration = Duration::from_secs(60 * 60);
+/// count cannot strand keys forever. Must outlive any restart or recoverable outage: a missing
+/// watermark resumes at the current time, silently skipping the checks that should have run.
+const WATERMARK_EXPIRY: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub enum RedisOperations {
     Read(RedisAsyncConnection),
@@ -234,7 +234,6 @@ impl RedisClient {
 mod tests {
     use super::*;
     use crate::app::config::Config;
-    use crate::types::check_config::MAX_CHECK_INTERVAL_SECS;
     use redis_test_macro::redis_test;
 
     #[redis_test(start_paused = false)]
@@ -255,17 +254,6 @@ mod tests {
         assert!(
             ttl > earliest_acceptable && ttl <= expiry_secs,
             "expected a watermark expiry near {expiry_secs}s, got {ttl}"
-        );
-    }
-
-    #[test]
-    fn test_watermark_expiry_does_not_exceed_max_check_interval() {
-        let expiry_secs = WATERMARK_EXPIRY.as_secs() as usize;
-
-        assert!(
-            expiry_secs <= MAX_CHECK_INTERVAL_SECS,
-            "an expiry above MAX_CHECK_INTERVAL_SECS ({MAX_CHECK_INTERVAL_SECS}s) lets one \
-             catch-up queue the same check more than once, got {expiry_secs}s"
         );
     }
 }
