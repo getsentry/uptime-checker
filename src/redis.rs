@@ -68,8 +68,7 @@ impl RedisOperations {
             .expect("must be in read-write mode to access");
 
         let mut pipe = redis::pipe();
-        // HVALS and DEL the update hash in one MULTI, so an update written between the
-        // two commands cannot be dropped unread.
+        // Read and delete the update hash atomically; an update written between them is lost.
         let (config_upserts, config_deletes) = pipe
             .atomic()
             .hvals(update_key)
