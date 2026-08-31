@@ -6,6 +6,11 @@ use std::time::Duration;
 
 use crate::check_config_provider::redis_config_provider::{ConfigUpdate, ConfigUpdateAction};
 
+/// Bounds how long a watermark outlives the checker that wrote it, so shrinking the partition
+/// count cannot strand keys forever. Must outlive any restart or recoverable outage: a missing
+/// watermark resumes at the current time, silently skipping the checks that should have run.
+const WATERMARK_EXPIRY: Duration = Duration::from_secs(24 * 60 * 60);
+
 pub enum RedisOperations {
     Read(RedisAsyncConnection),
     ReadWrite(RedisAsyncConnection),
@@ -50,8 +55,10 @@ impl RedisOperations {
         progress: i64,
     ) -> Result<(), RedisError> {
         let conn = self.get_conn();
+        let value = progress.to_string();
 
-        conn.set(progress_key, progress.to_string()).await
+        conn.set_ex(progress_key, value, WATERMARK_EXPIRY.as_secs())
+            .await
     }
 
     pub async fn read_configs(&mut self, config_key: &String) -> Result<Vec<Vec<u8>>, RedisError> {
@@ -219,5 +226,33 @@ impl RedisClient {
 
     pub fn is_readonly(&self) -> bool {
         self.readonly
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::config::Config;
+    use redis_test_macro::redis_test;
+
+    #[redis_test(start_paused = false)]
+    async fn test_write_watermark_sets_expiry() {
+        let config = Config::default();
+        let client = build_redis_client(&config.redis_host, false, 0, false).unwrap();
+        let mut ops = client.get_async_connection().await.unwrap();
+        let progress_key = "test_watermark_expiry".to_string();
+
+        ops.write_watermark(&progress_key, 1).await.unwrap();
+
+        let conn = ops.get_conn();
+        let ttl: i64 = conn.ttl(&progress_key).await.unwrap();
+        let expiry_secs = WATERMARK_EXPIRY.as_secs() as i64;
+        let round_trip_allowance = 60;
+        let earliest_acceptable = expiry_secs - round_trip_allowance;
+
+        assert!(
+            ttl > earliest_acceptable && ttl <= expiry_secs,
+            "expected a watermark expiry near {expiry_secs}s, got {ttl}"
+        );
     }
 }
