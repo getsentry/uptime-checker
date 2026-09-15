@@ -1,3 +1,19 @@
+## 26.9.0
+
+### New Features ✨
+
+- (redis) Expire the scheduler watermark after a day by @ldelvoye in [#511](https://github.com/getsentry/uptime-checker/pull/511)
+
+### Documentation 📚
+
+- (redis) Correct the update key's structure and commands by @ldelvoye in [#512](https://github.com/getsentry/uptime-checker/pull/512)
+
+### Internal Changes 🔧
+
+- (ci) Use scoped image-push service account by @oioki in [#516](https://github.com/getsentry/uptime-checker/pull/516)
+- (gocd) Use GitHub App credentials by @joshuarli in [#510](https://github.com/getsentry/uptime-checker/pull/510)
+- Migrate fast revert to GitHub app token action by @joshuarli in [#513](https://github.com/getsentry/uptime-checker/pull/513)
+
 ## 26.8.0
 
 ### New Features ✨
