@@ -1,5 +1,6 @@
-minVersion: 1.0.0
-changelogPolicy: auto
+minVersion: "2.15.0"
+changelog:
+  policy: auto
 
 artifactProvider:
   name: none
@@ -16,9 +17,9 @@ targets:
   - id: release
     name: docker
     source: ghcr.io/getsentry/uptime-checker
-    target: getsentry/uptime-checker
+    target: ghcr.io/getsentry/uptime-checker
   - id: latest
     name: docker
     source: ghcr.io/getsentry/uptime-checker
-    target: getsentry/uptime-checker
+    target: ghcr.io/getsentry/uptime-checker
     targetFormat: '{{{target}}}:latest'
