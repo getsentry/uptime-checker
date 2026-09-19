@@ -7,18 +7,20 @@ statusProvider:
   name: github
   config:
     contexts:
-      - 'build-multiplatform-image-ghcr-amd64'
-      - 'build-multiplatform-image-ghcr-arm64'
-      - 'Create multi-platform manifest'
+    - 'build-multiplatform-image-ghcr-amd64'
+    - 'build-multiplatform-image-ghcr-arm64'
+    - 'Create multi-platform manifest'
 
 targets:
-  - name: github
-  - id: release
-    name: docker
-    source: ghcr.io/getsentry/uptime-checker
-    target: getsentry/uptime-checker
-  - id: latest
-    name: docker
-    source: ghcr.io/getsentry/uptime-checker
-    target: getsentry/uptime-checker
-    targetFormat: '{{{target}}}:latest'
+- name: github
+- id: release
+  name: docker
+  source: ghcr.io/getsentry/uptime-checker
+  target: getsentry/uptime-checker
+- id: latest
+  name: docker
+  source: ghcr.io/getsentry/uptime-checker
+  target: getsentry/uptime-checker
+  targetFormat: '{{{target}}}:latest'
+versioning:
+  policy: calver
