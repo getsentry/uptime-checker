@@ -45,6 +45,9 @@ local deploy_canary_stage(pops) = {
         timeout: 600,
         elastic_profile_id: 'uptime-checker',
         environment_variables: {
+          // k8s-deploy dispatches deployment workflows using GitHub App credentials.
+          GITHUB_APP_ID: '{{SECRET:[devinfra-github][app_id]}}',
+          GITHUB_APP_PRIVATE_KEY: '{{SECRET:[devinfra-github][private_key]}}',
           SENTRY_REGION: r,
           LABEL_SELECTOR: 'service=uptime-checker,env=canary',
         },
@@ -77,6 +80,9 @@ local deploy_primary_stage(pops) = {
         timeout: 600,
         elastic_profile_id: 'uptime-checker',
         environment_variables: {
+          // k8s-deploy dispatches deployment workflows using GitHub App credentials.
+          GITHUB_APP_ID: '{{SECRET:[devinfra-github][app_id]}}',
+          GITHUB_APP_PRIVATE_KEY: '{{SECRET:[devinfra-github][private_key]}}',
           SENTRY_REGION: r,
           LABEL_SELECTOR: 'service=uptime-checker,env=primary',
         },
