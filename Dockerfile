@@ -50,7 +50,7 @@ RUN cargo build --release && \
 FROM scratch AS debug-symbols
 COPY --from=builder /app/target/release/uptime-checker.debug /uptime-checker.debug
 
-FROM alpine:3.22.1
+FROM ghcr.io/getsentry/image-mirror-library-alpine:3.22.1
 
 RUN apk add --no-cache tini libgcc ca-certificates curl && \
     addgroup -S app --gid 1000 && \
