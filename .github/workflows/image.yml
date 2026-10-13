@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
 
       - name: Build image
-        uses: getsentry/action-build-and-push-images@dd9b907092cdd2dbc6c1a409f7290df1b391f6ee
+        uses: getsentry/action-build-and-push-images@3714f354c0bc912a95221f193c9643cdba966e34
         with:
           image_name: 'uptime-checker'
           platforms: linux/${{ matrix.platform }}
@@ -44,6 +44,10 @@ jobs:
           # note: nightly will only be tagged if on default branch
           tag_nightly: true
           tag_latest: false
+          # One cache per architecture, so the amd64 and arm64 builds don't
+          # overwrite each other's cache index.
+          cache_from: type=gha,scope=uptime-checker-${{ matrix.platform }}
+          cache_to: type=gha,mode=max,scope=uptime-checker-${{ matrix.platform }}
 
   assemble-ghcr:
     needs: [build-multiplatform-image-ghcr]
@@ -100,7 +104,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Build and push image
-        uses: getsentry/action-build-and-push-images@dd9b907092cdd2dbc6c1a409f7290df1b391f6ee
+        uses: getsentry/action-build-and-push-images@3714f354c0bc912a95221f193c9643cdba966e34
         with:
           image_name: 'uptime-checker'
           platforms: linux/amd64
@@ -113,10 +117,18 @@ jobs:
           google_ar_image_name: us-central1-docker.pkg.dev/sentryio/uptime-checker/image
           google_workload_identity_provider: projects/868781662168/locations/global/workloadIdentityPools/prod-github/providers/github-oidc-pool
           google_service_account: gha-uptime-checker-push@sac-prod-sa.iam.gserviceaccount.com
+          # Same amd64 build as the GHCR amd64 job, which writes this cache.
+          cache_from: type=gha,scope=uptime-checker-amd64
+          cache_to: ''
 
       - name: Extract debug symbols
+        # `docker buildx build` uses the BuildKit builder the step above just
+        # built with, so the `builder` stage comes from its local cache.
+        # Plain `docker build` uses Docker's default builder, which has no
+        # cache and recompiles everything.
         run: |
-          docker build \
+          docker buildx build \
+            --platform linux/amd64 \
             --target debug-symbols \
             --build-arg UPTIME_CHECKER_GIT_REVISION=${{ github.sha }} \
             --output type=local,dest=./debug-out \
