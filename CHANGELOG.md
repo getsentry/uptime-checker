@@ -1,3 +1,26 @@
+## 26.10.0
+
+### Internal Changes 🔧
+
+#### Deps
+
+- Bump serde_with from 3.9.0 to 3.21.0 by @dependabot in [#519](https://github.com/getsentry/uptime-checker/pull/519)
+- Bump virtualenv from 20.29.3 to 21.7.12 by @dependabot in [#522](https://github.com/getsentry/uptime-checker/pull/522)
+- Bump openssl from 0.10.72 to 0.10.80 by @dependabot in [#518](https://github.com/getsentry/uptime-checker/pull/518)
+- Bump urllib3 from 2.5.0 to 2.8.0 by @dependabot in [#521](https://github.com/getsentry/uptime-checker/pull/521)
+- Bump tracing-subscriber from 0.3.18 to 0.3.20 by @dependabot in [#460](https://github.com/getsentry/uptime-checker/pull/460)
+
+#### Gocd
+
+- Make App credentials available to image deploy jobs by @joshuarli in [#526](https://github.com/getsentry/uptime-checker/pull/526)
+- Bump gocd-jsonnet to v3.0.10, dropping the us2 pipeline by @chazdnato in [#524](https://github.com/getsentry/uptime-checker/pull/524)
+
+#### Other
+
+- (image) Reuse the warm builder for debug symbols by @sentry-junior in [#528](https://github.com/getsentry/uptime-checker/pull/528)
+- Pull alpine runtime image from getsentry/image-mirror by @sentry-junior in [#527](https://github.com/getsentry/uptime-checker/pull/527)
+- Migrate to actions/create-github-app-token by @joshuarli in [#517](https://github.com/getsentry/uptime-checker/pull/517)
+
 ## 26.9.0
 
 ### New Features ✨
