@@ -1,6 +1,6 @@
 version = 1
-revision = 3
-requires-python = ">=3.13"
+revision = 5
+requires-python = ">=3.14"
 resolution-markers = [
     "sys_platform == 'darwin' or sys_platform == 'linux'",
 ]
@@ -118,10 +118,6 @@ name = "pyyaml"
 version = "6.0.2"
 source = { registry = "https://pypi.devinfra.sentry.io/simple" }
 wheels = [
-    { url = "https://pypi.devinfra.sentry.io/wheels/PyYAML-6.0.2-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:efdca5630322a10774e8e98e1af481aad470dd62c3170801852d752aa7a783ba" },
-    { url = "https://pypi.devinfra.sentry.io/wheels/PyYAML-6.0.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:50187695423ffe49e2deacb8cd10510bc361faac997de9efef88badc3bb9e2d1" },
-    { url = "https://pypi.devinfra.sentry.io/wheels/PyYAML-6.0.2-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0ffe8360bab4910ef1b9e87fb812d8bc0a308b0d0eef8c8f44e0254ab3b07133" },
-    { url = "https://pypi.devinfra.sentry.io/wheels/PyYAML-6.0.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5" },
     { url = "https://pypi.devinfra.sentry.io/wheels/pyyaml-6.0.2-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:ff2a8860cc687015a5acf920fb87e14f5f7f3fb4b895fa35e606b6ff2c7bd3b3" },
     { url = "https://pypi.devinfra.sentry.io/wheels/pyyaml-6.0.2-cp314-cp314-manylinux_2_31_aarch64.whl", hash = "sha256:918a9159ae5c038776e60536cd239f908b1445786bc445bec9ca873ca48e712b" },
     { url = "https://pypi.devinfra.sentry.io/wheels/pyyaml-6.0.2-cp314-cp314-manylinux_2_31_x86_64.whl", hash = "sha256:d0e22744a9bae02dff74a8ac4e92adf4040d07281e7d95e2a062e8a209363ff4" },
