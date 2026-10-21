@@ -3716,12 +3716,13 @@ dependencies = [
 
 [[package]]
 name = "sentry_arroyo"
-version = "2.41.4"
+version = "2.47.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb198a7f40fbdc1ce4ade994a4f36a58db4ddb720816a881113392d0ba023c25"
+checksum = "7529427a38f7928d90896498d6872c60a3797e3a523fa5334afbf596d7146f09"
 dependencies = [
  "chrono",
  "coarsetime",
+ "metrics",
  "once_cell",
  "parking_lot",
  "rand 0.8.8",
@@ -4700,7 +4701,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "uptime-checker"
-version = "26.9.0"
+version = "26.10.0"
 dependencies = [
  "anyhow",
  "associative-cache",
