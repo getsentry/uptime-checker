@@ -12,7 +12,7 @@ on:
 
 jobs:
   revert:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: |
       github.event_name == 'workflow_dispatch' || github.event.label.name == 'Trigger: Revert'
     steps:
@@ -29,8 +29,7 @@ jobs:
       - uses: getsentry/action-fast-revert@35b4b6c1f8f91b5911159568b3b15e531b5b8174 # v2.0.1
         with:
           pr: ${{ github.event.number || github.event.inputs.pr }}
-          co_authored_by:
-            ${{ github.event.inputs.co_authored_by || format('{0}
+          co_authored_by: ${{ github.event.inputs.co_authored_by || format('{0}
             <{1}+{0}@users.noreply.github.com>', github.event.sender.login,
             github.event.sender.id) }}
           committer_name: sentry-uptime-checker-fast-revert-bot
