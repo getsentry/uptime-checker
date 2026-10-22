@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: Release a new ${{ github.repository }} version
 
     steps:

@@ -20,7 +20,7 @@ permissions:
 jobs:
   lint:
     timeout-minutes: 5
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - # get a non-default github token so that any changes are verified by CI
         if: env.SECRET_ACCESS == 'true'
@@ -43,7 +43,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@884ad927a57e558e7a70b92f2bccf9198a4be546 # v6
         with:
-          version: '0.8.2'
+          version: "0.8.2"
           # we just cache the venv-dir directly in action-setup-venv
           enable-cache: false
 
@@ -89,4 +89,4 @@ jobs:
         uses: getsentry/action-github-commit@31f6706ca1a7b9ad6d22c1b07bf3a92eabb05632 # v2.0.0
         with:
           github-token: ${{ steps.token.outputs.token }}
-          message: ':hammer_and_wrench: apply pre-commit fixes'
+          message: ":hammer_and_wrench: apply pre-commit fixes"
