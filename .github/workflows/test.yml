@@ -10,7 +10,7 @@ on:
 jobs:
   test:
     timeout-minutes: 5
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - uses: shogo82148/actions-setup-redis@428a144f11914412a8f52902296e134dd2e0f925
