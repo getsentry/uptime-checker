@@ -166,24 +166,12 @@ wheels = [
 ]
 
 [[package]]
-name = "setuptools"
-version = "78.1.1"
-source = { registry = "https://sfw.security.sentry.io/pypi/simple" }
-sdist = { url = "https://sfw.security.sentry.io/pypi/packages/81/9c/42314ee079a3e9c24b27515f9fbc7a3c1d29992c33451779011c74488375/setuptools-78.1.1.tar.gz", hash = "sha256:fcc17fd9cd898242f6b4adfaca46137a9edef687f43e6f78469692a5e70d851d", size = 1368163, upload-time = "2025-04-19T18:23:36.68Z" }
-wheels = [
-    { url = "https://sfw.security.sentry.io/pypi/packages/90/99/158ad0609729111163fc1f674a5a42f2605371a4cf036d0441070e2f7455/setuptools-78.1.1-py3-none-any.whl", hash = "sha256:c3a9c4211ff4c309edb8b8c4f1cbfa7ae324c4ba9f91ff254e3d305b9fd54561", size = 1256462, upload-time = "2025-04-19T18:23:34.525Z" },
-]
-
-[[package]]
 name = "supervisor"
-version = "4.2.5"
+version = "4.3.0"
 source = { registry = "https://sfw.security.sentry.io/pypi/simple" }
-dependencies = [
-    { name = "setuptools" },
-]
-sdist = { url = "https://sfw.security.sentry.io/pypi/packages/ce/37/517989b05849dd6eaa76c148f24517544704895830a50289cbbf53c7efb9/supervisor-4.2.5.tar.gz", hash = "sha256:34761bae1a23c58192281a5115fb07fbf22c9b0133c08166beffc70fed3ebc12", size = 466073, upload-time = "2022-12-24T01:02:43.705Z" }
+sdist = { url = "https://sfw.security.sentry.io/pypi/packages/a9/b5/37e7a3706de436a8a2d75334711dad1afb4ddffab09f25e31d89e467542f/supervisor-4.3.0.tar.gz", hash = "sha256:4a2bf149adf42997e1bb44b70c43b613275ec9852c3edacca86a9166b27e945e", size = 468912, upload-time = "2025-08-23T18:25:02.418Z" }
 wheels = [
-    { url = "https://sfw.security.sentry.io/pypi/packages/2c/7a/0ad3973941590c040475046fef37a2b08a76691e61aa59540828ee235a6e/supervisor-4.2.5-py2.py3-none-any.whl", hash = "sha256:2ecaede32fc25af814696374b79e42644ecaba5c09494c51016ffda9602d0f08", size = 319561, upload-time = "2022-12-24T01:02:40.814Z" },
+    { url = "https://sfw.security.sentry.io/pypi/packages/0e/65/5e726c372da8a5e35022a94388b12252710aad0c2351699c3d76ae8dba78/supervisor-4.3.0-py2.py3-none-any.whl", hash = "sha256:0bcb763fddafba410f35cbde226aa7f8514b9fb82eb05a0c85f6588d1c13f8db", size = 320736, upload-time = "2025-08-23T18:25:00.767Z" },
 ]
 
 [[package]]
