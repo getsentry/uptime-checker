@@ -1,3 +1,31 @@
+## 26.10.1
+
+### Bug Fixes 🐛
+
+- (gocd) Use checkruns2 for GitHub App credentials by @joshuarli with @sentry-junior in [#544](https://github.com/getsentry/uptime-checker/pull/544)
+
+### Internal Changes 🔧
+
+#### Deps
+
+- Bump supervisor from 4.2.5 to 4.3.0 by @elramen in [#542](https://github.com/getsentry/uptime-checker/pull/542)
+- Bump virtualenv from 21.14.9 to 21.14.13 by @dependabot in [#540](https://github.com/getsentry/uptime-checker/pull/540)
+- Bump uv to 0.13.5 by @sentry-junior in [#539](https://github.com/getsentry/uptime-checker/pull/539)
+- Bump uv to 0.13.4 by @geoffg-sentry and @tobias-wilfert with @sentry-junior in [#532](https://github.com/getsentry/uptime-checker/pull/532)
+- Bump virtualenv from 21.7.12 to 21.14.9 by @dependabot in [#537](https://github.com/getsentry/uptime-checker/pull/537)
+- Bump certifi from 2025.7.14 to 2026.10.19 by @dependabot in [#531](https://github.com/getsentry/uptime-checker/pull/531)
+- Bump rdkafka to 0.38.0 by @geoffg-sentry with @sentry-junior in [#535](https://github.com/getsentry/uptime-checker/pull/535)
+- Bump rustls to 0.23.46 for rustls-webpki 0.103.16 by @geoffg-sentry with @sentry-junior in [#533](https://github.com/getsentry/uptime-checker/pull/533)
+- Switch PyPI index to Socket Firewall by @oioki and @claude in [#525](https://github.com/getsentry/uptime-checker/pull/525)
+- Bump webpki-roots from 1.0.7 to 1.0.10 by @geoffg-sentry with @sentry-junior in [#530](https://github.com/getsentry/uptime-checker/pull/530)
+- Bump sentry_arroyo to 2.47.0 by @untitaker with @sentry-junior in [#529](https://github.com/getsentry/uptime-checker/pull/529)
+- Bump rand from 0.8.5 to 0.8.8 by @dependabot in [#523](https://github.com/getsentry/uptime-checker/pull/523)
+
+#### Other
+
+- (docker) Bump runtime base to alpine 3.22.7 mirror by @geoffg-sentry with @sentry-junior in [#543](https://github.com/getsentry/uptime-checker/pull/543)
+- Pin ubuntu runners by @tobias-wilfert in [#536](https://github.com/getsentry/uptime-checker/pull/536)
+
 ## 26.10.0
 
 ### Internal Changes 🔧
