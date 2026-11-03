@@ -7,9 +7,16 @@ RUN apk add --no-cache \
     make \
     g++ \
     pkgconfig \
+    openssl \
     openssl-dev \
     protoc \
     binutils
+
+# Fail the build if the bundled SSL.com intermediate (trusted in the runtime
+# stage below) expires within 90 days, so it gets replaced before it lapses.
+COPY docker/SSL.com-TLS-T-ECC-R2.pem /tmp/SSL.com-TLS-T-ECC-R2.pem
+RUN openssl x509 -checkend $((90*24*3600)) -noout -in /tmp/SSL.com-TLS-T-ECC-R2.pem || \
+    { echo "docker/SSL.com-TLS-T-ECC-R2.pem expires within 90 days; replace it with a current copy from https://ssl.com/repo/certs/SSL.com-TLS-T-ECC-R2.pem" >&2; exit 1; }
 
 # Configure cargo
 RUN mkdir -p ~/.cargo && \
