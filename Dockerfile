@@ -7,9 +7,16 @@ RUN apk add --no-cache \
     make \
     g++ \
     pkgconfig \
+    openssl \
     openssl-dev \
     protoc \
     binutils
+
+# Fail the build if the bundled SSL.com intermediate (trusted in the runtime
+# stage below) expires within 90 days, so it gets replaced before it lapses.
+COPY docker/SSL.com-TLS-T-ECC-R2.pem /tmp/SSL.com-TLS-T-ECC-R2.pem
+RUN openssl x509 -checkend $((90*24*3600)) -noout -in /tmp/SSL.com-TLS-T-ECC-R2.pem || \
+    { echo "docker/SSL.com-TLS-T-ECC-R2.pem expires within 90 days; replace it with a current copy from https://ssl.com/repo/certs/SSL.com-TLS-T-ECC-R2.pem" >&2; exit 1; }
 
 # Configure cargo
 RUN mkdir -p ~/.cargo && \
@@ -52,21 +59,17 @@ COPY --from=builder /app/target/release/uptime-checker.debug /uptime-checker.deb
 
 FROM ghcr.io/getsentry/image-mirror-library-alpine:3.22.7
 
-RUN apk add --no-cache tini libgcc ca-certificates curl && \
+RUN apk add --no-cache tini libgcc ca-certificates && \
     addgroup -S app --gid 1000 && \
     adduser -S app -G app --uid 1000
 
-# XXX(epurkhiser): Install a missing Intermediary certificate the cloudflare
-# does not seem to serve and expects browsers to use AIA to download the
-# intermediary.
+# Some servers don't send the SSL.com TLS Transit ECC CA R2 intermediate and
+# expect clients to fetch it via AIA, which OpenSSL doesn't do. CA bundles
+# only carry roots, so trust this intermediate explicitly.
 #
 # Refs https://sentry.zendesk.com/agent/tickets/158451
-#
-# XXX(epurkhiser): I'm not sure why the ca-certificates package on alpine
-# doesn't include this, but maybe with a newer or different distribution we
-# wouldn't need this?
-RUN curl -sSL https://ssl.com/repo/certs/SSL.com-TLS-T-ECC-R2.pem -o /usr/local/share/ca-certificates/SSl.com-TLS-T-ECC-R2.crt && \
-    update-ca-certificates
+COPY docker/SSL.com-TLS-T-ECC-R2.pem /usr/local/share/ca-certificates/SSL.com-TLS-T-ECC-R2.crt
+RUN update-ca-certificates
 
 COPY --from=builder /app/target/release/uptime-checker /usr/local/bin/uptime-checker
 
