@@ -28,7 +28,7 @@ x-programs:
 
 services:
   uptime-checker:
-    image: ghcr.io/getsentry/uptime-checker:nightly
+    image: ghcr.io/getsentry/uptime-checker:nightly-distroless
     command:
       - run
     environment:
