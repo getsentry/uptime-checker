@@ -7,6 +7,10 @@ rust-version = "1.88"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+# Link OpenSSL statically from source, for runtime images without libssl.
+vendored-openssl = ["openssl/vendored"]
+
 [dependencies]
 jsonpath-rust = { git = "https://github.com/getsentry/jsonpath-rust", rev = "5c9907d14da0e100da1176426a67e77f11dbb4d2" }
 hyper = { git = "https://github.com/getsentry/hyper", rev = "9efa5aedce8a36e9a86115b8c104da44fcc43d7e" }

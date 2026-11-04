@@ -93,6 +93,116 @@ jobs:
           image_url: ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  # Distroless variant, built alongside the default image so workloads can
+  # switch over gradually. Like relay and symbolicator, the binary is built on
+  # the runner and the image only copies it in (see Dockerfile.distroless).
+  build-distroless-binary:
+    name: build-distroless-binary-${{ matrix.platform }}
+    if: ${{ github.repository_owner == 'getsentry' }}
+
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: amd64
+          - os: ubuntu-24.04-arm
+            platform: arm64
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      # The distroless base has only glibc and libgcc_s.
+      LIBZ_SYS_STATIC: "1"
+      UPTIME_CHECKER_GIT_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust Toolchain
+        run: rustup toolchain install stable --profile minimal --no-self-update
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: swatinem/rust-cache@7939da402645ba29a2df566723491a2c856e8f8a # v2
+        with:
+          key: distroless-${{ matrix.platform }}
+          save-if: ${{ github.ref_name == github.event.repository.default_branch }}
+
+      - name: Build binary
+        run: cargo build --release --locked --features vendored-openssl
+
+      - name: Strip debug info
+        run: objcopy --strip-debug --strip-unneeded target/release/uptime-checker
+
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: distroless-binary-${{ matrix.platform }}
+          path: target/release/uptime-checker
+
+  # Publishes `<sha>-distroless` (multi-platform) to GHCR, plus
+  # `nightly-distroless` on the default branch. It must never write the
+  # `latest` or `nightly` tags, which belong to the default image.
+  build-distroless-image:
+    needs: [build-distroless-binary]
+    if: ${{ github.repository_owner == 'getsentry' }}
+    name: Build and push distroless image
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download amd64 binary
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v5
+        with:
+          name: distroless-binary-amd64
+          path: binaries/linux/amd64
+
+      - name: Download arm64 binary
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v5
+        with:
+          name: distroless-binary-arm64
+          path: binaries/linux/arm64
+
+      - name: Build and push image
+        uses: getsentry/action-build-and-push-images@3714f354c0bc912a95221f193c9643cdba966e34
+        with:
+          image_name: "uptime-checker"
+          # Multi-platform is cheap here: the build only copies the binaries.
+          platforms: linux/amd64,linux/arm64
+          dockerfile_path: "./Dockerfile.distroless"
+          publish_on_pr: true # required for self-hosted-end-to-end-distroless on pull requests
+          ghcr: true
+          google_ar: false
+          tag_suffix: -distroless
+          tag_nightly: false
+          tag_latest: false
+          tags: ${{ github.ref_name == github.event.repository.default_branch && 'ghcr.io/getsentry/uptime-checker:nightly-distroless' || '' }}
+
+      # Catches a binary that can't load on the base image, e.g. a missing
+      # shared library.
+      - name: Smoke test
+        run: docker run --rm ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}-distroless run --help
+
+  self-hosted-end-to-end-distroless:
+    needs: [build-distroless-image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Run Sentry self-hosted e2e CI
+        uses: getsentry/self-hosted@871c182cb0a99dc1fad72cc7ce7889b514b0c5f0 # master
+        with:
+          project_name: uptime_checker
+          image_url: ghcr.io/getsentry/uptime-checker:${{ github.event.pull_request.head.sha || github.sha }}-distroless
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
   build-image-production:
     runs-on: ubuntu-24.04
     if: ${{ github.ref_name == github.event.repository.default_branch }}

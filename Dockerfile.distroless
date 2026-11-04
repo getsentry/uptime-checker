@@ -1,0 +1,22 @@
+# Distroless variant of the uptime-checker image, built alongside the default
+# `Dockerfile` so workloads can switch over gradually.
+#
+# The binary is built outside Docker, in CI (see `.github/workflows/image.yml`),
+# for glibc with `--features vendored-openssl` and `LIBZ_SYS_STATIC=1`, so it
+# needs only glibc and libgcc_s from the base image.
+FROM us-docker.pkg.dev/sentryio/dhi-mirror/static:20250419-glibc-debian13
+
+ARG TARGETPLATFORM
+COPY --chmod=0755 binaries/${TARGETPLATFORM}/uptime-checker /usr/local/bin/uptime-checker
+
+# Some servers don't send the SSL.com TLS Transit ECC CA R2 intermediate, so
+# trust it in addition to the base image's CA bundle. OpenSSL looks up issuers
+# in SSL_CERT_DIR by subject hash, which is the file name here.
+COPY docker/SSL.com-TLS-T-ECC-R2.pem /etc/ssl/certs/b35d1870.0
+ENV SSL_CERT_DIR=/etc/ssl/certs
+
+ENV RUST_BACKTRACE=1
+
+# Runs as the base image's `nonroot` user (65532). No tini: the binary runs as
+# PID 1 and handles SIGTERM itself.
+ENTRYPOINT ["/usr/local/bin/uptime-checker"]
