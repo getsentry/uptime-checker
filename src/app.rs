@@ -4,7 +4,13 @@ pub mod cli;
 pub mod config;
 
 use clap::Parser;
-use tokio::{select, signal::ctrl_c};
+use tokio::{
+    select,
+    signal::{
+        ctrl_c,
+        unix::{signal, SignalKind},
+    },
+};
 
 use crate::{
     logging::{self, LoggingConfig},
@@ -35,10 +41,13 @@ pub fn execute() -> io::Result<()> {
                 let mut shutdown = Manager::start(config);
                 tracing::info!("system.manager_started");
 
-                let sigint = ctrl_c();
+                let mut sigterm = signal(SignalKind::terminate())?;
                 select! {
-                    _ = sigint => {
+                    _ = ctrl_c() => {
                         tracing::info!("system.got_sigint");
+                    }
+                    _ = sigterm.recv() => {
+                        tracing::info!("system.got_sigterm");
                     }
                     result = shutdown.recv_task_finished() => {
                         match result {
