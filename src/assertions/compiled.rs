@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::{Borrow, BorrowMut},
     num::{ParseFloatError, ParseIntError},
+    str::ParseBoolError,
     time::Instant,
 };
 
@@ -361,6 +362,7 @@ impl HeaderOperand {
             Comparison::LessThan => match self {
                 HeaderOperand::None => false,
                 HeaderOperand::Literal { value } => match value {
+                    Value::Bool(value) => cmp_lt(&header_value.parse()?, value, gas)?,
                     Value::I64(value) => cmp_lt(&header_value.parse()?, value, gas)?,
                     Value::F64(value) => cmp_lt(&header_value.parse()?, value, gas)?,
                     Value::String(value) => cmp_lt(header_value, value.as_str(), gas)?,
@@ -370,6 +372,7 @@ impl HeaderOperand {
             Comparison::GreaterThan => match self {
                 HeaderOperand::None => false,
                 HeaderOperand::Literal { value } => match value {
+                    Value::Bool(value) => cmp_gt(&header_value.parse()?, value, gas)?,
                     Value::I64(value) => cmp_gt(&header_value.parse()?, value, gas)?,
                     Value::F64(value) => cmp_gt(&header_value.parse()?, value, gas)?,
                     Value::String(value) => cmp_gt(header_value, value, gas)?,
@@ -416,6 +419,7 @@ impl TryFrom<&super::HeaderOperand> for HeaderOperand {
 
 #[derive(Debug, PartialEq)]
 enum Value {
+    Bool(bool),
     I64(i64),
     F64(f64),
     String(String),
@@ -435,6 +439,11 @@ impl From<&String> for Value {
             return Value::I64(i);
         }
 
+        let b = value.parse::<bool>();
+        if let Ok(b) = b {
+            return Value::Bool(b);
+        }
+
         Value::String(value.clone())
     }
 }
@@ -447,18 +456,20 @@ where
     Ok(*response_value == *test_value)
 }
 
-fn cmp_coerce_json<FF64, FI64, FSTR>(
+fn cmp_coerce_json<FF64, FI64, FSTR, FBOOL>(
     json_value: &serde_json::Value,
     test_value: &String,
     gas: &mut Gas,
     cmp_f64: FF64,
     cmp_i64: FI64,
     cmp_str: FSTR,
+    cmp_bool: FBOOL,
 ) -> Result<bool, RuntimeError>
 where
     FF64: FnOnce(&f64, &f64, &mut Gas) -> Result<bool, RuntimeError>,
     FI64: FnOnce(&i64, &i64, &mut Gas) -> Result<bool, RuntimeError>,
     FSTR: FnOnce(&str, &str, &mut Gas) -> Result<bool, RuntimeError>,
+    FBOOL: FnOnce(&bool, &bool, &mut Gas) -> Result<bool, RuntimeError>,
 {
     if let Some(v) = json_value.as_f64() {
         if let Ok(tv) = test_value.parse() {
@@ -469,6 +480,12 @@ where
     if let Some(v) = json_value.as_i64() {
         if let Ok(tv) = test_value.parse() {
             return cmp_i64(&v, &tv, gas);
+        }
+    }
+
+    if let Some(v) = json_value.as_bool() {
+        if let Ok(tv) = test_value.parse() {
+            return cmp_bool(&v, &tv, gas);
         }
     }
 
@@ -490,7 +507,7 @@ fn cmp_lt_json(
     test_value: &String,
     gas: &mut Gas,
 ) -> Result<bool, RuntimeError> {
-    cmp_coerce_json(json_value, test_value, gas, cmp_lt, cmp_lt, cmp_lt)
+    cmp_coerce_json(json_value, test_value, gas, cmp_lt, cmp_lt, cmp_lt, cmp_lt)
 }
 
 fn cmp_lt<T>(response_value: &T, test_value: &T, gas: &mut Gas) -> Result<bool, RuntimeError>
@@ -506,7 +523,7 @@ fn cmp_gt_json(
     test_value: &String,
     gas: &mut Gas,
 ) -> Result<bool, RuntimeError> {
-    cmp_coerce_json(json_value, test_value, gas, cmp_gt, cmp_gt, cmp_gt)
+    cmp_coerce_json(json_value, test_value, gas, cmp_gt, cmp_gt, cmp_gt, cmp_gt)
 }
 
 fn cmp_gt<T>(response_value: &T, test_value: &T, gas: &mut Gas) -> Result<bool, RuntimeError>
@@ -522,7 +539,7 @@ fn cmp_eq_json(
     test_value: &String,
     gas: &mut Gas,
 ) -> Result<bool, RuntimeError> {
-    cmp_coerce_json(json_value, test_value, gas, cmp_eq, cmp_eq, cmp_eq)
+    cmp_coerce_json(json_value, test_value, gas, cmp_eq, cmp_eq, cmp_eq, cmp_eq)
 }
 
 fn cmp_eq_header(
@@ -532,6 +549,7 @@ fn cmp_eq_header(
 ) -> Result<bool, RuntimeError> {
     let result = match test_value {
         HeaderOperand::Literal { value } => match value {
+            Value::Bool(value) => cmp_eq(&header_value.parse()?, value, gas)?,
             Value::I64(value) => cmp_eq(&header_value.parse()?, value, gas)?,
             Value::F64(value) => cmp_eq(&header_value.parse()?, value, gas)?,
             Value::String(value) => cmp_eq(header_value, value.as_str(), gas)?,
@@ -557,8 +575,8 @@ fn cmp_eq_jsonpath(
         JSONPathOperand::Glob { pattern } => {
             // TODO: either expose, or copy, the complexity metric from relay-pattern.
             gas.consume(5)?;
-            pattern.is_match(body_value.as_str().ok_or(RuntimeError::TookTooLong {
-                assert_path: Vec::new(),
+            pattern.is_match(body_value.as_str().ok_or(RuntimeError::InvalidJsonBody {
+                body: body_value.to_string(),
             })?)
         }
         JSONPathOperand::None => false,
@@ -773,6 +791,15 @@ fn compile_op(
     };
     path.pop();
     Ok(op)
+}
+
+impl From<ParseBoolError> for RuntimeError {
+    fn from(value: ParseBoolError) -> Self {
+        Self::InvalidTypeComparison {
+            msg: value.to_string(),
+            assert_path: Vec::new(),
+        }
+    }
 }
 
 impl From<ParseIntError> for RuntimeError {
@@ -1291,7 +1318,9 @@ mod tests {
       "prop1": {
         "id1" : 123,
         "id2": 123.1,
-        "id3": "123"
+        "id3": "123",
+        "id4": true,
+        "id5": false
       }
     }
 "#;
@@ -1370,6 +1399,46 @@ mod tests {
 
         assert!(
             !assert
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
+                .unwrap()
+                .result
+        );
+
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$.prop1.id4".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "true".into(),
+                },
+                operator: Comparison::Equals,
+            },
+        };
+
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
+
+        assert!(
+            assert
+                .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
+                .unwrap()
+                .result
+        );
+
+        let hmap = HeaderMap::new();
+        let assert = Assertion {
+            root: Op::JsonPath {
+                value: "$.prop1.id5".to_owned(),
+                operand: JSONPathOperand::Literal {
+                    value: "false".into(),
+                },
+                operator: Comparison::Equals,
+            },
+        };
+
+        let assert = compile(&assert, MAX_ASSERTION_OPS, REGION).unwrap();
+
+        assert!(
+            assert
                 .eval(200, &hmap, body.as_bytes(), ASSERTION_MAX_GAS, REGION)
                 .unwrap()
                 .result
