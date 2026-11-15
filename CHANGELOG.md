@@ -1,3 +1,25 @@
+## 26.11.0
+
+### Bug Fixes 🐛
+
+- (app) Shut down gracefully on SIGTERM by @oioki and @claude with @getsantry in [#546](https://github.com/getsentry/uptime-checker/pull/546)
+- (uptime) Add boolean comparisons to asserts. by @klochek in [#555](https://github.com/getsentry/uptime-checker/pull/555)
+
+### Internal Changes 🔧
+
+#### Docker
+
+- Add distroless image variant by @oioki and @claude in [#547](https://github.com/getsentry/uptime-checker/pull/547)
+- Commit the SSL.com intermediate instead of downloading it by @oioki and @claude in [#548](https://github.com/getsentry/uptime-checker/pull/548)
+
+#### Other
+
+- (devservices) Use the distroless uptime-checker image by @oioki and @claude in [#550](https://github.com/getsentry/uptime-checker/pull/550)
+- (image) Push the distroless image to GAR by @oioki and @claude in [#549](https://github.com/getsentry/uptime-checker/pull/549)
+- (uptime) Log tick_scheduled at debug by @wedamija with @getsantry in [#545](https://github.com/getsentry/uptime-checker/pull/545)
+- Bump uv to 0.13.7 by @oioki in [#553](https://github.com/getsentry/uptime-checker/pull/553)
+- Bump Python to 3.13.18 by @oioki in [#551](https://github.com/getsentry/uptime-checker/pull/551)
+
 ## 26.10.1
 
 ### Bug Fixes 🐛
