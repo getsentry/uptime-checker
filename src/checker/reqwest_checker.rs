@@ -1189,6 +1189,26 @@ mod tests {
             result.status_reason.map(|r| r.description),
             Some("destination is restricted".to_string())
         );
+
+        // Unspecified address
+        for url in [
+            "http://[::]/",
+            "http://[0:0:0:0:0:0:0:0]/",
+            "http://[::0.0.0.0]/",
+        ] {
+            let config = CheckConfig {
+                url: url.to_string(),
+                ..Default::default()
+            };
+            let check = ScheduledCheck::new_for_test(make_tick(), config);
+            let result = checker.check_url(&check, "us-west").await;
+
+            assert_eq!(
+                result.status_reason.map(|r| r.description),
+                Some("destination is restricted".to_string()),
+                "{url} should be restricted"
+            );
+        }
     }
 
     #[tokio::test]
